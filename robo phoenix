@@ -823,7 +823,11 @@ void ResetBadStates()
    {
       if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
       
-      double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+      double lossRate = 0.0;
+      if(g_stateVisits[s] > 0)
+      {
+         lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+      }
       
       // ⚠️ MODIFICAÇÃO CRÍTICA: Condição mais agressiva
       if((lossRate > BadStateLossThreshold || (g_stateVisits[s] > 10 && g_stateWins[s] == 0)) 
@@ -958,7 +962,11 @@ void BlockState(int state)
         return;
     }
     
-    double lossRate = (double)losses / (double)visits;
+    double lossRate = 0.0;
+    if(visits > 0)
+    {
+        lossRate = (double)losses / (double)visits;
+    }
     
     if(lossRate >= BlockLossRateThreshold)
     {
@@ -1016,7 +1024,11 @@ bool ShouldBlockState(int state)
     
     if(visits < MinVisitsForBlockDecision) return false;
     
-    double lossRate = (double)losses / (double)visits;
+    double lossRate = 0.0;
+    if(visits > 0)
+    {
+        lossRate = (double)losses / (double)visits;
+    }
     
     return (lossRate >= BlockLossRateThreshold);
 }
@@ -2072,7 +2084,11 @@ void DebugTradeCounting()
          // Verificar estados que deveriam estar bloqueados
          if(g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
-            double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+            double lossRate = 0.0;
+            if(g_stateVisits[s] > 0)
+            {
+               lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+            }
             if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
             {
                Print("⚠️ Estado ", s, " deveria estar bloqueado! Loss rate: ", 
@@ -2476,7 +2492,11 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   double currentWinRate = 0.0;
+   if(g_totalTrades > 0)
+   {
+      currentWinRate = (double)g_totalWins / g_totalTrades;
+   }
    
    if(currentWinRate < 0.25)
    {
@@ -2956,7 +2976,14 @@ bool CheckRealVolume()
       sumVol += volumeArray[i];
    }
    
-   g_volumeAverage = (long)(sumVol / (barsToCopy - 1));
+   if(barsToCopy > 1)
+   {
+      g_volumeAverage = (long)(sumVol / (barsToCopy - 1));
+   }
+   else
+   {
+      g_volumeAverage = g_currentVolume;
+   }
    
    if(g_volumeAverage > 0)
    {
@@ -5180,9 +5207,13 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      double currentWinRate = 0.0;
+      if(g_totalTrades > 0)
+      {
+         currentWinRate = (double)g_totalWins / g_totalTrades;
+      }
       
-      if(currentWinRate < 0.20)
+      if(currentWinRate < 0.20 && g_totalTrades > 0)
       {
          Print("⚠️⚠️⚠️ ALERTA: Win rate crítica (", DoubleToString(currentWinRate*100,1), "%)");
          
@@ -5200,7 +5231,11 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      double blockedRatio = 0.0;
+      if(g_activeStatesCount > 0)
+      {
+         blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      }
       if(blockedRatio > 0.7 && g_activeStatesCount > 50)
       {
          Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
