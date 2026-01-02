@@ -3641,15 +3641,8 @@ void ExecuteAction(int action, int state)
                    quality,
                    g_totalDecayCycles);
    
-   // 🔧 CORREÇÃO: Converter string para uchar array corretamente
-   uchar ucomment[];
-   StringToCharArray(comment, ucomment, 0, StringLen(comment));
-   // Copiar manualmente para evitar erro de tipo
-   int copySize = MathMin(ArraySize(ucomment), ArraySize(req.comment));
-   for(int i = 0; i < copySize; i++)
-   {
-      req.comment[i] = ucomment[i];
-   }
+   // 🔧 CORREÇÃO: Atribuir string diretamente ao campo comment
+   req.comment = comment;
 
    if(!OrderSend(req,res))
    {
@@ -4177,11 +4170,7 @@ bool CloseAllPositions()
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
       if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
       
-      double currentPrice = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 
-                           SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
-                           SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      
-      if(!trade.PositionClose(ticket, currentPrice))
+      if(!trade.PositionClose(ticket))
       {
          Print("❌ Falha ao fechar posição #", ticket);
          allClosed = false;
