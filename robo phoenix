@@ -1721,8 +1721,8 @@ bool LoadBrainFromFile(string filename)
 
 string BrainKey()
 {
-   return StringFormat("B%dx%dx%dx%dx%dx%dx%d_A%d",
-      BINS_MA_DIST,BINS_RSI,BINS_ADX,BINS_BBPOS,BINS_VOLATILITY,BINS_VOLUME,BINS_TIME,NUM_ACTIONS);
+   return StringFormat("B%dx%dx%d_A%d",
+      BINS_MA_DIST,BINS_RSI,BINS_VOLATILITY,NUM_ACTIONS);
 }
 
 string GetBrainFileName()
@@ -2394,11 +2394,11 @@ void EmergencyCounterFix()
    Print("   Estados corrigidos: ", fixedStates);
    Print("   Estados desbloqueados: ", unblockedStates);
    Print("   Novos totais:");
-   Print("     Total Visitas: ", totalVisitas);
+   Print("     Total Visitas: ", totalVisits);
    Print("     Total Vitórias: ", totalWins);
    Print("     Total Perdas: ", totalLosses);
-   Print("     Win Rate: ", totalVisitas > 0 ? 
-         DoubleToString((double)totalWins/totalVisitas*100, 1) : "0.0", "%");
+   Print("     Win Rate: ", totalVisits > 0 ? 
+         DoubleToString((double)totalWins/totalVisits*100, 1) : "0.0", "%");
    
    // Forçar save
    g_memoryDirty = true;
@@ -2604,7 +2604,7 @@ void OptimizeParametersDynamically()
    // ✅ AJUSTAR LEARNING RATE
    if(g_totalTrades > 500)
    {
-      LearningRate = 0.01; // Reduzir após muitos trades
+      g_currentLearningRate = 0.01; // Reduzir após muitos trades
       Print("🎓 Learning rate ajustado para 0.01 (maturidade do sistema)");
    }
    
@@ -3768,10 +3768,8 @@ void ExecuteAction(int action, int state)
                    quality,
                    g_totalDecayCycles);
    
-   // 🔧 CORREÇÃO: Converter string para uchar array corretamente
-   uchar ucomment[];
-   StringToCharArray(comment, ucomment, 0, StringLen(comment));
-   ArrayCopy(req.comment, ucomment, 0, 0, ArraySize(ucomment));
+   // Set comment directly - MQL5 handles string conversion
+   req.comment = comment;
 
    if(!OrderSend(req,res))
    {
@@ -4238,11 +4236,8 @@ bool CloseAllPositions()
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
       if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
       
-      double currentPrice = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 
-                           SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
-                           SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      
-      if(!trade.PositionClose(ticket, currentPrice))
+      // PositionClose uses current market price automatically
+      if(!trade.PositionClose(ticket))
       {
          Print("❌ Falha ao fechar posição #", ticket);
          allClosed = false;
@@ -5665,8 +5660,8 @@ int OnInit()
    if(DecayFactor <= 0.0 || DecayFactor > 1.0)
    {
       Print("❌ ERRO: DecayFactor inválido (", DecayFactor, ")");
-      Print("✅ Ajustando para 0.98");
-      DecayFactor = 0.98;
+      Print("⚠️ AVISO: DecayFactor deve estar entre 0.0 e 1.0");
+      Print("⚠️ Sistema continuará com valor padrão interno de 0.98");
    }
    
    if(LotSize <= 0.0)
