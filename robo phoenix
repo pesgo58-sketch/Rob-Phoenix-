@@ -823,6 +823,8 @@ void ResetBadStates()
    {
       if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
       
+      // ✅ Extra safety check to prevent division by zero (defensive programming)
+      // Even though BadStateMinVisits should be > 0, this ensures robustness
       double lossRate = 0.0;
       if(g_stateVisits[s] > 0)
       {
@@ -5211,22 +5213,22 @@ void OnTick()
       if(g_totalTrades > 0)
       {
          currentWinRate = (double)g_totalWins / g_totalTrades;
-      }
-      
-      if(currentWinRate < 0.20 && g_totalTrades > 0)
-      {
-         Print("⚠️⚠️⚠️ ALERTA: Win rate crítica (", DoubleToString(currentWinRate*100,1), "%)");
          
-         // Se performance muito ruim por muito tempo
-         static int badPerformanceCounter = 0;
-         badPerformanceCounter++;
-         
-         if(badPerformanceCounter >= 5)
+         if(currentWinRate < 0.20)
          {
-            Print("🔥 ATIVAÇÃO DE CORREÇÃO DE EMERGÊNCIA");
-            EmergencyCounterFix();
-            OverhaulBlockingSystem();
-            badPerformanceCounter = 0;
+            Print("⚠️⚠️⚠️ ALERTA: Win rate crítica (", DoubleToString(currentWinRate*100,1), "%)");
+            
+            // Se performance muito ruim por muito tempo
+            static int badPerformanceCounter = 0;
+            badPerformanceCounter++;
+         
+            if(badPerformanceCounter >= 5)
+            {
+               Print("🔥 ATIVAÇÃO DE CORREÇÃO DE EMERGÊNCIA");
+               EmergencyCounterFix();
+               OverhaulBlockingSystem();
+               badPerformanceCounter = 0;
+            }
          }
       }
       
