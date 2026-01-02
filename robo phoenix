@@ -324,7 +324,7 @@ int g_totalBadStateResets = 0;
 // ======================================================================
 string hudObjects[15];
 int hudObjectCount = 0;
-datetime hudLastUpdate = 0;
+ulong hudLastUpdateTick = 0; // ✅ CORRIGIDO: Usar GetTickCount64() para precisão em milissegundos
 int cachedVisitedStates = -1;
 int cachedBlockedStates = -1;
 int cachedPositions = -1;
@@ -2768,37 +2768,34 @@ void UpdateHUDLight()
       return;
    }
    
-   datetime currentTime = TimeCurrent();
-   if(currentTime - hudLastUpdate < HUD_UpdateMS/1000 && !HUD_Minimal) return;
-   hudLastUpdate = currentTime;
-   
-   int visitedStates = cachedVisitedStates;
-   if(visitedStates < 0)
+   // ✅ CORRIGIDO: Usar GetTickCount64() para precisão em milissegundos
+   ulong currentTick = GetTickCount64();
+   if((currentTick - hudLastUpdateTick < (ulong)HUD_UpdateMS) && !HUD_Minimal) 
    {
-      visitedStates = g_activeStatesCount;
-      cachedVisitedStates = visitedStates;
+      return;
+   }
+   hudLastUpdateTick = currentTick;
+   
+   // ✅ NOVO: Log de atualização do HUD (a cada 10 atualizações para não poluir o log)
+   static int updateCounter = 0;
+   updateCounter++;
+   if(updateCounter % 10 == 0)
+   {
+      Print("🖥️ HUD atualizado - Contador: ", updateCounter, " | Intervalo configurado: ", HUD_UpdateMS, "ms");
    }
    
-   int blockedStates = cachedBlockedStates;
-   if(blockedStates < 0)
-   {
-      blockedStates = CountBlockedStates();
-      cachedBlockedStates = blockedStates;
-   }
+   // ✅ CORRIGIDO: Sempre buscar valores atuais para garantir sincronização em tempo real
+   int visitedStates = g_activeStatesCount;
+   cachedVisitedStates = visitedStates;
    
-   int totalPositions = cachedPositions;
-   if(totalPositions < 0)
-   {
-      totalPositions = GetTotalPositions();
-      cachedPositions = totalPositions;
-   }
+   int blockedStates = CountBlockedStates();
+   cachedBlockedStates = blockedStates;
    
-   int currentDir = cachedDirection;
-   if(currentDir < 0)
-   {
-      currentDir = GetCurrentPositionsDirection();
-      cachedDirection = currentDir;
-   }
+   int totalPositions = GetTotalPositions();
+   cachedPositions = totalPositions;
+   
+   int currentDir = GetCurrentPositionsDirection();
+   cachedDirection = currentDir;
    
    string newTitle = "🛡️ PHOENIX TRADER v307F SUPER CORRIGIDO";
    ObjectSetString(0, "HUD_Title", OBJPROP_TEXT, newTitle);
@@ -4945,6 +4942,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    g_lastTradeExecuted = false;
    g_lastTradeStateExecuted = -1;
    
+   // ✅ NOVO: Invalidar cache do HUD para atualização imediata
+   InvalidateHUDCache();
+   
    if(GetTotalPositions() == 0)
    {
       g_currentDirection = 0;
@@ -5681,6 +5681,11 @@ int OnInit()
       Print("🖥️ HUD inicializado com ", hudObjectCount, " objetos");
    }
    
+   // ✅ NOVO: Configurar timer para atualização periódica do HUD
+   // O timer dispara a cada 1 segundo para garantir atualizações regulares
+   EventSetTimer(1);
+   Print("⏰ Timer do HUD configurado para disparar a cada 1 segundo");
+   
    g_statusMessage = "Pronto para operar (Sistema Super Corrigido v307F)";
    
    return INIT_SUCCEEDED;
@@ -5691,6 +5696,10 @@ int OnInit()
 // ======================================================================
 void OnDeinit(const int reason)
 {
+   // ✅ NOVO: Remover timer do HUD
+   EventKillTimer();
+   Print("⏰ Timer do HUD removido");
+   
    Print("💾 Salvando memória antes de fechar...");
    
    if(g_memoryInitialized)
@@ -5719,4 +5728,17 @@ void OnDeinit(const int reason)
    IndicatorRelease(g_atrHandle);
 
    RemoveHUD();
+}
+
+// ======================================================================
+// ✅ NOVO: OnTimer - Atualização periódica do HUD
+// ======================================================================
+void OnTimer()
+{
+   // Atualizar o HUD regularmente para garantir que as informações
+   // sejam exibidas em tempo real, mesmo sem novos ticks
+   if(ShowHUD)
+   {
+      UpdateHUDLight();
+   }
 }
