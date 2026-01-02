@@ -3894,6 +3894,12 @@ double GetStateQuality(int state)
 // ✅✅✅ FUNÇÕES PARA CALCULAR ESTADO
 // ======================================================================
 
+// ======================================================================
+// ⚠️ DEPRECATED v308: Bucket helper functions
+// These functions are NO LONGER USED in v308 simplified state calculation
+// Kept for reference/rollback purposes only
+// ======================================================================
+
 // ✅ Função para calcular bucket RSI
 int GetRSIBucket(double rsiValue)
 {
@@ -3944,7 +3950,11 @@ int GetVolumeBucket()
    else return 1;                         // Volume normal/alto
 }
 
-// ✅ Função para calcular bucket de tempo
+// ======================================================================
+// ⚠️ DEPRECATED v308: GetTimeBucket - TIME removed from state calculation
+// This function is NO LONGER USED in v308 simplified state calculation
+// Kept for reference/rollback purposes only
+// ======================================================================
 int GetTimeBucket()
 {
    MqlDateTime timeStruct;
