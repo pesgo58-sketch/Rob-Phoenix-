@@ -517,6 +517,9 @@ void FixStuckStatesProblem()
       // Forçar save
       g_memoryDirty = true;
       SaveState();
+      
+      // ✅ CORREÇÃO: Sincronizar HUD com estados atualizados
+      SyncStatesWithHUD();
    }
 }
 
@@ -560,6 +563,9 @@ void ResetBlockingSystem()
    g_memoryDirty = true;
    SaveState();
    SaveBrain();
+   
+   // ✅ CORREÇÃO: Sincronizar HUD com estados resetados
+   SyncStatesWithHUD();
 }
 
 // ======================================================================
@@ -634,6 +640,9 @@ void DebugStuckStatesEnhanced()
       }
       
       Print("✅✅✅ ", wronglyBlocked, " estados desbloqueados automaticamente");
+      
+      // ✅ CORREÇÃO: Sincronizar HUD após correção automática
+      SyncStatesWithHUD();
    }
    
    Print("=== FIM DEBUG ===");
@@ -728,6 +737,9 @@ void ResetBadStatesEnhanced()
       
       g_memoryDirty = true;
       SaveState();
+      
+      // ✅ CORREÇÃO: Sincronizar HUD após reset de estados
+      SyncStatesWithHUD();
    }
 }
 
@@ -972,6 +984,9 @@ void BlockState(int state)
               " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
         
         g_memoryDirty = true;
+        
+        // ✅ CORREÇÃO: Invalidar cache do HUD após bloquear estado
+        InvalidateHUDCache();
     }
     else
     {
@@ -1003,6 +1018,9 @@ void UnblockState(int state)
               " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
         
         g_memoryDirty = true;
+        
+        // ✅ CORREÇÃO: Invalidar cache do HUD após desbloquear estado
+        InvalidateHUDCache();
     }
 }
 
@@ -1111,6 +1129,9 @@ void EvaluateAllActiveStates()
     {
       Print("📊 Avaliação de estados (c/ cooldown): ", blocked, " bloqueados, ", unblocked, " desbloqueados");
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
+      
+      // ✅ CORREÇÃO: Sincronizar HUD quando houver mudanças
+      SyncStatesWithHUD();
     }
 }
 
@@ -1190,6 +1211,9 @@ void SaveState()
    
    FileClose(handle);
    
+   // ✅ CORREÇÃO: Invalidar cache do HUD após salvar estados
+   InvalidateHUDCache();
+   
    static datetime lastSave = 0;
    datetime now = TimeCurrent();
    if(now - lastSave > 60)
@@ -1243,6 +1267,9 @@ void LoadState()
    g_totalBadStateResets = tempTotalBadStateResets;
    
    FileClose(handle);
+   
+   // ✅ CORREÇÃO: Invalidar cache do HUD após carregar estados
+   InvalidateHUDCache();
    
    Print("✅ Estados carregados da memória persistente");
    Print("📊 Estados ativos: ", g_activeStatesCount);
@@ -2815,7 +2842,26 @@ void UpdateHUDLight()
    
    double blockedPercent = visitedStates > 0 ? (double)blockedStates/visitedStates*100 : 0;
    string newBlocked = StringFormat("   Bloqueados: %d (%.1f%%)", blockedStates, blockedPercent);
-   color blockedColor = (blockedStates > 0) ? HUD_WarningColor : HUD_TextColor;
+   
+   // ✅ MELHORIA: Indicador visual melhorado para estados bloqueados
+   color blockedColor = HUD_TextColor;
+   if(blockedStates == 0)
+   {
+      blockedColor = HUD_SuccessColor; // Verde se nenhum estado bloqueado
+   }
+   else if(blockedPercent < 10.0)
+   {
+      blockedColor = HUD_TextColor; // Branco se poucos bloqueados (<10%)
+   }
+   else if(blockedPercent < 25.0)
+   {
+      blockedColor = HUD_WarningColor; // Laranja se moderado (10-25%)
+   }
+   else
+   {
+      blockedColor = HUD_ErrorColor; // Vermelho se muitos bloqueados (>25%)
+   }
+   
    ObjectSetInteger(0, "HUD_Blocked", OBJPROP_COLOR, blockedColor);
    ObjectSetString(0, "HUD_Blocked", OBJPROP_TEXT, newBlocked);
    
@@ -2911,6 +2957,25 @@ void InvalidateHUDCache()
    cachedStatus = "";
    cachedVolume = -1;
    cachedTradesToday = -1;
+}
+
+// ======================================================================
+// ✅✅✅ NOVA FUNÇÃO: SINCRONIZAR HUD COM MEMÓRIA PERSISTENTE
+// ======================================================================
+void SyncStatesWithHUD()
+{
+   // Invalidar todos os caches para forçar atualização completa
+   InvalidateHUDCache();
+   
+   // Forçar atualização imediata do HUD
+   if(ShowHUD)
+   {
+      UpdateHUDLight();
+   }
+   
+   Print("🔄 HUD sincronizado com memória persistente");
+   Print("   Estados bloqueados: ", CountBlockedStates());
+   Print("   Estados ativos: ", g_activeStatesCount);
 }
 
 void RemoveHUD()
