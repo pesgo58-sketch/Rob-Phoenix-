@@ -4595,6 +4595,13 @@ bool ValidateWithTrend(bool isBuy)
       atr_value = price * 0.005;
    }
    
+   // ✅ PROTEÇÃO: Garantir atr_value não é zero
+   if(atr_value <= 0)
+   {
+      atr_value = price * 0.005;
+      if(atr_value <= 0) atr_value = point * 10; // Fallback adicional
+   }
+   
    double distance_from_ma = (price - ma[0]) / atr_value;
    
    if(isBuy)
