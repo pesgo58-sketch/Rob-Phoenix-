@@ -3641,10 +3641,8 @@ void ExecuteAction(int action, int state)
                    quality,
                    g_totalDecayCycles);
    
-   // 🔧 CORREÇÃO: Converter string para uchar array corretamente
-   uchar ucomment[];
-   StringToCharArray(comment, ucomment, 0, StringLen(comment));
-   ArrayCopy(req.comment, ucomment, 0, 0, ArraySize(ucomment));
+   // ✅ CORREÇÃO: Copiar string diretamente para req.comment
+   StringToCharArray(comment, req.comment, 0, StringLen(comment));
 
    if(!OrderSend(req,res))
    {
