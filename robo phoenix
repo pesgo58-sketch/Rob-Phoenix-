@@ -1514,6 +1514,7 @@ bool SaveBrainToFile(string filename)
    }
    
    FileWriteDouble(h, g_currentExplorationRate);
+   FileWriteDouble(h, g_currentLearningRate);  // ✅ v308 NEW: Salvar learning rate adaptativo
    FileWriteInteger(h, (int)g_tradesToday);
    FileWriteInteger(h, (int)g_consecutiveLosses);
    FileWriteInteger(h, (int)g_totalTrades);
@@ -1630,6 +1631,18 @@ bool LoadBrainFromFile(string filename)
    }
    
    g_currentExplorationRate = FileReadDouble(h);
+   
+   // ✅ v308 NEW: Carregar learning rate adaptativo (com fallback para compatibilidade)
+   if(!FileIsEnding(h))  // Proteção para arquivos v307 antigos
+   {
+      g_currentLearningRate = FileReadDouble(h);
+   }
+   else
+   {
+      g_currentLearningRate = InitialLearningRate; // Fallback para cérebros antigos
+      Print("⚠️ Cérebro antigo detectado - inicializando learning rate: ", g_currentLearningRate);
+   }
+   
    g_tradesToday = FileReadInteger(h);
    g_consecutiveLosses = FileReadInteger(h);
    g_totalTrades = FileReadInteger(h);
@@ -5644,8 +5657,9 @@ int OnInit()
    else
    {
       g_memoryInitialized = true;
-      // ✅ v308 NEW: Initialize adaptive rates if loading existing brain
+      // ✅ v308 FIX: Garantir compatibilidade com cérebros antigos
       if(g_currentLearningRate == 0.0) g_currentLearningRate = InitialLearningRate;
+      if(g_currentExplorationRate == 0.0) g_currentExplorationRate = InitialExplorationRate;
       Print("✅ Cérebro existente carregado (Sistema v308 - OVERFITTING CORRIGIDO)");
    }
    
@@ -5693,14 +5707,6 @@ int OnInit()
    Print("🔥🔥🔥 LEARNING RATE: ", DoubleToString(g_currentLearningRate, 3));
    Print("🔥🔥🔥 DECAY FACTOR: ", DoubleToString(DecayFactor, 2), " (was 0.05!)");
    Print("🔥🔥🔥 SISTEMA v308: ATIVADO - 95% MENOS OVERFITTING!");
-   
-   // ✅ CONFIGURAÇÕES OTIMIZADAS FORÇADAS:
-   g_currentExplorationRate = 0.40; // Forçar 40% em vez de 70%
-   Print("⚙️ Configurações otimizadas forçadas:");
-   Print("   • Exploration Rate: 40%");
-   Print("   • MinVisitsToTrade: 2");
-   Print("   • BadStateMinVisits: 3");
-   Print("   • BadStateLossThreshold: 60%");
    
    if(EnableUnifiedBlockingSystem)
    {
