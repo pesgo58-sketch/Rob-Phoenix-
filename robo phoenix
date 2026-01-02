@@ -83,7 +83,8 @@ input int    ConsecutiveLossLimit    = 15;
 // ✅ APRENDIZADO CORRIGIDO
 // ======================================================================
 input group "=== APRENDIZADO CORRIGIDO ===";
-input bool   UseSimpleRewardSystem   = true;
+// ❌ DEPRECATED v308: Simple reward system removed
+// input bool   UseSimpleRewardSystem   = true;
 input double RewardWin     = 5.0;
 input double RewardLoss    = -2.0;
 
@@ -4657,7 +4658,9 @@ int CalculateIndicatorScore(bool isBuy)
 }
 
 // ======================================================================
-// ✅ OLD VALIDATION (KEPT FOR COMPATIBILITY)
+// ⚠️ DEPRECATED v308: ValidateAllIndicators (replaced by CalculateIndicatorScore)
+// This function is NO LONGER USED in v308 - replaced with weighted scoring system
+// Kept for compatibility/rollback purposes only
 // ======================================================================
 bool ValidateAllIndicators(bool isBuy)
 {
