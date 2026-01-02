@@ -751,7 +751,14 @@ void ApplyStateDecay()
 {
    if(!EnableMemoryDecay) return;
    
-   const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário
+   // ✅ PROTEÇÃO: Garantir DecayFactor válido
+   double DECAY_FACTOR = DecayFactor;
+   if(DECAY_FACTOR <= 0.0 || DECAY_FACTOR > 1.0)
+   {
+      Print("⚠️ DecayFactor inválido (", DECAY_FACTOR, ") - ajustando para 0.98");
+      DECAY_FACTOR = 0.98;
+   }
+   
    int statesDecayed = 0;
    double totalMemoryBefore = 0;
    double totalMemoryAfter = 0;
@@ -832,7 +839,10 @@ void ResetBadStates()
    {
       if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
       
-      double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+      // ✅ PROTEÇÃO: Verificar se visits > 0 antes da divisão
+      if(g_stateVisits[s] == 0) continue;
+      
+      double lossRate = (double)g_stateLosses[s] / (double)g_stateVisits[s];
       
       // ⚠️ MODIFICAÇÃO CRÍTICA: Condição mais agressiva
       if((lossRate > BadStateLossThreshold || (g_stateVisits[s] > 10 && g_stateWins[s] == 0)) 
@@ -1027,6 +1037,9 @@ void BlockState(int state)
         Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
         return;
     }
+    
+    // ✅ PROTEÇÃO: Verificar se visits > 0 antes da divisão
+    if(visits == 0) return;
     
     double lossRate = (double)losses / (double)visits;
     
@@ -2155,11 +2168,15 @@ void DebugTradeCounting()
          // Verificar estados que deveriam estar bloqueados
          if(g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
-            double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
-            if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
+            // ✅ PROTEÇÃO: Verificar se visits > 0 antes da divisão
+            if(g_stateVisits[s] > 0)
             {
-               Print("⚠️ Estado ", s, " deveria estar bloqueado! Loss rate: ", 
-                     DoubleToString(lossRate*100, 1), "%");
+               double lossRate = (double)g_stateLosses[s] / (double)g_stateVisits[s];
+               if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
+               {
+                  Print("⚠️ Estado ", s, " deveria estar bloqueado! Loss rate: ", 
+                        DoubleToString(lossRate*100, 1), "%");
+               }
             }
          }
       }
@@ -5609,6 +5626,26 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
 // ======================================================================
 int OnInit()
 {
+   // ✅ VALIDAÇÃO DE PARÂMETROS CRÍTICOS
+   if(DecayFactor <= 0.0 || DecayFactor > 1.0)
+   {
+      Print("❌ ERRO: DecayFactor inválido (", DecayFactor, ")");
+      Print("✅ Ajustando para 0.98");
+      DecayFactor = 0.98;
+   }
+   
+   if(LotSize <= 0.0)
+   {
+      Print("❌ ERRO: LotSize inválido (", LotSize, ")");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   
+   if(FixedSL_Points <= 0 && UseFixedSL)
+   {
+      Print("❌ ERRO: FixedSL_Points inválido com UseFixedSL ativo");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   
    trade.SetExpertMagicNumber(MagicNumber);
    trade.SetTypeFillingBySymbol(_Symbol);
    trade.SetDeviationInPoints(30);
