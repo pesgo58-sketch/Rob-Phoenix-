@@ -2999,6 +2999,24 @@ void RemoveHUD()
 }
 
 // ======================================================================
+// ✅✅✅ FUNÇÃO AUXILIAR: CONVERTER COR PARA STRING
+// ======================================================================
+string ColorToStringCustom(color clr)
+{
+   // Converter cor para string legível
+   if(clr == clrRed) return "Vermelho";
+   if(clr == clrOrange) return "Laranja";
+   if(clr == clrWhite) return "Branco";
+   if(clr == clrCyan) return "Ciano";
+   if(clr == clrLime) return "Verde";
+   if(clr == clrYellow) return "Amarelo";
+   if(clr == clrGray) return "Cinza";
+   
+   // Se não for uma cor conhecida, retornar o valor hexadecimal
+   return StringFormat("0x%06X", (int)clr);
+}
+
+// ======================================================================
 // ✅✅✅ NOVA FUNÇÃO: VALIDAR SINCRONIZAÇÃO HUD COM ESTADOS BLOQUEADOS
 // ======================================================================
 void ValidateHUDBlockedStatesSync()
@@ -3036,7 +3054,7 @@ void ValidateHUDBlockedStatesSync()
       color hudColor = (color)ObjectGetInteger(0, "HUD_Blocked", OBJPROP_COLOR);
       
       Print("📺 Texto HUD: ", hudText);
-      Print("📺 Cor HUD: ", ColorToString(hudColor));
+      Print("📺 Cor HUD: ", ColorToStringCustom(hudColor));
       
       // Verificar cor está correta baseada no percentual
       int activeStates = g_activeStatesCount;
@@ -3055,8 +3073,8 @@ void ValidateHUDBlockedStatesSync()
       else
       {
          Print("⚠️ Cor do HUD pode estar desatualizada");
-         Print("   Esperado: ", ColorToString(expectedColor));
-         Print("   Atual: ", ColorToString(hudColor));
+         Print("   Esperado: ", ColorToStringCustom(expectedColor));
+         Print("   Atual: ", ColorToStringCustom(hudColor));
       }
    }
    
@@ -3078,12 +3096,16 @@ void ValidateBlockingParameters()
    Print("   MIN_VISITS_FOR_BLOCK (constante): ", MIN_VISITS_FOR_BLOCK);
    Print("   MinVisitsForBlockDecision (variável): ", MinVisitsForBlockDecision);
    
-   // Verificar consistência
+   // Verificar consistência e forçar sincronização se necessário
    if(MIN_VISITS_FOR_BLOCK != MinVisitsForBlockDecision)
    {
       Print("⚠️ AVISO: Valores inconsistentes!");
       Print("   Isso pode causar comportamento inesperado");
-      Print("   Recomendação: Manter ambos em 30");
+      Print("   Sincronizando MinVisitsForBlockDecision com MIN_VISITS_FOR_BLOCK...");
+      
+      // ✅ CORREÇÃO AUTOMÁTICA: Forçar consistência
+      MinVisitsForBlockDecision = MIN_VISITS_FOR_BLOCK;
+      Print("✅ MinVisitsForBlockDecision ajustado para: ", MinVisitsForBlockDecision);
    }
    else
    {
