@@ -2794,11 +2794,12 @@ void UpdateHUDLight()
       blockedStates = CountBlockedStates();
       cachedBlockedStates = blockedStates;
       
-      // Log de debug para rastreamento (apenas quando atualiza)
-      static int lastLoggedBlocked = -999;
-      if(blockedStates != lastLoggedBlocked && blockedStates > 0)
+      // Log de debug para rastreamento de mudanças no bloqueio
+      static int lastLoggedBlocked = -1;
+      if(blockedStates != lastLoggedBlocked)
       {
-         Print("📊 HUD: Atualizando contagem de estados bloqueados: ", blockedStates);
+         Print("📊 HUD: Atualizando contagem de estados bloqueados: ", blockedStates,
+               " (anterior: ", lastLoggedBlocked >= 0 ? IntegerToString(lastLoggedBlocked) : "N/A", ")");
          lastLoggedBlocked = blockedStates;
       }
    }
