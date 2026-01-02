@@ -2291,11 +2291,11 @@ void EmergencyCounterFix()
    Print("   Estados corrigidos: ", fixedStates);
    Print("   Estados desbloqueados: ", unblockedStates);
    Print("   Novos totais:");
-   Print("     Total Visitas: ", totalVisitas);
+   Print("     Total Visitas: ", totalVisits);
    Print("     Total Vitórias: ", totalWins);
    Print("     Total Perdas: ", totalLosses);
-   Print("     Win Rate: ", totalVisitas > 0 ? 
-         DoubleToString((double)totalWins/totalVisitas*100, 1) : "0.0", "%");
+   Print("     Win Rate: ", totalVisits > 0 ? 
+         DoubleToString((double)totalWins/totalVisits*100, 1) : "0.0", "%");
    
    // Forçar save
    g_memoryDirty = true;
@@ -3644,7 +3644,12 @@ void ExecuteAction(int action, int state)
    // 🔧 CORREÇÃO: Converter string para uchar array corretamente
    uchar ucomment[];
    StringToCharArray(comment, ucomment, 0, StringLen(comment));
-   ArrayCopy(req.comment, ucomment, 0, 0, ArraySize(ucomment));
+   // Copiar manualmente para evitar erro de tipo
+   int copySize = MathMin(ArraySize(ucomment), ArraySize(req.comment));
+   for(int i = 0; i < copySize; i++)
+   {
+      req.comment[i] = ucomment[i];
+   }
 
    if(!OrderSend(req,res))
    {
@@ -3924,13 +3929,13 @@ int GetCurrentState()
    int timeBucket = GetTimeBucket();
    
    // ✅ Proteção contra overflow
-   maBucket = MathMod(maBucket, BINS_MA_DIST);
-   rsiBucket = MathMod(rsiBucket, BINS_RSI);
-   adxBucket = MathMod(adxBucket, BINS_ADX);
-   bbBucket = MathMod(bbBucket, BINS_BBPOS);
-   volBucket = MathMod(volBucket, BINS_VOLATILITY);
-   volumeBucket = MathMod(volumeBucket, BINS_VOLUME);
-   timeBucket = MathMod(timeBucket, BINS_TIME);
+   maBucket = (int)MathMod(maBucket, BINS_MA_DIST);
+   rsiBucket = (int)MathMod(rsiBucket, BINS_RSI);
+   adxBucket = (int)MathMod(adxBucket, BINS_ADX);
+   bbBucket = (int)MathMod(bbBucket, BINS_BBPOS);
+   volBucket = (int)MathMod(volBucket, BINS_VOLATILITY);
+   volumeBucket = (int)MathMod(volumeBucket, BINS_VOLUME);
+   timeBucket = (int)MathMod(timeBucket, BINS_TIME);
    
    // ✅ CORREÇÃO: Método correto - multiplicar na ordem inversa
    int state_idx = 0;
