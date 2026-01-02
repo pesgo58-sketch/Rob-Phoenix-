@@ -3071,7 +3071,9 @@ bool CheckRealVolume()
    }
    else
    {
-      g_volumeAverage = (long)sumVol;
+      // Edge case: não há barras suficientes para calcular média
+      g_volumeAverage = (long)sumVol > 0 ? (long)sumVol : 1;
+      Print("⚠️ Volume: barras insuficientes para média, usando fallback");
    }
    
    if(g_volumeAverage > 0)
