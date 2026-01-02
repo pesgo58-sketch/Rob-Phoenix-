@@ -3641,10 +3641,12 @@ void ExecuteAction(int action, int state)
                    quality,
                    g_totalDecayCycles);
    
-   // ✅ CORREÇÃO: Converter string para array uchar e copiar
+   // ✅ CORREÇÃO: Converter string para array uchar
    uchar temp_comment[];
    StringToCharArray(comment, temp_comment, 0, StringLen(comment));
-   ArrayCopy(req.comment, temp_comment, 0, 0, MathMin(ArraySize(temp_comment), ArraySize(req.comment)));
+   int copy_size = MathMin(ArraySize(temp_comment), 31); // req.comment max size is 31
+   for(int i = 0; i < copy_size; i++)
+      req.comment[i] = temp_comment[i];
 
    if(!OrderSend(req,res))
    {
