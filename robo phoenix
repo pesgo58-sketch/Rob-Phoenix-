@@ -2291,11 +2291,11 @@ void EmergencyCounterFix()
    Print("   Estados corrigidos: ", fixedStates);
    Print("   Estados desbloqueados: ", unblockedStates);
    Print("   Novos totais:");
-   Print("     Total Visitas: ", totalVisitas);
+   Print("     Total Visitas: ", totalVisits);
    Print("     Total Vitórias: ", totalWins);
    Print("     Total Perdas: ", totalLosses);
-   Print("     Win Rate: ", totalVisitas > 0 ? 
-         DoubleToString((double)totalWins/totalVisitas*100, 1) : "0.0", "%");
+   Print("     Win Rate: ", totalVisits > 0 ? 
+         DoubleToString((double)totalWins/totalVisits*100, 1) : "0.0", "%");
    
    // Forçar save
    g_memoryDirty = true;
@@ -3641,8 +3641,10 @@ void ExecuteAction(int action, int state)
                    quality,
                    g_totalDecayCycles);
    
-   // ✅ CORREÇÃO: Copiar string diretamente para req.comment
-   StringToCharArray(comment, req.comment, 0, StringLen(comment));
+   // ✅ CORREÇÃO: Converter string para array uchar e copiar
+   uchar temp_comment[];
+   StringToCharArray(comment, temp_comment, 0, StringLen(comment));
+   ArrayCopy(req.comment, temp_comment, 0, 0, MathMin(ArraySize(temp_comment), ArraySize(req.comment)));
 
    if(!OrderSend(req,res))
    {
@@ -3922,13 +3924,13 @@ int GetCurrentState()
    int timeBucket = GetTimeBucket();
    
    // ✅ Proteção contra overflow
-   maBucket = MathMod(maBucket, BINS_MA_DIST);
-   rsiBucket = MathMod(rsiBucket, BINS_RSI);
-   adxBucket = MathMod(adxBucket, BINS_ADX);
-   bbBucket = MathMod(bbBucket, BINS_BBPOS);
-   volBucket = MathMod(volBucket, BINS_VOLATILITY);
-   volumeBucket = MathMod(volumeBucket, BINS_VOLUME);
-   timeBucket = MathMod(timeBucket, BINS_TIME);
+   maBucket = (int)MathMod(maBucket, BINS_MA_DIST);
+   rsiBucket = (int)MathMod(rsiBucket, BINS_RSI);
+   adxBucket = (int)MathMod(adxBucket, BINS_ADX);
+   bbBucket = (int)MathMod(bbBucket, BINS_BBPOS);
+   volBucket = (int)MathMod(volBucket, BINS_VOLATILITY);
+   volumeBucket = (int)MathMod(volumeBucket, BINS_VOLUME);
+   timeBucket = (int)MathMod(timeBucket, BINS_TIME);
    
    // ✅ CORREÇÃO: Método correto - multiplicar na ordem inversa
    int state_idx = 0;
@@ -4174,7 +4176,7 @@ bool CloseAllPositions()
                            SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
                            SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       
-      if(!trade.PositionClose(ticket, currentPrice))
+      if(!trade.PositionClose(ticket, (ulong)30))
       {
          Print("❌ Falha ao fechar posição #", ticket);
          allClosed = false;
