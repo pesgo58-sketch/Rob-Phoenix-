@@ -1099,6 +1099,9 @@ bool ShouldBlockState(int state)
     
     if(visits < MinVisitsForBlockDecision) return false;
     
+    // ✅ PROTEÇÃO: Verificar se visits > 0 antes da divisão
+    if(visits == 0) return false;
+    
     double lossRate = (double)losses / (double)visits;
     
     return (lossRate >= BlockLossRateThreshold);
@@ -2576,7 +2579,12 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   // ✅ PROTEÇÃO: Verificar divisão por zero
+   double currentWinRate = 0.0;
+   if(g_totalTrades > 0)
+   {
+      currentWinRate = (double)g_totalWins / g_totalTrades;
+   }
    
    if(currentWinRate < 0.25)
    {
@@ -3056,7 +3064,15 @@ bool CheckRealVolume()
       sumVol += volumeArray[i];
    }
    
-   g_volumeAverage = (long)(sumVol / (barsToCopy - 1));
+   // ✅ PROTEÇÃO: Evitar divisão por zero
+   if(barsToCopy - 1 > 0)
+   {
+      g_volumeAverage = (long)(sumVol / (barsToCopy - 1));
+   }
+   else
+   {
+      g_volumeAverage = (long)sumVol;
+   }
    
    if(g_volumeAverage > 0)
    {
@@ -5272,7 +5288,12 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      // ✅ PROTEÇÃO: Verificar divisão por zero
+      double currentWinRate = 0.0;
+      if(g_totalTrades > 0)
+      {
+         currentWinRate = (double)g_totalWins / g_totalTrades;
+      }
       
       if(currentWinRate < 0.20)
       {
@@ -5292,7 +5313,12 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      // ✅ PROTEÇÃO: Verificar divisão por zero
+      double blockedRatio = 0.0;
+      if(g_activeStatesCount > 0)
+      {
+         blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      }
       if(blockedRatio > 0.7 && g_activeStatesCount > 50)
       {
          Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
