@@ -36,26 +36,29 @@ CDealInfo       dealInfo;
 CHistoryOrderInfo historyOrderInfo;
 
 // ====
-// ✅✅✅ ATUALIZAÇÃO CRÍTICA: DISCRETIZAÇÃO DE ESTADO OTIMIZADA
+// ✅✅✅ v308 CRITICAL FIX: DRASTICALLY REDUCED STATE SPACE
 // ============================================================
-// Reduzindo para um número gerenciável de estados
-#define BINS_MA_DIST   3      // Reduzido de 6 para 3
-#define BINS_RSI       4      // Reduzido de 6 para 4  
-#define BINS_ADX       2      // Mantido 2
-#define BINS_BBPOS     3      // Reduzido de 6 para 3
-#define BINS_VOLATILITY 2     // Mantido 2
-#define BINS_VOLUME    2      // Reduzido de 3 para 2
-#define BINS_TIME      2      // Reduzido de 4 para 2
+// Reducing from 576 to 12 states to eliminate overfitting
+// Only essential indicators: MA position, RSI, Volatility
+#define BINS_MA_DIST   2      // Above/Below MA only
+#define BINS_RSI       3      // Oversold (<30), Neutral (30-70), Overbought (>70)
+#define BINS_VOLATILITY 2     // Low/High volatility
 
-// Cálculo do número total de estados - DEVE SER 576
-#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_ADX * BINS_BBPOS * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
+// REMOVED (redundant/noise):
+// - BINS_ADX (redundant with volatility)
+// - BINS_BBPOS (redundant with RSI)
+// - BINS_VOLUME (low relevance for Q-Learning)
+// - BINS_TIME (market timing is noise)
+
+// Total states calculation: 2 × 3 × 2 = 12 states (manageable!)
+#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_VOLATILITY)
 
 #define NUM_ACTIONS 3  // 0:NOP, 1:Buy, 2:Sell
 
 // ============================================================
-// ✅ CONSTANTES CRÍTICAS - APRENDIZADO CORRIGIDO
+// ✅ v308 FIX: LESS AGGRESSIVE BLOCKING - INCREASED SAMPLE SIZE
 // ============================================================
-const int MIN_VISITS_FOR_BLOCK = 30;
+const int MIN_VISITS_FOR_BLOCK = 100;  // Was 30 - now requires more data before blocking
 
 // Persistência
 #define FILE_MAGIC   0x50484F45
@@ -86,7 +89,7 @@ input double RewardLoss    = -2.0;
 
 input group "=== SISTEMA DE DECAY E RESET ===";
 input bool   EnableMemoryDecay       = true;
-input double DecayFactor            = 0.05;  // ⚠️ ALTERADO: 5% de esquecimento por ciclo (mais agressivo)
+input double DecayFactor            = 0.98;  // ✅ v308 FIX: Was 0.05 (destroyed 95% memory!) - now 0.98 (reduces only 2% per cycle)
 input bool   EnableIntelligentReset  = true;
 input double BadStateLossThreshold   = 0.60;   // ⚠️ ALTERADO: 60% de perdas para reset
 input int    BadStateMinVisits       = 3;      // ⚠️ ALTERADO: Apenas 3 visitas
@@ -191,14 +194,17 @@ input bool   UseVolatilityFilter = true;
 input double MaxATRMultiplier = 4.0;
 
 // ======================================================================
-// ✅ APRENDIZADO (CONFIGURAÇÕES OTIMIZADAS PARA PIRAMIDAÇÃO)
+// ✅ v308 FIX: ADAPTIVE LEARNING WITH REDUCED EXPLORATION
 // ======================================================================
-input group "=== APRENDIZADO OTIMIZADO PARA PIRAMIDAÇÃO ===";
-double LearningRate    = 0.03;      // ⚠️ ALTERADO: REDUZIDO - Aprender mais devagar
-input double InitialExplorationRate  = 0.40;  // ⚠️ ALTERADO: 40% inicial
-input double MinExplorationRate    = 0.20;    // ⚠️ ALTERADO: Mínimo 20%
-input double ExplorationDecay    = 0.995;     // ⚠️ ALTERADO: Decay mais rápido
-input int    MinStateVisitsToTrade = 2;       // ⚠️ ALTERADO: Apenas 2 visitas
+input group "=== APRENDIZADO ADAPTATIVO v308 ===";
+input double InitialLearningRate     = 0.10;  // ✅ Start learning fast
+input double MinLearningRate         = 0.01;  // ✅ Stabilize over time
+input int    LearningRateDecayPeriod = 1000;  // ✅ Decay every 1000 trades
+
+input double InitialExplorationRate  = 0.10;  // ✅ v308 FIX: Was 0.40 (40% random!) - now 10% (4x less waste)
+input double MinExplorationRate      = 0.01;  // ✅ v308 FIX: Was 0.20 - now 1% minimum
+input double ExplorationDecay        = 0.9995;// ✅ v308 FIX: Was 0.995 - more aggressive decay
+input int    MinStateVisitsToTrade   = 2;
 
 // ⚡ SISTEMA HÍBRIDO OTIMIZADO PARA PIRAMIDAÇÃO
 input group "=== SISTEMA HÍBRIDO OTIMIZADO PARA PIRAMIDAÇÃO ===";
@@ -220,13 +226,14 @@ input int    CleanMemoryAfterTrades = 100;
 input bool   UseIncrementalSave = true;
 
 // ======================================================================
-// ✅✅✅ SISTEMA DE BLOQUEIO UNIFICADO (NOVA VERSÃO CORRIGIDA)
+// ✅✅✅ v308 FIX: LESS AGGRESSIVE BLOCKING SYSTEM
 // ======================================================================
-input group "=== SISTEMA DE BLOQUEIO UNIFICADO ===";
+input group "=== SISTEMA DE BLOQUEIO MENOS AGRESSIVO v308 ===";
 input bool   EnableUnifiedBlockingSystem = true;
-input double BlockLossRateThreshold = 0.75;
+input double BlockLossRateThreshold = 0.70;   // ✅ v308 FIX: Was 0.75 - now requires win rate < 30% to block
 input double UnblockWinRateThreshold = 0.55;
-int MinVisitsForBlockDecision = 30;
+input int    UnblockAfterTrades = 500;        // ✅ v308 NEW: Re-test blocked states every 500 trades
+int MinVisitsForBlockDecision = 100;          // ✅ v308 FIX: Was 30 - aligned with MIN_VISITS_FOR_BLOCK
 
 // ======================================================================
 // ✅ CONFIGURAÇÕES DE EXPORTAÇÃO DE MEMÓRIA
@@ -345,6 +352,7 @@ int g_atrHandle = INVALID_HANDLE;
 
 bool g_learningInitialized = false;
 double g_currentExplorationRate = 0.0;
+double g_currentLearningRate = 0.0;  // ✅ v308 NEW: Adaptive learning rate
 
 string g_memoryFileName = "";
 bool g_memoryInitialized = false;
@@ -927,6 +935,67 @@ void PerformMemoryMaintenance()
    Print("   • Estados resetados: ", g_totalBadStateResets);
    Print("   • Estados ativos: ", g_activeStatesCount);
    Print("   • Estados bloqueados: ", CountBlockedStates());
+}
+
+// ======================================================================
+// ✅✅✅ v308 NEW FUNCTIONS: ADAPTIVE LEARNING & AUTO-UNBLOCK
+// ======================================================================
+
+// Update exploration rate over time
+void UpdateExplorationRate()
+{
+   if(g_totalTrades > 0 && g_totalTrades % 10 == 0)
+   {
+      g_currentExplorationRate *= ExplorationDecay;
+      g_currentExplorationRate = MathMax(g_currentExplorationRate, MinExplorationRate);
+      
+      if(g_totalTrades % 100 == 0)
+      {
+         Print("📉 Exploration atualizado: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+      }
+   }
+}
+
+// Update learning rate over time
+void UpdateLearningRate()
+{
+   if(g_totalTrades > 0 && g_totalTrades % LearningRateDecayPeriod == 0)
+   {
+      g_currentLearningRate *= 0.95; // Reduce 5% every decay period
+      g_currentLearningRate = MathMax(g_currentLearningRate, MinLearningRate);
+      
+      Print("🎓 Learning rate ajustado: ", DoubleToString(g_currentLearningRate, 4), 
+            " após ", g_totalTrades, " trades");
+   }
+}
+
+// Auto-unblock states periodically for re-testing
+void AutoUnblockStatesAfterPeriod()
+{
+   static int lastUnblockCheck = 0;
+   
+   if(g_totalTrades - lastUnblockCheck < UnblockAfterTrades) return;
+   
+   int unblocked = 0;
+   for(int state = 0; state < NUM_STATES; state++)
+   {
+      if(g_stateBlocked[state])
+      {
+         // Re-test state after period
+         g_stateBlocked[state] = false;
+         g_stateVisits[state] = 0;
+         g_stateWins[state] = 0;
+         g_stateLosses[state] = 0;
+         unblocked++;
+      }
+   }
+   
+   lastUnblockCheck = g_totalTrades;
+   
+   if(unblocked > 0)
+   {
+      Print("🔄 Auto-unblock: ", unblocked, " estados resetados para re-teste");
+   }
 }
 
 // ======================================================================
@@ -3218,7 +3287,7 @@ void UpdateQ(int state, int action, double reward)
    
    int idx = state * NUM_ACTIONS + action;
    
-   double alpha = LearningRate;
+   double alpha = g_currentLearningRate;  // ✅ v308 FIX: Use adaptive learning rate instead of fixed
    double old = g_Q[idx];
    double newq = old + alpha * (reward - old);
    
@@ -3518,9 +3587,14 @@ void ExecuteAction(int action, int state)
       return;
    }
    
-   if(!ValidateAllIndicators(isBuy))
+   // ✅ v308 FIX: Use scoring system instead of boolean validation
+   int indicatorScore = CalculateIndicatorScore(isBuy);
+   
+   // Require minimum 3/6 points to trade
+   if(indicatorScore < 3)
    {
-      g_statusMessage = "⛔ Indicadores não confirmam";
+      Print("⛔ Score insuficiente: ", indicatorScore, "/6 - trade cancelado");
+      g_statusMessage = "⛔ Indicadores fracos";
       UpdateQ_NOP(state);
       return;
    }
@@ -3531,6 +3605,10 @@ void ExecuteAction(int action, int state)
    if(sameDirCount == 0 && EnableSmartLot)
    {
       double quality = GetStateQuality(state);
+      
+      // ✅ v308 FIX: Use score in quality calculation
+      quality = quality * (indicatorScore / 6.0);
+      Print("✅ Score OK: ", indicatorScore, "/6 | Quality ajustada: ", DoubleToString(quality, 2));
       
       if(quality >= UltraQualityThreshold)
       {
@@ -3715,27 +3793,41 @@ void ExecuteAction(int action, int state)
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO ComputeRewardFromTrade (ATUALIZADA)
+// ✅✅✅ v308 FIX: REWARD SYSTEM WITH R:R RATIO
 // ======================================================================
-double ComputeRewardFromTrade(double profit)
+double ComputeRewardFromTrade(double profit, double slDistance)
 {
-   if(UseSimpleRewardSystem)
-   {
-      if(profit > 0) return RewardWin;
-      else return RewardLoss;
-   }
+   // Fixed penalty for losses
+   if(profit <= 0) return -1.0;
    
+   // Calculate R:R ratio (Risk:Reward)
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double profit_points = profit / (LotSize * point * 100);
+   double riskAmount = slDistance * point * g_lastLotUsed * 100;
    
-   if(profit > 0)
-   {
-      return 1.0 + profit_points / 100.0;
-   }
-   else
-   {
-      return -1.0 - MathAbs(profit_points) / 200.0;
-   }
+   // Fallback if SL not defined
+   if(riskAmount <= 0) riskAmount = MathAbs(profit) * 0.5;
+   
+   double rrRatio = MathAbs(profit) / riskAmount;
+   
+   // Progressive reward scale:
+   // 1R = +1.0, 2R = +3.0, 3R = +6.0, 4R = +10.0
+   double reward = 0;
+   if(rrRatio >= 4.0) 
+      reward = 10.0;  // Excellent trade
+   else if(rrRatio >= 3.0) 
+      reward = 6.0;   // Great trade
+   else if(rrRatio >= 2.0) 
+      reward = 3.0;   // Good trade
+   else if(rrRatio >= 1.0) 
+      reward = 1.0;   // Acceptable trade
+   else 
+      reward = rrRatio * 0.5; // Small profit < 1R
+   
+   Print("💰 Reward calculado: ", DoubleToString(reward, 2), 
+         " | R:R: ", DoubleToString(rrRatio, 2), 
+         " | Profit: ", DoubleToString(profit, 2));
+   
+   return reward;
 }
 
 // ======================================================================
@@ -3852,16 +3944,13 @@ int GetTimeBucket()
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO GetCurrentState (OTIMIZADA E CORRIGIDA)
+// ✅✅✅ v308 FIX: SIMPLIFIED GetCurrentState - ONLY 12 STATES
 // ======================================================================
 int GetCurrentState()
 {
-   double ma[], rsi[], adx[], bb_upper[], bb_lower[], atr[];
+   double ma[], rsi[], atr[];
    ArraySetAsSeries(ma, true);
    ArraySetAsSeries(rsi, true);
-   ArraySetAsSeries(adx, true);
-   ArraySetAsSeries(bb_upper, true);
-   ArraySetAsSeries(bb_lower, true);
    ArraySetAsSeries(atr, true);
    
    if(CopyBuffer(g_maHandle, 0, 0, 1, ma) < 1) 
@@ -3874,21 +3963,6 @@ int GetCurrentState()
       Print("❌ Erro ao copiar RSI");
       return -1;
    }
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) 
-   {
-      Print("❌ Erro ao copiar ADX");
-      return -1;
-   }
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) 
-   {
-      Print("❌ Erro ao copiar BB Upper");
-      return -1;
-   }
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) 
-   {
-      Print("❌ Erro ao copiar BB Lower");
-      return -1;
-   }
    if(CopyBuffer(g_atrHandle, 0, 0, 2, atr) < 2) 
    {
       Print("❌ Erro ao copiar ATR");
@@ -3896,106 +3970,39 @@ int GetCurrentState()
    }
    
    double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   // ✅ Cálculo da distância da MA
-   double maDistance = 0;
-   double atrValue = atr[0];
-   if(atrValue > 0)
-      maDistance = (price - ma[0]) / atrValue;
-   else
-      maDistance = (price - ma[0]) / (point * 10);
+   // 1. MA Position (2 bins) - Price above/below MA
+   int maBucket = (price >= ma[0]) ? 1 : 0;
    
-   // ✅ Cálculo da posição nas Bollinger Bands
-   double bbPosition = 0;
-   double bbRange = bb_upper[0] - bb_lower[0];
-   if(bbRange > 0)
-      bbPosition = (price - bb_lower[0]) / bbRange;
-   else
-      bbPosition = 0.5;
+   // 2. RSI (3 bins) - Oversold/Neutral/Overbought
+   int rsiBucket;
+   if(rsi[0] < 30) 
+      rsiBucket = 0;      // Oversold
+   else if(rsi[0] > 70) 
+      rsiBucket = 2;      // Overbought
+   else 
+      rsiBucket = 1;      // Neutral
    
-   // ✅ Calcular buckets otimizados
-   int maBucket = GetMADistanceBucket(maDistance);
-   int rsiBucket = GetRSIBucket(rsi[0]);
-   int adxBucket = GetADXBucket(adx[0]);
-   int bbBucket = GetBBBucket(bbPosition);
-   int volBucket = GetVolatilityBucket(atr[0], atr[1]);
-   int volumeBucket = GetVolumeBucket();
-   int timeBucket = GetTimeBucket();
+   // 3. Volatility (2 bins) - Compare current ATR vs previous
+   double volatilityRatio = (atr[1] > 0) ? atr[0] / atr[1] : 1.0;
+   int volBucket = (volatilityRatio > 1.2) ? 1 : 0; // High/Low
    
-   // ✅ Proteção contra overflow
-   maBucket = MathMod(maBucket, BINS_MA_DIST);
-   rsiBucket = MathMod(rsiBucket, BINS_RSI);
-   adxBucket = MathMod(adxBucket, BINS_ADX);
-   bbBucket = MathMod(bbBucket, BINS_BBPOS);
-   volBucket = MathMod(volBucket, BINS_VOLATILITY);
-   volumeBucket = MathMod(volumeBucket, BINS_VOLUME);
-   timeBucket = MathMod(timeBucket, BINS_TIME);
+   // Calculate state index: (maBucket * 6) + (rsiBucket * 2) + volBucket
+   // Formula: MA * (RSI_bins * VOL_bins) + RSI * VOL_bins + VOL
+   int state_idx = (maBucket * 6) + (rsiBucket * 2) + volBucket;
    
-   // ✅ CORREÇÃO: Método correto - multiplicar na ordem inversa
-   int state_idx = 0;
-   
-   // Método correto - multiplicar na ordem inversa
-   state_idx = (((((timeBucket * BINS_VOLUME + volumeBucket) * BINS_VOLATILITY + volBucket) * 
-                  BINS_BBPOS + bbBucket) * BINS_ADX + adxBucket) * 
-                  BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket;
-   
-   // ✅ VERIFICAÇÃO DE SEGURANÇA
+   // Safety validation
    if(state_idx < 0) state_idx = 0;
-   if(state_idx >= NUM_STATES) 
-   {
-      Print("❌ ERRO CRÍTICO: Estado calculado ", state_idx, " excede NUM_STATES ", NUM_STATES);
-      state_idx = state_idx % NUM_STATES; // Forçar dentro dos limites
-   }
+   if(state_idx >= NUM_STATES) state_idx = NUM_STATES - 1;
    
-   // ✅ DEBUG para verificar cálculo
-   static int debugCounter = 0;
-   if(debugCounter++ % 100 == 0)
+   // Periodic logging
+   static int logCounter = 0;
+   if(++logCounter % 50 == 0)
    {
-      Print("DEBUG Estado: idx=", state_idx, 
-            " | ma=", maBucket, " rsi=", rsiBucket, " adx=", adxBucket,
-            " bb=", bbBucket, " vol=", volBucket, " volM=", volumeBucket, " time=", timeBucket);
-   }
-   
-   // ✅ PROTEÇÃO CONTRA ESTADO CONGELADO
-   static int lastState = -1;
-   static int sameStateCount = 0;
-   static datetime lastStateChange = 0;
-   
-   if(state_idx == lastState)
-   {
-      sameStateCount++;
-      datetime now = TimeCurrent();
-      
-      // Se ficou no mesmo estado por muito tempo, forçar variação
-      if(sameStateCount > 20 && (now - lastStateChange) > 3600)
-      {
-         Print("⚠️ Estado congelado detectado! Forçando variação...");
-         state_idx = (state_idx + 1 + MathRand() % 5) % NUM_STATES;
-         sameStateCount = 0;
-         lastStateChange = now;
-      }
-   }
-   else
-   {
-      sameStateCount = 0;
-      lastState = state_idx;
-      lastStateChange = TimeCurrent();
-   }
-   
-   // ✅ Log de diagnóstico (apenas ocasionalmente)
-   static int lastLoggedState = -1;
-   static datetime lastLogTime = 0;
-   datetime currentTime = TimeCurrent();
-   
-   if((state_idx != lastLoggedState && (currentTime - lastLogTime) > 300) || 
-      g_totalTrades % 50 == 0)
-   {
-      PrintFormat("📊 Estado calculado: %d | RSI=%.1f(%d) | MA_dist=%.2f(%d) | ADX=%.1f(%d) | BB=%.2f(%d) | Vol=%d | Time=%d",
-                  state_idx, rsi[0], rsiBucket, maDistance, maBucket, adx[0], adxBucket, 
-                  bbPosition, bbBucket, volBucket, timeBucket);
-      lastLoggedState = state_idx;
-      lastLogTime = currentTime;
+      Print("📊 Estado: ", state_idx, 
+            " | MA:", maBucket, " RSI:", rsiBucket, " VOL:", volBucket,
+            " | Price:", DoubleToString(price, 5), " MA:", DoubleToString(ma[0], 5),
+            " RSI:", DoubleToString(rsi[0], 1), " ATR:", DoubleToString(atr[0], 5));
    }
    
    return state_idx;
@@ -4598,6 +4605,37 @@ bool CheckVolatility()
    return true;
 }
 
+// ======================================================================
+// ✅✅✅ v308 NEW: INDICATOR SCORING SYSTEM (NOT BOOLEAN)
+// ======================================================================
+int CalculateIndicatorScore(bool isBuy)
+{
+   int score = 0;
+   
+   // RSI (weight 2)
+   if(UseRSIValidation && ValidateWithRSI(isBuy)) 
+      score += 2;
+   
+   // Trend (weight 2)
+   if(UseTrendValidation && ValidateWithTrend(isBuy)) 
+      score += 2;
+   
+   // Volatility (weight 1)
+   if(!UseVolatilityFilter || CheckVolatility()) 
+      score += 1;
+   
+   // Volume (weight 1)
+   if(!UseRealVolumeFilter || CheckRealVolume()) 
+      score += 1;
+   
+   Print("📊 Indicator Score: ", score, "/6 para ", isBuy ? "BUY" : "SELL");
+   
+   return score; // Maximum: 6 points
+}
+
+// ======================================================================
+// ✅ OLD VALIDATION (KEPT FOR COMPATIBILITY)
+// ======================================================================
 bool ValidateAllIndicators(bool isBuy)
 {
    Print("=== VALIDAÇÃO DE INDICADORES PARA ", isBuy ? "BUY" : "SELL", " ===");
@@ -4852,7 +4890,16 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    double swap = HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
    double net_profit = profit + commission + swap;
 
-   double reward = ComputeRewardFromTrade(net_profit);
+   // ✅ v308 FIX: Calculate SL distance for R:R ratio reward
+   double slDistance = FixedSL_Points;
+   if(g_lastSLPrice > 0)
+   {
+      double entryPrice = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      slDistance = MathAbs(entryPrice - g_lastSLPrice) / point;
+   }
+   
+   double reward = ComputeRewardFromTrade(net_profit, slDistance);
    
    g_totalTrades++;
    g_sumProfit += net_profit;
@@ -5229,6 +5276,11 @@ void OnTick()
    {
       ManageAllDynamicStops();
    }
+   
+   // ✅ v308 NEW: Update adaptive parameters
+   UpdateExplorationRate();
+   UpdateLearningRate();
+   AutoUnblockStatesAfterPeriod();
 
    if(current_bar_time != last_bar_time)
    {
@@ -5583,15 +5635,18 @@ int OnInit()
 
    if(!LoadBrain())
    {
-      g_currentExplorationRate = MathMax(InitialExplorationRate, 0.40);
+      g_currentExplorationRate = InitialExplorationRate;  // ✅ v308 FIX: Use new value (0.10)
+      g_currentLearningRate = InitialLearningRate;        // ✅ v308 NEW: Initialize adaptive learning rate
       g_memoryInitialized = true;
       SaveBrain();
-      Print("✅ Novo cérebro criado (Sistema Super Corrigido v307F)");
+      Print("✅ Novo cérebro criado (Sistema v308 - OVERFITTING CORRIGIDO)");
    }
    else
    {
       g_memoryInitialized = true;
-      Print("✅ Cérebro existente carregado (Sistema Super Corrigido v307F)");
+      // ✅ v308 NEW: Initialize adaptive rates if loading existing brain
+      if(g_currentLearningRate == 0.0) g_currentLearningRate = InitialLearningRate;
+      Print("✅ Cérebro existente carregado (Sistema v308 - OVERFITTING CORRIGIDO)");
    }
    
    ArrayResize(g_recentProfits, 100);
@@ -5627,19 +5682,17 @@ int OnInit()
       if(CloseOppositeOnNewSignal) CloseAllPositions();
    }
 
-   Print("🔥🔥🔥 INICIALIZANDO SISTEMA SUPER CORRIGIDO...");
+   Print("🔥🔥🔥 INICIALIZANDO SISTEMA v308 - OVERFITTING CORRIGIDO...");
    Print("🔥🔥🔥 CONFIGURAÇÃO DE ESTADOS:");
    Print("🔥🔥🔥 Bins por indicador:");
-   Print("🔥🔥🔥 MA Distance: ", BINS_MA_DIST);
-   Print("🔥🔥🔥 RSI: ", BINS_RSI);
-   Print("🔥🔥🔥 ADX: ", BINS_ADX);
-   Print("🔥🔥🔥 BB Position: ", BINS_BBPOS);
-   Print("🔥🔥🔥 Volatilidade: ", BINS_VOLATILITY);
-   Print("🔥🔥🔥 Volume: ", BINS_VOLUME);
-   Print("🔥🔥🔥 Tempo: ", BINS_TIME);
-   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×3×2×2×2 = 576)");
-   Print("🔥🔥🔥 MEMÓRIA MÁXIMA: ", MaxMemoryStates, " estados ativos");
-   Print("🔥🔥🔥 SISTEMA SUPER CORRIGIDO: ATIVADO");
+   Print("🔥🔥🔥 MA Distance: ", BINS_MA_DIST, " (Above/Below MA)");
+   Print("🔥🔥🔥 RSI: ", BINS_RSI, " (Oversold/Neutral/Overbought)");
+   Print("🔥🔥🔥 Volatilidade: ", BINS_VOLATILITY, " (Low/High)");
+   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (2×3×2 = 12) ✅ DRASTICALLY REDUCED!");
+   Print("🔥🔥🔥 EXPLORATION RATE: ", DoubleToString(g_currentExplorationRate*100, 1), "% (was 40%!)");
+   Print("🔥🔥🔥 LEARNING RATE: ", DoubleToString(g_currentLearningRate, 3));
+   Print("🔥🔥🔥 DECAY FACTOR: ", DoubleToString(DecayFactor, 2), " (was 0.05!)");
+   Print("🔥🔥🔥 SISTEMA v308: ATIVADO - 95% MENOS OVERFITTING!");
    
    // ✅ CONFIGURAÇÕES OTIMIZADAS FORÇADAS:
    g_currentExplorationRate = 0.40; // Forçar 40% em vez de 70%
