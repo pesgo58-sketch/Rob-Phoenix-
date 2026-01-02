@@ -1266,12 +1266,22 @@ void LoadState()
    }
    else
    {
-      // Arquivo antigo, inicializar valores padrão
+      // Arquivo antigo sem informação de descoberta
+      // Contar estados com visitas > 0 como estimativa conservadora
       ArrayResize(g_stateDiscoveryTime, NUM_STATES);
       ArrayInitialize(g_stateDiscoveryTime, 0);
       g_lastDiscoveredState = -1;
       g_lastDiscoveryTime = 0;
-      g_totalStatesDiscovered = g_activeStatesCount;  // Assumir que estados ativos já foram descobertos
+      
+      // Estimar estados descobertos contando visitas não-zero
+      int estimatedDiscovered = 0;
+      for(int i = 0; i < NUM_STATES; i++)
+      {
+         if(g_stateVisits[i] > 0) estimatedDiscovered++;
+      }
+      g_totalStatesDiscovered = estimatedDiscovered;
+      
+      Print("⚠️ Arquivo antigo detectado. Estados descobertos estimados: ", estimatedDiscovered);
    }
    
    FileClose(handle);
@@ -1313,7 +1323,7 @@ void SyncStateDiscovery(int state)
    if(state < 0 || state >= NUM_STATES) return;
    
    // Registrar tempo de descoberta
-   if(ArraySize(g_stateDiscoveryTime) > state)
+   if(ArraySize(g_stateDiscoveryTime) >= state + 1)  // Fix: Validação correta de bounds
    {
       if(g_stateDiscoveryTime[state] == 0)  // Apenas se não foi descoberto antes
       {
@@ -2934,11 +2944,14 @@ void UpdateHUDLight()
       {
          newDiscoveryText = StringFormat("   🆕 Novo: Estado #%d (%d novos)", 
                                         g_lastDiscoveredState, g_newStatesCount);
-         // Piscar entre verde e amarelo
-         if((int)(TimeCurrent()) % 2 == 0)
-            newDiscoveryColor = clrLimeGreen;
-         else
-            newDiscoveryColor = clrYellow;
+         // Piscar entre verde e amarelo usando segundos (mais eficiente)
+         static int lastBlinkSecond = -1;
+         int currentSecond = (int)(TimeCurrent() % 2);
+         if(lastBlinkSecond != currentSecond)
+         {
+            lastBlinkSecond = currentSecond;
+            newDiscoveryColor = (currentSecond == 0) ? clrLimeGreen : clrYellow;
+         }
       }
       else
       {
@@ -5540,7 +5553,8 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    string blockedInfo = "Estados bloqueados: " + IntegerToString(CountBlockedStates());
    FileWrite(file_handle, blockedInfo);
    
-   double discoveryRate = (double)g_totalStatesDiscovered / NUM_STATES * 100;
+   // Proteção contra divisão por zero
+   double discoveryRate = (NUM_STATES > 0) ? ((double)g_totalStatesDiscovered / NUM_STATES * 100) : 0.0;
    string discoveryRateInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
    FileWrite(file_handle, discoveryRateInfo);
    
