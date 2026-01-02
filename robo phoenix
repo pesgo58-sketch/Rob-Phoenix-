@@ -83,7 +83,8 @@ input int    ConsecutiveLossLimit    = 15;
 // ✅ APRENDIZADO CORRIGIDO
 // ======================================================================
 input group "=== APRENDIZADO CORRIGIDO ===";
-input bool   UseSimpleRewardSystem   = true;
+// ❌ DEPRECATED v308: Simple reward system removed
+// input bool   UseSimpleRewardSystem   = true;
 input double RewardWin     = 5.0;
 input double RewardLoss    = -2.0;
 
@@ -1514,6 +1515,7 @@ bool SaveBrainToFile(string filename)
    }
    
    FileWriteDouble(h, g_currentExplorationRate);
+   FileWriteDouble(h, g_currentLearningRate);  // ✅ v308 NEW: Salvar learning rate adaptativo
    FileWriteInteger(h, (int)g_tradesToday);
    FileWriteInteger(h, (int)g_consecutiveLosses);
    FileWriteInteger(h, (int)g_totalTrades);
@@ -1630,6 +1632,18 @@ bool LoadBrainFromFile(string filename)
    }
    
    g_currentExplorationRate = FileReadDouble(h);
+   
+   // ✅ v308 NEW: Carregar learning rate adaptativo (com fallback para compatibilidade)
+   if(!FileIsEnding(h))  // Proteção para arquivos v307 antigos
+   {
+      g_currentLearningRate = FileReadDouble(h);
+   }
+   else
+   {
+      g_currentLearningRate = InitialLearningRate; // Fallback para cérebros antigos
+      Print("⚠️ Cérebro antigo detectado - inicializando learning rate: ", g_currentLearningRate);
+   }
+   
    g_tradesToday = FileReadInteger(h);
    g_consecutiveLosses = FileReadInteger(h);
    g_totalTrades = FileReadInteger(h);
@@ -3881,6 +3895,12 @@ double GetStateQuality(int state)
 // ✅✅✅ FUNÇÕES PARA CALCULAR ESTADO
 // ======================================================================
 
+// ======================================================================
+// ⚠️ DEPRECATED v308: Bucket helper functions
+// These functions are NO LONGER USED in v308 simplified state calculation
+// Kept for reference/rollback purposes only
+// ======================================================================
+
 // ✅ Função para calcular bucket RSI
 int GetRSIBucket(double rsiValue)
 {
@@ -3931,7 +3951,11 @@ int GetVolumeBucket()
    else return 1;                         // Volume normal/alto
 }
 
-// ✅ Função para calcular bucket de tempo
+// ======================================================================
+// ⚠️ DEPRECATED v308: GetTimeBucket - TIME removed from state calculation
+// This function is NO LONGER USED in v308 simplified state calculation
+// Kept for reference/rollback purposes only
+// ======================================================================
 int GetTimeBucket()
 {
    MqlDateTime timeStruct;
@@ -4634,7 +4658,9 @@ int CalculateIndicatorScore(bool isBuy)
 }
 
 // ======================================================================
-// ✅ OLD VALIDATION (KEPT FOR COMPATIBILITY)
+// ⚠️ DEPRECATED v308: ValidateAllIndicators (replaced by CalculateIndicatorScore)
+// This function is NO LONGER USED in v308 - replaced with weighted scoring system
+// Kept for compatibility/rollback purposes only
 // ======================================================================
 bool ValidateAllIndicators(bool isBuy)
 {
@@ -5644,8 +5670,9 @@ int OnInit()
    else
    {
       g_memoryInitialized = true;
-      // ✅ v308 NEW: Initialize adaptive rates if loading existing brain
+      // ✅ v308 FIX: Garantir compatibilidade com cérebros antigos
       if(g_currentLearningRate == 0.0) g_currentLearningRate = InitialLearningRate;
+      if(g_currentExplorationRate == 0.0) g_currentExplorationRate = InitialExplorationRate;
       Print("✅ Cérebro existente carregado (Sistema v308 - OVERFITTING CORRIGIDO)");
    }
    
@@ -5693,14 +5720,6 @@ int OnInit()
    Print("🔥🔥🔥 LEARNING RATE: ", DoubleToString(g_currentLearningRate, 3));
    Print("🔥🔥🔥 DECAY FACTOR: ", DoubleToString(DecayFactor, 2), " (was 0.05!)");
    Print("🔥🔥🔥 SISTEMA v308: ATIVADO - 95% MENOS OVERFITTING!");
-   
-   // ✅ CONFIGURAÇÕES OTIMIZADAS FORÇADAS:
-   g_currentExplorationRate = 0.40; // Forçar 40% em vez de 70%
-   Print("⚙️ Configurações otimizadas forçadas:");
-   Print("   • Exploration Rate: 40%");
-   Print("   • MinVisitsToTrade: 2");
-   Print("   • BadStateMinVisits: 3");
-   Print("   • BadStateLossThreshold: 60%");
    
    if(EnableUnifiedBlockingSystem)
    {
