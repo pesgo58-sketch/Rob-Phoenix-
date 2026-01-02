@@ -2476,7 +2476,16 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   // ✅ CORREÇÃO: Validar divisor antes da operação para evitar divisão por zero
+   double currentWinRate = 0.0;
+   if(g_totalTrades > 0)
+   {
+      currentWinRate = (double)g_totalWins / g_totalTrades;
+   }
+   else
+   {
+      Print("⚠️ Divisor zero detectado: g_totalTrades = 0. Usando valor padrão currentWinRate = 0.0");
+   }
    
    if(currentWinRate < 0.25)
    {
@@ -5180,7 +5189,12 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      // ✅ CORREÇÃO: Validar divisor antes da operação para evitar divisão por zero
+      double currentWinRate = 0.0;
+      if(g_totalTrades > 0)
+      {
+         currentWinRate = (double)g_totalWins / g_totalTrades;
+      }
       
       if(currentWinRate < 0.20)
       {
@@ -5200,7 +5214,12 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      // ✅ CORREÇÃO: Validar divisor antes da operação para evitar divisão por zero
+      double blockedRatio = 0.0;
+      if(g_activeStatesCount > 0)
+      {
+         blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      }
       if(blockedRatio > 0.7 && g_activeStatesCount > 50)
       {
          Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
