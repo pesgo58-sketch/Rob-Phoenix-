@@ -516,6 +516,7 @@ void FixStuckStatesProblem()
       
       // Forçar save
       g_memoryDirty = true;
+      cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
       SaveState();
    }
 }
@@ -558,6 +559,7 @@ void ResetBlockingSystem()
    Print("   Contadores zerados: stateResets, stateDecays, totalBadStateResets");
    
    g_memoryDirty = true;
+   cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
    SaveState();
    SaveBrain();
 }
@@ -727,6 +729,7 @@ void ResetBadStatesEnhanced()
       Print("   Total resets acumulados: ", g_totalBadStateResets);
       
       g_memoryDirty = true;
+      cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
       SaveState();
    }
 }
@@ -876,6 +879,7 @@ void ResetBadStates()
          }
       }
       
+      cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
       Print("✅ ", statesReset, " estados ruins resetados | Total resets: ", g_totalBadStateResets);
    }
 }
@@ -972,6 +976,7 @@ void BlockState(int state)
               " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
         
         g_memoryDirty = true;
+        cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
     }
     else
     {
@@ -1003,6 +1008,7 @@ void UnblockState(int state)
               " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
         
         g_memoryDirty = true;
+        cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
     }
 }
 
@@ -2299,6 +2305,7 @@ void EmergencyCounterFix()
    
    // Forçar save
    g_memoryDirty = true;
+   cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
    SaveState();
    SaveBrain();
 }
@@ -2381,6 +2388,7 @@ void OverhaulBlockingSystem()
    Print("   Mudança: ", blockedAfter - blockedBefore);
    
    g_memoryDirty = true;
+   cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
 }
 
 // ======================================================================
@@ -2465,6 +2473,7 @@ void IntelligentPartialReset()
    Print("   Total estados ativos após reset: ", g_activeStatesCount);
    
    g_memoryDirty = true;
+   cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
    SaveState();
 }
 
@@ -2784,6 +2793,22 @@ void UpdateHUDLight()
    {
       blockedStates = CountBlockedStates();
       cachedBlockedStates = blockedStates;
+      
+      // Log de debug para rastreamento de mudanças no bloqueio
+      static int lastLoggedBlocked = -1; // -1 indica primeiro update (valor não inicializado)
+      if(blockedStates != lastLoggedBlocked)
+      {
+         if(lastLoggedBlocked >= 0)
+         {
+            Print("📊 HUD: Atualizando contagem de estados bloqueados: ", blockedStates,
+                  " (anterior: ", lastLoggedBlocked, ")");
+         }
+         else
+         {
+            Print("📊 HUD: Inicializando contagem de estados bloqueados: ", blockedStates);
+         }
+         lastLoggedBlocked = blockedStates;
+      }
    }
    
    int totalPositions = cachedPositions;
@@ -5219,6 +5244,9 @@ void OnTick()
       
       // ✅ CHAMAR CORREÇÃO ESPECÍFICA
       FixStuckStatesProblem();
+      
+      // ✅ INVALIDAR CACHE DO HUD PARA GARANTIR SINCRONIZAÇÃO
+      cachedBlockedStates = -1;
       
       lastMaintenanceCall = TimeCurrent();
    }
