@@ -2305,6 +2305,7 @@ void EmergencyCounterFix()
    
    // Forçar save
    g_memoryDirty = true;
+   cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
    SaveState();
    SaveBrain();
 }
@@ -2387,6 +2388,7 @@ void OverhaulBlockingSystem()
    Print("   Mudança: ", blockedAfter - blockedBefore);
    
    g_memoryDirty = true;
+   cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
 }
 
 // ======================================================================
@@ -2471,6 +2473,7 @@ void IntelligentPartialReset()
    Print("   Total estados ativos após reset: ", g_activeStatesCount);
    
    g_memoryDirty = true;
+   cachedBlockedStates = -1; // Invalidar cache do HUD para atualizar exibição
    SaveState();
 }
 
@@ -5233,6 +5236,9 @@ void OnTick()
       
       // ✅ CHAMAR CORREÇÃO ESPECÍFICA
       FixStuckStatesProblem();
+      
+      // ✅ INVALIDAR CACHE DO HUD PARA GARANTIR SINCRONIZAÇÃO
+      cachedBlockedStates = -1;
       
       lastMaintenanceCall = TimeCurrent();
    }
