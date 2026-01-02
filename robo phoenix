@@ -224,9 +224,12 @@ input bool   UseIncrementalSave = true;
 // ======================================================================
 input group "=== SISTEMA DE BLOQUEIO UNIFICADO ===";
 input bool   EnableUnifiedBlockingSystem = true;
-input double BlockLossRateThreshold = 0.75;
-input double UnblockWinRateThreshold = 0.55;
-int MinVisitsForBlockDecision = 30;
+input double BlockLossRateThreshold = 0.75;  // Taxa de perda para bloquear (75% = 3 de 4 perdas)
+input double UnblockWinRateThreshold = 0.55;  // Taxa de vitória para desbloquear (55%)
+int MinVisitsForBlockDecision = 30;  // Mínimo de visitas antes de avaliar bloqueio
+
+// ✅ NOTA: MIN_VISITS_FOR_BLOCK é uma constante (linha 58) também configurada em 30
+// Ambos os valores devem ser consistentes para o correto funcionamento do sistema
 
 // ======================================================================
 // ✅ CONFIGURAÇÕES DE EXPORTAÇÃO DE MEMÓRIA
@@ -1829,6 +1832,9 @@ void ResetQTable()
    
    InitializeLearningSystem();
    
+   // ✅ CORREÇÃO: Sincronizar HUD após reset completo da Q-Table
+   SyncStatesWithHUD();
+   
    Print("🆕 Nova memória criada (Sistema Corrigido v307F com Decay e Reset)");
 }
 
@@ -2990,6 +2996,141 @@ void RemoveHUD()
    hudObjectCount = 0;
    InvalidateHUDCache();
    ChartRedraw(0);
+}
+
+// ======================================================================
+// ✅✅✅ NOVA FUNÇÃO: VALIDAR SINCRONIZAÇÃO HUD COM ESTADOS BLOQUEADOS
+// ======================================================================
+void ValidateHUDBlockedStatesSync()
+{
+   Print("===========================================================");
+   Print("🔍 VALIDAÇÃO: Sincronização HUD com Estados Bloqueados");
+   Print("===========================================================");
+   
+   int actualBlockedCount = CountBlockedStates();
+   int cachedBlockedCount = cachedBlockedStates;
+   
+   Print("📊 Estados bloqueados (real): ", actualBlockedCount);
+   Print("📊 Estados bloqueados (cache HUD): ", cachedBlockedCount);
+   
+   if(cachedBlockedCount == -1)
+   {
+      Print("✅ Cache invalidado corretamente (será atualizado no próximo tick)");
+   }
+   else if(cachedBlockedCount == actualBlockedCount)
+   {
+      Print("✅ HUD sincronizado corretamente!");
+   }
+   else
+   {
+      Print("❌ AVISO: Dessincronia detectada!");
+      Print("   Diferença: ", MathAbs(actualBlockedCount - cachedBlockedCount), " estados");
+      Print("   Forçando sincronização...");
+      SyncStatesWithHUD();
+   }
+   
+   // Validar visual do HUD
+   if(ShowHUD && ObjectFind(0, "HUD_Blocked") >= 0)
+   {
+      string hudText = ObjectGetString(0, "HUD_Blocked", OBJPROP_TEXT);
+      color hudColor = (color)ObjectGetInteger(0, "HUD_Blocked", OBJPROP_COLOR);
+      
+      Print("📺 Texto HUD: ", hudText);
+      Print("📺 Cor HUD: ", ColorToString(hudColor));
+      
+      // Verificar cor está correta baseada no percentual
+      int activeStates = g_activeStatesCount;
+      double blockedPercent = activeStates > 0 ? (double)actualBlockedCount/activeStates*100 : 0;
+      
+      color expectedColor = clrWhite;
+      if(actualBlockedCount == 0) expectedColor = clrCyan;
+      else if(blockedPercent < 10.0) expectedColor = clrWhite;
+      else if(blockedPercent < 25.0) expectedColor = clrOrange;
+      else expectedColor = clrRed;
+      
+      if(hudColor == expectedColor)
+      {
+         Print("✅ Cor do HUD correta para ", DoubleToString(blockedPercent,1), "% bloqueados");
+      }
+      else
+      {
+         Print("⚠️ Cor do HUD pode estar desatualizada");
+         Print("   Esperado: ", ColorToString(expectedColor));
+         Print("   Atual: ", ColorToString(hudColor));
+      }
+   }
+   
+   Print("===========================================================");
+   Print("✅ Validação concluída");
+   Print("===========================================================");
+}
+
+// ======================================================================
+// ✅✅✅ NOVA FUNÇÃO: VALIDAR PARÂMETROS DE BLOQUEIO
+// ======================================================================
+void ValidateBlockingParameters()
+{
+   Print("===========================================================");
+   Print("🔍 VALIDAÇÃO: Parâmetros de Bloqueio de Estados");
+   Print("===========================================================");
+   
+   Print("📋 Configuração atual:");
+   Print("   MIN_VISITS_FOR_BLOCK (constante): ", MIN_VISITS_FOR_BLOCK);
+   Print("   MinVisitsForBlockDecision (variável): ", MinVisitsForBlockDecision);
+   
+   // Verificar consistência
+   if(MIN_VISITS_FOR_BLOCK != MinVisitsForBlockDecision)
+   {
+      Print("⚠️ AVISO: Valores inconsistentes!");
+      Print("   Isso pode causar comportamento inesperado");
+      Print("   Recomendação: Manter ambos em 30");
+   }
+   else
+   {
+      Print("✅ Valores consistentes");
+   }
+   
+   // Verificar se o valor é razoável
+   if(MinVisitsForBlockDecision < 5)
+   {
+      Print("⚠️ AVISO: Limite muito baixo (", MinVisitsForBlockDecision, ")");
+      Print("   Estados podem ser bloqueados prematuramente");
+      Print("   Recomendação: Usar valores entre 20-50");
+   }
+   else if(MinVisitsForBlockDecision > 100)
+   {
+      Print("⚠️ AVISO: Limite muito alto (", MinVisitsForBlockDecision, ")");
+      Print("   Sistema pode demorar demais para bloquear estados ruins");
+      Print("   Recomendação: Usar valores entre 20-50");
+   }
+   else
+   {
+      Print("✅ Valor adequado (", MinVisitsForBlockDecision, ")");
+   }
+   
+   Print("");
+   Print("📋 Thresholds:");
+   Print("   BlockLossRateThreshold: ", DoubleToString(BlockLossRateThreshold*100,1), "%");
+   Print("   UnblockWinRateThreshold: ", DoubleToString(UnblockWinRateThreshold*100,1), "%");
+   
+   // Validar lógica dos thresholds
+   double minWinRateToAvoidBlock = 1.0 - BlockLossRateThreshold;
+   if(UnblockWinRateThreshold < minWinRateToAvoidBlock)
+   {
+      Print("⚠️ AVISO: Gap entre bloqueio e desbloqueio!");
+      Print("   Estados bloqueados com win rate < ", DoubleToString(minWinRateToAvoidBlock*100,1), "%");
+      Print("   Mas só desbloqueados com win rate >= ", DoubleToString(UnblockWinRateThreshold*100,1), "%");
+      Print("   Isso pode criar zona morta entre ", DoubleToString(minWinRateToAvoidBlock*100,1), 
+            "% e ", DoubleToString(UnblockWinRateThreshold*100,1), "%");
+   }
+   else
+   {
+      Print("✅ Thresholds logicamente consistentes");
+   }
+   
+   Print("===========================================================");
+   Print("✅ Validação de parâmetros concluída");
+   Print("===========================================================");
 }
 
 // ======================================================================
@@ -5285,6 +5426,9 @@ void OnTick()
       // ✅ CHAMAR CORREÇÃO ESPECÍFICA
       FixStuckStatesProblem();
       
+      // ✅ VALIDAR SINCRONIZAÇÃO DO HUD
+      ValidateHUDBlockedStatesSync();
+      
       lastMaintenanceCall = TimeCurrent();
    }
 
@@ -5366,6 +5510,9 @@ void OnTick()
                   g_stateBlocked[s] = false;
                   Print("🔄 AUTO-DESBLOQUEIO Estado ", s, 
                         " | Win Rate: ", DoubleToString(winRate*100,1), "%");
+                  
+                  // ✅ CORREÇÃO: Invalidar cache após auto-desbloqueio
+                  InvalidateHUDCache();
                }
                else
                {
@@ -5745,6 +5892,12 @@ int OnInit()
       ChartRedraw(0);
       Print("🖥️ HUD inicializado com ", hudObjectCount, " objetos");
    }
+   
+   // ✅ VALIDAR CONFIGURAÇÕES DE BLOQUEIO
+   ValidateBlockingParameters();
+   
+   // ✅ VALIDAR SINCRONIZAÇÃO INICIAL DO HUD
+   ValidateHUDBlockedStatesSync();
    
    g_statusMessage = "Pronto para operar (Sistema Super Corrigido v307F)";
    
