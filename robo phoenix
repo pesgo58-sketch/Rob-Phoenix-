@@ -1274,6 +1274,7 @@ void LoadState()
       g_lastDiscoveryTime = 0;
       
       // Estimar estados descobertos contando visitas não-zero
+      // (Executado apenas uma vez na migração de arquivo antigo)
       int estimatedDiscovered = 0;
       for(int i = 0; i < NUM_STATES; i++)
       {
@@ -1323,7 +1324,7 @@ void SyncStateDiscovery(int state)
    if(state < 0 || state >= NUM_STATES) return;
    
    // Registrar tempo de descoberta
-   if(ArraySize(g_stateDiscoveryTime) >= state + 1)  // Fix: Validação correta de bounds
+   if(state < ArraySize(g_stateDiscoveryTime))  // Validação simplificada
    {
       if(g_stateDiscoveryTime[state] == 0)  // Apenas se não foi descoberto antes
       {
@@ -2945,12 +2946,12 @@ void UpdateHUDLight()
          newDiscoveryText = StringFormat("   🆕 Novo: Estado #%d (%d novos)", 
                                         g_lastDiscoveredState, g_newStatesCount);
          // Piscar entre verde e amarelo usando segundos (mais eficiente)
-         static int lastBlinkSecond = -1;
-         int currentSecond = (int)(TimeCurrent() % 2);
-         if(lastBlinkSecond != currentSecond)
+         static int lastBlinkState = -1;
+         int currentBlinkState = ((int)TimeCurrent()) % 2;
+         if(lastBlinkState != currentBlinkState)
          {
-            lastBlinkSecond = currentSecond;
-            newDiscoveryColor = (currentSecond == 0) ? clrLimeGreen : clrYellow;
+            lastBlinkState = currentBlinkState;
+            newDiscoveryColor = (currentBlinkState == 0) ? clrLimeGreen : clrYellow;
          }
       }
       else
