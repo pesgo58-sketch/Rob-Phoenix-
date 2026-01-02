@@ -445,6 +445,14 @@ datetime g_lastTextExportTime = 0;
 int g_textExportCount = 0;
 
 // ======================================================================
+// ✅✅✅ VARIÁVEIS PARA SINCRONIZAÇÃO DE ESTADOS DESCOBERTOS NO HUD
+// ======================================================================
+datetime g_stateDiscoveryTime[];    // Timestamp quando cada estado foi descoberto
+int g_lastDiscoveredState = -1;     // Último estado descoberto
+datetime g_lastDiscoveryTime = 0;   // Timestamp da última descoberta
+int g_newStatesCount = 0;           // Contador de novos estados desde último update do HUD
+
+// ======================================================================
 // ✅✅✅ CORREÇÕES AGUDAS PARA O PROBLEMA DE ESTADOS TRAVADOS
 // ======================================================================
 
@@ -1188,6 +1196,12 @@ void SaveState()
    FileWriteInteger(handle, (int)g_totalDecayCycles);
    FileWriteInteger(handle, (int)g_totalBadStateResets);
    
+   // ✅ NOVO: Salvar informações de descoberta de estados
+   FileWriteArray(handle, g_stateDiscoveryTime);
+   FileWriteInteger(handle, (int)g_lastDiscoveredState);
+   FileWriteLong(handle, (long)g_lastDiscoveryTime);
+   FileWriteInteger(handle, (int)g_totalStatesDiscovered);
+   
    FileClose(handle);
    
    static datetime lastSave = 0;
@@ -1242,10 +1256,40 @@ void LoadState()
    g_totalDecayCycles = tempTotalDecayCycles;
    g_totalBadStateResets = tempTotalBadStateResets;
    
+   // ✅ NOVO: Carregar informações de descoberta de estados (com verificação de compatibilidade)
+   if(!FileIsEnding(handle))
+   {
+      FileReadArray(handle, g_stateDiscoveryTime);
+      g_lastDiscoveredState = FileReadInteger(handle);
+      g_lastDiscoveryTime = (datetime)FileReadLong(handle);
+      g_totalStatesDiscovered = FileReadInteger(handle);
+   }
+   else
+   {
+      // Arquivo antigo sem informação de descoberta
+      // Contar estados com visitas > 0 como estimativa conservadora
+      ArrayResize(g_stateDiscoveryTime, NUM_STATES);
+      ArrayInitialize(g_stateDiscoveryTime, 0);
+      g_lastDiscoveredState = -1;
+      g_lastDiscoveryTime = 0;
+      
+      // Estimar estados descobertos contando visitas não-zero
+      // (Executado apenas uma vez na migração de arquivo antigo)
+      int estimatedDiscovered = 0;
+      for(int i = 0; i < NUM_STATES; i++)
+      {
+         if(g_stateVisits[i] > 0) estimatedDiscovered++;
+      }
+      g_totalStatesDiscovered = estimatedDiscovered;
+      
+      Print("⚠️ Arquivo antigo detectado. Estados descobertos estimados: ", estimatedDiscovered);
+   }
+   
    FileClose(handle);
    
    Print("✅ Estados carregados da memória persistente");
    Print("📊 Estados ativos: ", g_activeStatesCount);
+   Print("📊 Estados descobertos: ", g_totalStatesDiscovered);
    Print("📊 Total visitas REAIS: ", ArraySum(g_stateVisits));
    Print("📊 Total perdas REAIS: ", ArraySum(g_stateLosses));
    Print("📊 Total vitórias REAIS: ", ArraySum(g_stateWins));
@@ -1272,36 +1316,78 @@ double CompressQValue(double value)
    return NormalizeDouble(value, (int)QValuePrecision);
 }
 
+// ======================================================================
+// ✅✅✅ FUNÇÃO DE SINCRONIZAÇÃO DE ESTADOS DESCOBERTOS
+// ======================================================================
+void SyncStateDiscovery(int state)
+{
+   if(state < 0 || state >= NUM_STATES) return;
+   
+   // Registrar tempo de descoberta
+   if(state < ArraySize(g_stateDiscoveryTime))  // Validação simplificada
+   {
+      if(g_stateDiscoveryTime[state] == 0)  // Apenas se não foi descoberto antes
+      {
+         g_stateDiscoveryTime[state] = TimeCurrent();
+         g_lastDiscoveredState = state;
+         g_lastDiscoveryTime = TimeCurrent();
+         g_newStatesCount++;
+         g_totalStatesDiscovered++;
+         
+         // Invalidar cache do HUD para forçar atualização
+         cachedVisitedStates = -1;
+         
+         // Log da descoberta
+         Print("🆕 NOVO ESTADO DESCOBERTO: ", state, 
+               " | Total descobertos: ", g_totalStatesDiscovered,
+               " | Progresso: ", DoubleToString((double)g_totalStatesDiscovered/NUM_STATES*100, 1), "%");
+      }
+   }
+}
+
 void AddActiveState(int state)
 {
    if(state < 0 || state >= NUM_STATES) return;
    
+   // Verificar se o estado já existe
+   bool stateExists = false;
    for(int i = 0; i < g_activeStatesCount; i++)
    {
-      if(g_activeStates[i] == state) return;
+      if(g_activeStates[i] == state) 
+      {
+         stateExists = true;
+         break;
+      }
    }
    
-   if(g_activeStatesCount < MaxMemoryStates)
+   // Se é um novo estado, registrar descoberta
+   if(!stateExists)
    {
-      g_activeStates[g_activeStatesCount] = state;
-      g_activeStatesCount++;
-   }
-   else
-   {
-      int oldestIndex = 0;
-      int oldestTime = INT_MAX;
-      
-      for(int i = 0; i < g_activeStatesCount; i++)
+      if(g_activeStatesCount < MaxMemoryStates)
       {
-         int stateIdx = g_activeStates[i];
-         if(g_stateLastUpdate[stateIdx] < oldestTime)
+         g_activeStates[g_activeStatesCount] = state;
+         g_activeStatesCount++;
+      }
+      else
+      {
+         int oldestIndex = 0;
+         int oldestTime = INT_MAX;
+         
+         for(int i = 0; i < g_activeStatesCount; i++)
          {
-            oldestTime = g_stateLastUpdate[stateIdx];
-            oldestIndex = i;
+            int stateIdx = g_activeStates[i];
+            if(g_stateLastUpdate[stateIdx] < oldestTime)
+            {
+               oldestTime = g_stateLastUpdate[stateIdx];
+               oldestIndex = i;
+            }
          }
+         
+         g_activeStates[oldestIndex] = state;
       }
       
-      g_activeStates[oldestIndex] = state;
+      // ✅ NOVO: Sincronizar descoberta do estado
+      SyncStateDiscovery(state);
    }
    
    g_stateLastUpdate[state] = g_totalTrades;
@@ -1486,6 +1572,10 @@ bool SaveBrainToFile(string filename)
    FileWriteInteger(h, (int)g_lastDecayTradeCount);
    FileWriteInteger(h, (int)g_totalDecayCycles);
    FileWriteInteger(h, (int)g_totalBadStateResets);
+   
+   // ✅ NOVO: Salvar informações de descoberta de estados
+   FileWriteInteger(h, (int)g_lastDiscoveredState);
+   FileWriteLong(h, (long)g_lastDiscoveryTime);
 
    FileClose(h);
    return true;
@@ -1607,9 +1697,23 @@ bool LoadBrainFromFile(string filename)
    g_totalDecayCycles = FileReadInteger(h);
    g_totalBadStateResets = FileReadInteger(h);
    
+   // ✅ NOVO: Carregar informações de descoberta de estados (com verificação de compatibilidade)
+   if(!FileIsEnding(h))
+   {
+      g_lastDiscoveredState = FileReadInteger(h);
+      g_lastDiscoveryTime = (datetime)FileReadLong(h);
+   }
+   else
+   {
+      // Arquivo antigo, usar valores padrão
+      g_lastDiscoveredState = -1;
+      g_lastDiscoveryTime = 0;
+   }
+   
    FileClose(h);
    
    Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
+   Print("📊 Estados descobertos: ", g_totalStatesDiscovered);
    Print("📊 Estados bloqueados carregados: ", CountBlockedStates());
    Print("📊 Ciclos de decay: ", g_totalDecayCycles);
    Print("📊 Estados resetados: ", g_totalBadStateResets);
@@ -2583,6 +2687,21 @@ void CreateHUDObjects()
       currentY += lineHeight;
    }
    
+   if(ObjectCreate(0, "HUD_NewDiscovery", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_COLOR, clrLimeGreen);
+      ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_NewDiscovery", OBJPROP_FONT, "Arial Bold");
+      ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_NewDiscovery", OBJPROP_TEXT, "");
+      hudObjects[hudObjectCount++] = "HUD_NewDiscovery";
+      currentY += lineHeight;
+   }
+   
    if(ObjectCreate(0, "HUD_Blocked", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -2812,6 +2931,38 @@ void UpdateHUDLight()
    // 🔧 CORREÇÃO: Converter double para string corretamente
    string newProgress = StringFormat("   [%s] (%.1f%%)", progressBar, progressPercent);
    ObjectSetString(0, "HUD_Progress", OBJPROP_TEXT, newProgress);
+   
+   // ✅ NOVO: Atualizar indicador de estados recém-descobertos
+   string newDiscoveryText = "";
+   color newDiscoveryColor = clrLimeGreen;
+   
+   if(g_lastDiscoveredState >= 0 && g_newStatesCount > 0)
+   {
+      datetime timeSinceDiscovery = TimeCurrent() - g_lastDiscoveryTime;
+      
+      // Mostrar por 30 segundos após descoberta
+      if(timeSinceDiscovery < 30)
+      {
+         newDiscoveryText = StringFormat("   🆕 Novo: Estado #%d (%d novos)", 
+                                        g_lastDiscoveredState, g_newStatesCount);
+         // Piscar entre verde e amarelo usando segundos (mais eficiente)
+         static int lastBlinkState = -1;
+         int currentBlinkState = ((int)TimeCurrent()) % 2;
+         if(lastBlinkState != currentBlinkState)
+         {
+            lastBlinkState = currentBlinkState;
+            newDiscoveryColor = (currentBlinkState == 0) ? clrLimeGreen : clrYellow;
+         }
+      }
+      else
+      {
+         // Resetar contador após exibição
+         g_newStatesCount = 0;
+      }
+   }
+   
+   ObjectSetString(0, "HUD_NewDiscovery", OBJPROP_TEXT, newDiscoveryText);
+   ObjectSetInteger(0, "HUD_NewDiscovery", OBJPROP_COLOR, newDiscoveryColor);
    
    double blockedPercent = visitedStates > 0 ? (double)blockedStates/visitedStates*100 : 0;
    string newBlocked = StringFormat("   Bloqueados: %d (%.1f%%)", blockedStates, blockedPercent);
@@ -5390,12 +5541,23 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    string activeInfo = "Estados ativos na memória: " + IntegerToString(g_activeStatesCount);
    FileWrite(file_handle, activeInfo);
    
+   string discoveredInfo = "Estados descobertos: " + IntegerToString(g_totalStatesDiscovered);
+   FileWrite(file_handle, discoveredInfo);
+   
+   if(g_lastDiscoveredState >= 0)
+   {
+      string lastDiscoveredInfo = "Último estado descoberto: #" + IntegerToString(g_lastDiscoveredState) + 
+                                 " em " + TimeToString(g_lastDiscoveryTime);
+      FileWrite(file_handle, lastDiscoveredInfo);
+   }
+   
    string blockedInfo = "Estados bloqueados: " + IntegerToString(CountBlockedStates());
    FileWrite(file_handle, blockedInfo);
    
-   double discoveryRate = (double)g_activeStatesCount / NUM_STATES * 100;
-   string discoveryInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
-   FileWrite(file_handle, discoveryInfo);
+   // Proteção contra divisão por zero
+   double discoveryRate = (NUM_STATES > 0) ? ((double)g_totalStatesDiscovered / NUM_STATES * 100) : 0.0;
+   string discoveryRateInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
+   FileWrite(file_handle, discoveryRateInfo);
    
    string decayInfo = "Ciclos de decay: " + IntegerToString(g_totalDecayCycles);
    FileWrite(file_handle, decayInfo);
@@ -5576,6 +5738,13 @@ int OnInit()
    
    ArrayResize(g_activeStates, MaxMemoryStates);
    g_activeStatesCount = 0;
+   
+   // ✅ NOVO: Inicializar array de descoberta de estados
+   ArrayResize(g_stateDiscoveryTime, NUM_STATES);
+   ArrayInitialize(g_stateDiscoveryTime, 0);
+   g_lastDiscoveredState = -1;
+   g_lastDiscoveryTime = 0;
+   g_newStatesCount = 0;
 
    LoadState();
 
