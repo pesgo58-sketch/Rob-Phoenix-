@@ -182,13 +182,14 @@ Chamada:
 - **Descrição**: Número mínimo de visitas antes de considerar bloquear um estado
 - **Localização**: Linha 58
 
-### MinVisitsForBlockDecision
-- **Tipo**: Variável
-- **Valor padrão**: 30
+### g_minVisitsForBlockDecision
+- **Tipo**: Variável global
+- **Valor padrão**: MIN_VISITS_FOR_BLOCK (30)
 - **Descrição**: Mínimo de visitas para decisões de bloqueio no sistema unificado
-- **Localização**: Linha 229
+- **Localização**: Linha ~231
+- **Inicialização**: `int g_minVisitsForBlockDecision = MIN_VISITS_FOR_BLOCK;`
 
-**Importante**: Estes dois valores devem ser mantidos iguais para consistência do sistema.
+**Importante**: Este valor é inicializado a partir da constante MIN_VISITS_FOR_BLOCK para garantir consistência. Não é um parâmetro input para evitar modificação acidental em runtime.
 
 ### BlockLossRateThreshold
 - **Tipo**: Input
@@ -237,14 +238,16 @@ O sistema agora valida automaticamente a cada hora:
 
 ### 4. Verificação de Cores
 
-Testar cada faixa de bloqueio:
+Testar cada faixa de bloqueio (percentual calculado sobre estados visitados):
 
-| Estados Bloqueados | % Esperado | Cor Esperada |
-|-------------------|------------|--------------|
-| 0                 | 0%         | Verde/Cyan   |
-| < 10% dos ativos  | < 10%      | Branco       |
-| 10-25% dos ativos | 10-25%     | Laranja      |
-| > 25% dos ativos  | > 25%      | Vermelho     |
+| Estados Bloqueados | % dos Visitados | Cor Esperada |
+|-------------------|-----------------|--------------|
+| 0                 | 0%              | Verde (HUD_SuccessColor) |
+| < 10% dos visitados | < 10%         | Branco (HUD_TextColor)   |
+| 10-25% dos visitados | 10-25%       | Laranja (HUD_WarningColor) |
+| > 25% dos visitados | > 25%         | Vermelho (HUD_ErrorColor)  |
+
+**Nota**: O percentual é calculado como `bloqueados / visitados * 100`, não como `bloqueados / ativos * 100`.
 
 ## Logs de Diagnóstico
 

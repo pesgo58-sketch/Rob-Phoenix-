@@ -226,10 +226,10 @@ input group "=== SISTEMA DE BLOQUEIO UNIFICADO ===";
 input bool   EnableUnifiedBlockingSystem = true;
 input double BlockLossRateThreshold = 0.75;  // Taxa de perda para bloquear (75% = 3 de 4 perdas)
 input double UnblockWinRateThreshold = 0.55;  // Taxa de vitória para desbloquear (55%)
-int MinVisitsForBlockDecision = 30;  // Mínimo de visitas antes de avaliar bloqueio
 
-// ✅ NOTA: MIN_VISITS_FOR_BLOCK é uma constante (linha 58) também configurada em 30
-// Ambos os valores devem ser consistentes para o correto funcionamento do sistema
+// ✅ NOTA: g_minVisitsForBlockDecision inicializado a partir de MIN_VISITS_FOR_BLOCK (linha 58)
+// Variável global ao invés de input para permitir ajuste em runtime se necessário
+int g_minVisitsForBlockDecision = MIN_VISITS_FOR_BLOCK;  // Inicializado com valor da constante
 
 // ======================================================================
 // ✅ CONFIGURAÇÕES DE EXPORTAÇÃO DE MEMÓRIA
@@ -967,7 +967,7 @@ void BlockState(int state)
     int visits = g_stateVisits[state];
     int losses = g_stateLosses[state];
     
-    if(visits < MinVisitsForBlockDecision)
+    if(visits < g_minVisitsForBlockDecision)
     {
         Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
         return;
@@ -984,7 +984,7 @@ void BlockState(int state)
               " | Visitas REAIS: ", visits, 
               " | Perdas REAIS: ", losses, 
               " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
+              " | Mínimo requerido: ", g_minVisitsForBlockDecision, " visitas");
         
         g_memoryDirty = true;
         
@@ -1035,7 +1035,7 @@ bool ShouldBlockState(int state)
     int visits = g_stateVisits[state];
     int losses = g_stateLosses[state];
     
-    if(visits < MinVisitsForBlockDecision) return false;
+    if(visits < g_minVisitsForBlockDecision) return false;
     
     double lossRate = (double)losses / (double)visits;
     
@@ -1051,7 +1051,7 @@ bool ShouldUnblockState(int state)
     
     int visits = g_stateVisits[state];
     
-    if(visits < MinVisitsForBlockDecision) return false;
+    if(visits < g_minVisitsForBlockDecision) return false;
     
     double winRate = CalculateWinRate(state);
     
@@ -2018,7 +2018,7 @@ void DebugBlockedStates()
          {
             blockedCount++;
             
-            if(winRate >= UnblockWinRateThreshold && g_stateVisits[state] >= MinVisitsForBlockDecision)
+            if(winRate >= UnblockWinRateThreshold && g_stateVisits[state] >= g_minVisitsForBlockDecision)
             {
                wronglyBlocked++;
                PrintFormat("❌❌❌ ERRO GRAVE: Estado %d BLOQUEADO mas tem WIN RATE ALTA: %.1f%% | Visitas: %d", 
@@ -2029,7 +2029,7 @@ void DebugBlockedStates()
                   UnblockState(state);
                }
             }
-            else if(lossRate >= BlockLossRateThreshold && g_stateVisits[state] >= MinVisitsForBlockDecision)
+            else if(lossRate >= BlockLossRateThreshold && g_stateVisits[state] >= g_minVisitsForBlockDecision)
             {
                correctlyBlocked++;
                PrintFormat("⛔ Estado %d BLOQUEADO CORRETAMENTE: %.1f%% win | Visitas: %d", 
@@ -2103,7 +2103,7 @@ void DebugTradeCounting()
          }
          
          // Verificar estados que deveriam estar bloqueados
-         if(g_stateVisits[s] >= MinVisitsForBlockDecision)
+         if(g_stateVisits[s] >= g_minVisitsForBlockDecision)
          {
             double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
             if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
@@ -2536,7 +2536,7 @@ void OptimizeParametersDynamically()
    // ✅ AJUSTAR LIMITES DE BLOQUEIO
    if(g_activeStatesCount > 100)
    {
-      MinVisitsForBlockDecision = 8; // Exigir mais visitas
+      g_minVisitsForBlockDecision = 8; // Exigir mais visitas
       Print("🛡️ Mínimo visitas para bloqueio ajustado para 8");
    }
    
@@ -3057,14 +3057,16 @@ void ValidateHUDBlockedStatesSync()
       Print("📺 Cor HUD: ", ColorToStringCustom(hudColor));
       
       // Verificar cor está correta baseada no percentual
-      int activeStates = g_activeStatesCount;
-      double blockedPercent = activeStates > 0 ? (double)actualBlockedCount/activeStates*100 : 0;
+      // ✅ CORREÇÃO: Usar visitedStates ao invés de activeStates para consistência com UpdateHUDLight
+      int visitedStates = cachedVisitedStates >= 0 ? cachedVisitedStates : g_activeStatesCount;
+      double blockedPercent = visitedStates > 0 ? (double)actualBlockedCount/visitedStates*100 : 0;
       
-      color expectedColor = clrWhite;
-      if(actualBlockedCount == 0) expectedColor = clrCyan;
-      else if(blockedPercent < 10.0) expectedColor = clrWhite;
-      else if(blockedPercent < 25.0) expectedColor = clrOrange;
-      else expectedColor = clrRed;
+      // ✅ CORREÇÃO: Usar constantes HUD ao invés de cores fixas
+      color expectedColor = HUD_TextColor;
+      if(actualBlockedCount == 0) expectedColor = HUD_SuccessColor;
+      else if(blockedPercent < 10.0) expectedColor = HUD_TextColor;
+      else if(blockedPercent < 25.0) expectedColor = HUD_WarningColor;
+      else expectedColor = HUD_ErrorColor;
       
       if(hudColor == expectedColor)
       {
@@ -3094,18 +3096,16 @@ void ValidateBlockingParameters()
    
    Print("📋 Configuração atual:");
    Print("   MIN_VISITS_FOR_BLOCK (constante): ", MIN_VISITS_FOR_BLOCK);
-   Print("   MinVisitsForBlockDecision (variável): ", MinVisitsForBlockDecision);
+   Print("   g_minVisitsForBlockDecision (variável): ", g_minVisitsForBlockDecision);
    
-   // Verificar consistência e forçar sincronização se necessário
-   if(MIN_VISITS_FOR_BLOCK != MinVisitsForBlockDecision)
+   // Verificar consistência - valores devem ser iguais
+   if(MIN_VISITS_FOR_BLOCK != g_minVisitsForBlockDecision)
    {
       Print("⚠️ AVISO: Valores inconsistentes!");
       Print("   Isso pode causar comportamento inesperado");
-      Print("   Sincronizando MinVisitsForBlockDecision com MIN_VISITS_FOR_BLOCK...");
-      
-      // ✅ CORREÇÃO AUTOMÁTICA: Forçar consistência
-      MinVisitsForBlockDecision = MIN_VISITS_FOR_BLOCK;
-      Print("✅ MinVisitsForBlockDecision ajustado para: ", MinVisitsForBlockDecision);
+      Print("   NOTA: g_minVisitsForBlockDecision deve ser inicializado com MIN_VISITS_FOR_BLOCK");
+      Print("   Valor esperado: ", MIN_VISITS_FOR_BLOCK);
+      Print("   Valor atual: ", g_minVisitsForBlockDecision);
    }
    else
    {
@@ -3113,21 +3113,21 @@ void ValidateBlockingParameters()
    }
    
    // Verificar se o valor é razoável
-   if(MinVisitsForBlockDecision < 5)
+   if(g_minVisitsForBlockDecision < 5)
    {
-      Print("⚠️ AVISO: Limite muito baixo (", MinVisitsForBlockDecision, ")");
+      Print("⚠️ AVISO: Limite muito baixo (", g_minVisitsForBlockDecision, ")");
       Print("   Estados podem ser bloqueados prematuramente");
       Print("   Recomendação: Usar valores entre 20-50");
    }
-   else if(MinVisitsForBlockDecision > 100)
+   else if(g_minVisitsForBlockDecision > 100)
    {
-      Print("⚠️ AVISO: Limite muito alto (", MinVisitsForBlockDecision, ")");
+      Print("⚠️ AVISO: Limite muito alto (", g_minVisitsForBlockDecision, ")");
       Print("   Sistema pode demorar demais para bloquear estados ruins");
       Print("   Recomendação: Usar valores entre 20-50");
    }
    else
    {
-      Print("✅ Valor adequado (", MinVisitsForBlockDecision, ")");
+      Print("✅ Valor adequado (", g_minVisitsForBlockDecision, ")");
    }
    
    Print("");
@@ -3470,7 +3470,7 @@ void UpdateQ(int state, int action, double reward)
    }
    
    // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
-   if(EnableUnifiedBlockingSystem && g_stateVisits[state] >= MinVisitsForBlockDecision)
+   if(EnableUnifiedBlockingSystem && g_stateVisits[state] >= g_minVisitsForBlockDecision)
    {
       double winRate = CalculateWinRate(state);
       
@@ -5115,7 +5115,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             g_stateLosses[g_lastTradeState]++;
             Print("❌❌❌ PERDA REGISTRADA para estado ", g_lastTradeState);
             
-            if(EnableUnifiedBlockingSystem && g_stateVisits[g_lastTradeState] >= MinVisitsForBlockDecision)
+            if(EnableUnifiedBlockingSystem && g_stateVisits[g_lastTradeState] >= g_minVisitsForBlockDecision)
             {
                EvaluateAndUpdateBlockState(g_lastTradeState);
             }
