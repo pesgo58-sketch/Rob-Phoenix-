@@ -658,7 +658,7 @@ void ResetBadStatesEnhanced()
    
    for(int s = 0; s < NUM_STATES; s++)
    {
-      if(g_stateVisits[s] >= 5) // Mínimo de 5 visitas
+      if(g_stateVisits[s] >= MinVisitsForBlockDecision) // Usar MinVisitsForBlockDecision
       {
          double winRate = CalculateWinRate(s);
          double lossRate = 1.0 - winRate;
@@ -667,20 +667,20 @@ void ResetBadStatesEnhanced()
          bool shouldReset = false;
          string reason = "";
          
-         if(lossRate > 0.75 && g_stateVisits[s] >= 8)
+         if(lossRate > 0.75 && g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
             shouldReset = true;
             reason = "Loss rate > 75%";
          }
-         else if(winRate < 0.20 && g_stateVisits[s] >= 10)
+         else if(winRate < 0.20 && g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
             shouldReset = true;
             reason = "Win rate < 20%";
          }
-         else if(g_stateVisits[s] >= 15 && winRate == 0.0)
+         else if(g_stateVisits[s] >= MinVisitsForBlockDecision && winRate == 0.0)
          {
             shouldReset = true;
-            reason = "15+ visitas, 0 vitórias";
+            reason = "Visitas suficientes, 0 vitórias";
          }
          
          if(shouldReset)
@@ -714,7 +714,7 @@ void ResetBadStatesEnhanced()
          }
          
          // ✅ DESBLOQUEAR ESTADOS BONS
-         if(g_stateBlocked[s] && winRate >= 0.35 && g_stateVisits[s] >= 5)
+         if(g_stateBlocked[s] && winRate >= 0.35 && g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
             g_stateBlocked[s] = false;
             statesUnblocked++;
@@ -2359,17 +2359,17 @@ void OverhaulBlockingSystem()
          bool shouldBeBlocked = false;
          
          // 1. Muito ruim com histórico suficiente
-         if(g_stateVisits[state] >= 10 && winRate < 0.20)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.20)
          {
             shouldBeBlocked = true;
          }
-         // 2. Catastrófico mesmo com menos visitas
-         else if(g_stateVisits[state] >= 5 && winRate < 0.10)
+         // 2. Catastrófico mesmo com histórico mínimo
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)
          {
             shouldBeBlocked = true;
          }
          // 3. Nunca ganhou com visitas significativas
-         else if(g_stateVisits[state] >= 8 && winRate == 0.0)
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0)
          {
             shouldBeBlocked = true;
          }
@@ -2378,7 +2378,7 @@ void OverhaulBlockingSystem()
          bool shouldBeUnblocked = false;
          
          // 1. Performance aceitável
-         if(g_stateVisits[state] >= 5 && winRate >= 0.30)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate >= 0.30)
          {
             shouldBeUnblocked = true;
          }
@@ -2434,10 +2434,10 @@ void IntelligentPartialReset()
       {
          double winRate = CalculateWinRate(state);
          
-         // ✅ CRITÉRIOS PARA RESET COMPLETO
-         if((g_stateVisits[state] >= 10 && winRate < 0.15) || // Muito ruim
-            (g_stateVisits[state] >= 5 && winRate == 0.0) ||  // Nunca ganhou
-            (g_stateVisits[state] > 20 && winRate < 0.25))    // Histórico longo ruim
+         // ✅ CRITÉRIOS PARA RESET COMPLETO (usar MinVisitsForBlockDecision)
+         if((g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15) || // Muito ruim
+            (g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0) ||  // Nunca ganhou
+            (g_stateVisits[state] > MinVisitsForBlockDecision && winRate < 0.25))    // Histórico longo ruim
          {
             // Reset completo
             g_stateVisits[state] = 0;
@@ -2453,7 +2453,7 @@ void IntelligentPartialReset()
             statesReset++;
          }
          // ✅ RESET PARCIAL PARA ESTADOS MÉDIOS
-         else if(g_stateVisits[state] >= 8 && winRate < 0.30)
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.30)
          {
             // Manter 30% da memória
             g_stateVisits[state] = (int)(g_stateVisits[state] * 0.3);
@@ -3289,8 +3289,8 @@ void UpdateQ(int state, int action, double reward)
    {
       double winRate = CalculateWinRate(state);
       
-      // Só bloquear se realmente for muito ruim
-      if(winRate < 0.25 && g_stateVisits[state] >= 8)
+      // Só bloquear se realmente for muito ruim - SEM verificação adicional de visitas
+      if(winRate < 0.25)
       {
          g_stateBlocked[state] = true;
          Print("⛔ Estado ", state, " bloqueado - Win rate muito baixa: ", 
@@ -3469,9 +3469,9 @@ int ChooseAction(int state)
    
    double nopQ = g_Q[state * NUM_ACTIONS + 0];
    
-   // ⚠️ CORREÇÃO: Tornar NOP mais atrativo para estados ruins
+   // ⚠️ CORREÇÃO: Tornar NOP mais atrativo para estados ruins - usar MinVisitsForBlockDecision
    double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= 5 && winRate < 0.3)
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.3)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (estado ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
@@ -3804,7 +3804,7 @@ double GetStateQuality(int state)
    
    double quality = bestTradeQ / 10.0;
    
-   if(g_stateVisits[state] >= 5)
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision)
    {
       double winRate = CalculateWinRate(state);
       double lossRate = 1.0 - winRate;
@@ -3814,7 +3814,7 @@ double GetStateQuality(int state)
          quality -= (lossRate - 0.6) * 3.0;
       }
       
-      if(winRate > 0.7 && g_stateVisits[state] >= 10)
+      if(winRate > 0.7 && g_stateVisits[state] >= MinVisitsForBlockDecision)
       {
          quality += (winRate - 0.7) * 2.0;
       }
