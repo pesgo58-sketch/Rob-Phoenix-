@@ -191,6 +191,9 @@ input double UltraQualityThreshold = 0.8;        // Limiar para entrada de quali
 input double SmartLotMultiplier    = 1.8;        // Multiplicador para entradas de alta qualidade
 input double UltraLotMultiplier    = 3.0;        // Multiplicador para entradas de qualidade ultra
 input double MaxAllowedLot         = 1.0;        // Tamanho máximo permitido de lote
+input double MinQualityThreshold   = -0.5;       // Limiar mínimo de qualidade (abaixo disso, cancela trade)
+input double VolumeQualityBonus    = 0.2;        // Multiplicador para bonus de volume na qualidade
+input double MaxVolumeBonus        = 0.3;        // Bonus máximo que volume pode adicionar à qualidade
 
 // ✅ CONTROLE DE TEMPO ENTRE TRADES
 input int    MinMinutesBetweenTrades = 3;
@@ -3595,9 +3598,10 @@ void ExecuteAction(int action, int state)
       else if(quality < -0.3)
       {
          Print("⚠️⚠️ SETUP NEGATIVO DETECTADO - Considerando cancelar trade");
-         if(quality < -0.5)
+         if(quality < MinQualityThreshold)
          {
-            Print("⛔ TRADE CANCELADO - Qualidade muito baixa: ", quality);
+            Print("⛔ TRADE CANCELADO - Qualidade muito baixa: ", DoubleToString(quality, 3), 
+                  " (limiar: ", DoubleToString(MinQualityThreshold, 2), ")");
             g_statusMessage = "⛔ Setup Negativo - Trade Cancelado";
             UpdateQ_NOP(state);
             return;
@@ -3824,9 +3828,9 @@ double GetStateQuality(int state)
    if(UseRealVolumeFilter && g_volumeMultiplier > MinVolumeMultiplier)
    {
       // Volume acima do mínimo é um sinal positivo
-      double volumeBonus = (g_volumeMultiplier - MinVolumeMultiplier) * 0.2;
+      double volumeBonus = (g_volumeMultiplier - MinVolumeMultiplier) * VolumeQualityBonus;
       // Limitar o bonus para não dominar a qualidade
-      if(volumeBonus > 0.3) volumeBonus = 0.3;
+      if(volumeBonus > MaxVolumeBonus) volumeBonus = MaxVolumeBonus;
       quality += volumeBonus;
       
       // Log apenas quando bonus significativo
@@ -3893,8 +3897,9 @@ int GetVolumeBucket()
 {
    if(!UseRealVolumeFilter) return 1;    // Volume normal (default)
    
-   if(g_volumeMultiplier < 0.7) return 0;  // Volume baixo
-   else return 1;                         // Volume normal/alto
+   // Usa MinVolumeMultiplier como referência para classificação
+   if(g_volumeMultiplier < MinVolumeMultiplier) return 0;  // Volume baixo
+   else return 1;                                           // Volume normal/alto
 }
 
 // ✅ Função para calcular bucket de tempo

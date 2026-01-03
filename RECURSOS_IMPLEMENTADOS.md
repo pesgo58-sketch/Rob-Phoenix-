@@ -21,6 +21,9 @@ O robô aumenta automaticamente o tamanho do lote quando identifica entradas de 
 | `SmartLotMultiplier` | double | 1.8 | Multiplicador aplicado ao lote base em entradas de alta qualidade |
 | `UltraLotMultiplier` | double | 3.0 | Multiplicador aplicado ao lote base em entradas de qualidade ultra |
 | `MaxAllowedLot` | double | 1.0 | Tamanho máximo permitido de lote |
+| `MinQualityThreshold` | double | -0.5 | Qualidade mínima aceitável (abaixo disso, cancela trade) |
+| `VolumeQualityBonus` | double | 0.2 | Multiplicador para calcular bônus de volume na qualidade |
+| `MaxVolumeBonus` | double | 0.3 | Bônus máximo que volume pode adicionar à qualidade |
 
 ### Como Funciona
 
@@ -109,8 +112,8 @@ O volume é integrado diretamente como um indicador na análise de entradas do r
 3. **Influência na Qualidade da Entrada** (função `GetStateQuality`)
    ```
    SE UseRealVolumeFilter E g_volumeMultiplier > MinVolumeMultiplier:
-      volumeBonus = (g_volumeMultiplier - MinVolumeMultiplier) × 0.2
-      volumeBonus = min(volumeBonus, 0.3)  // Limita para não dominar
+      volumeBonus = (g_volumeMultiplier - MinVolumeMultiplier) × VolumeQualityBonus
+      volumeBonus = min(volumeBonus, MaxVolumeBonus)  // Limita para não dominar
       quality += volumeBonus
    ```
 
@@ -133,10 +136,12 @@ O volume é integrado diretamente como um indicador na análise de entradas do r
 VolumeAtual: 5000
 VolumeMédio: 2500
 MinVolumeMultiplier: 0.5
+VolumeQualityBonus: 0.2
+MaxVolumeBonus: 0.3
 
 → g_volumeMultiplier = 5000 / 2500 = 2.0
 → Volume > (0.5 × 1.5) = 0.75 ✓
-→ volumeBonus = (2.0 - 0.5) × 0.2 = 0.3
+→ volumeBonus = (2.0 - 0.5) × 0.2 = 0.3 (limitado a MaxVolumeBonus)
 → "✅ Volume FORTE detectado (2.00x) - Sinal positivo para entrada!"
 → Quality aumenta em +0.3
 ```
