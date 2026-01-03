@@ -650,8 +650,9 @@ void ApplyStateDecay()
       {
          totalMemoryBefore += g_stateVisits[s];
          
-         // Aplicar decay somente em estados com histórico significativo
-         if(g_stateVisits[s] > 10)
+         // Aplicar decay somente em estados com histórico muito significativo
+         // ✅ CORREÇÃO: Aumentado de >10 para >50 para evitar cap artificial em 10 visitas
+         if(g_stateVisits[s] > 50)
          {
             // ✅ CORREÇÃO: Decay deve REMOVER X%, não MANTER X%
             // Se DecayFactor = 0.05 (5%), deve manter 95% (1.0 - 0.05)
@@ -3219,12 +3220,9 @@ void UpdateQ(int state, int action, double reward)
    g_qUpdatesSinceSave++;
    g_totalQUpdates++;
    
-   // ✅ DECAY PERIÓDICO
-   if(g_totalTrades - g_lastDecayTradeCount >= 500)
-   {
-      ApplyStateDecay();
-      g_lastDecayTradeCount = g_totalTrades;
-   }
+   // ✅ DECAY PERIÓDICO REMOVIDO
+   // Decay é aplicado apenas pela manutenção periódica (hourly)
+   // para evitar aplicação excessiva que limitava visitas
    
    // ✅ SAVE PERIÓDICO
    if(g_qUpdatesSinceSave >= 3)
