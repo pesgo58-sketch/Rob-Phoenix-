@@ -465,14 +465,15 @@ static int g_divisionIntWarningsSkipped = 0;
 // Função SafeDivide: Previne divisão por zero em todas as operações
 double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
 {
-   if(denominator == 0.0 || MathAbs(denominator) < DIVISION_EPSILON)
+   if(MathAbs(denominator) < DIVISION_EPSILON)
    {
       // Rate limiter: logar no máximo 1 vez por segundo
       datetime currentTime = TimeCurrent();
       if(currentTime - g_lastDivisionWarningTime >= 1)
       {
-         Print("⚠️ DIVISÃO POR ZERO DETECTADA E PREVENIDA! Numerador: ", DoubleToString(numerator, 8), 
-               " | Denominador: ", DoubleToString(denominator, 8), " | Retornando: ", DoubleToString(defaultValue, 8));
+         string msg = StringFormat("⚠️ DIVISÃO POR ZERO DETECTADA E PREVENIDA! Numerador: %.8f | Denominador: %.8f | Retornando: %.8f", 
+                                  numerator, denominator, defaultValue);
+         Print(msg);
          
          if(g_divisionWarningsSkipped > 0)
          {
@@ -502,8 +503,9 @@ double SafeDivideInt(int numerator, int denominator, double defaultValue = 0.0)
       datetime currentTime = TimeCurrent();
       if(currentTime - g_lastDivisionIntWarningTime >= 1)
       {
-         Print("⚠️ DIVISÃO POR ZERO (INT) DETECTADA E PREVENIDA! Numerador: ", IntegerToString(numerator), 
-               " | Denominador: ", IntegerToString(denominator), " | Retornando: ", DoubleToString(defaultValue, 8));
+         string msg = StringFormat("⚠️ DIVISÃO POR ZERO (INT) DETECTADA E PREVENIDA! Numerador: %d | Denominador: %d | Retornando: %.8f", 
+                                  numerator, denominator, defaultValue);
+         Print(msg);
          
          if(g_divisionIntWarningsSkipped > 0)
          {
@@ -3030,19 +3032,20 @@ bool CheckRealVolume()
    
    g_currentVolume = volumeArray[barsToCopy - 1];
    
-   long sumVol = 0;
-   for(int i = 0; i < barsToCopy - 1; i++)
-   {
-      sumVol += volumeArray[i];
-   }
-   
-   // Se barsToCopy == 1, usar volume atual como média
-   if(barsToCopy <= 1)
+   // Se não há dados históricos suficientes, usar volume atual como média
+   if(barsToCopy < 2)
    {
       g_volumeAverage = g_currentVolume;
    }
    else
    {
+      // Calcular média do volume histórico
+      long sumVol = 0;
+      for(int i = 0; i < barsToCopy - 1; i++)
+      {
+         sumVol += volumeArray[i];
+      }
+      
       // Usar SafeDivide com doubles para evitar overflow
       g_volumeAverage = (long)SafeDivide((double)sumVol, (double)(barsToCopy - 1), (double)g_currentVolume);
    }
