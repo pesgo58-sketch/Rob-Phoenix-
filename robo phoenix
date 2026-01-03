@@ -458,7 +458,10 @@ int g_textExportCount = 0;
 //+------------------------------------------------------------------+
 double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
 {
-   if(denominator == 0.0 || MathAbs(denominator) < 0.0000001)
+   // Use DBL_EPSILON scaled by magnitude for more appropriate zero detection
+   double epsilon = MathMax(DBL_EPSILON * 1000, 1e-10);
+   
+   if(denominator == 0.0 || MathAbs(denominator) < epsilon)
    {
       static datetime lastWarningTime = 0;
       datetime currentTime = TimeCurrent();
@@ -3933,18 +3936,14 @@ int GetCurrentState()
    // ✅ Cálculo da distância da MA
    double maDistance = 0;
    double atrValue = atr[0];
-   if(atrValue > 0)
-      maDistance = SafeDivide((price - ma[0]), atrValue, 0.0);
-   else
-      maDistance = SafeDivide((price - ma[0]), (point * 10), 0.0);
+   // Use atrValue if valid, otherwise fallback to point * 10
+   double divisor = (atrValue > 0) ? atrValue : (point * 10);
+   maDistance = SafeDivide((price - ma[0]), divisor, 0.0);
    
    // ✅ Cálculo da posição nas Bollinger Bands
    double bbPosition = 0;
    double bbRange = bb_upper[0] - bb_lower[0];
-   if(bbRange > 0)
-      bbPosition = SafeDivide((price - bb_lower[0]), bbRange, 0.5);
-   else
-      bbPosition = 0.5;
+   bbPosition = SafeDivide((price - bb_lower[0]), bbRange, 0.5);
    
    // ✅ Calcular buckets otimizados
    int maBucket = GetMADistanceBucket(maDistance);
