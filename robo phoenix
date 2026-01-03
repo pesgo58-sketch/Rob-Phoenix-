@@ -180,7 +180,7 @@ double LearningRate                   = 0.03;         // Taxa de aprendizado (fi
 input group "──── 🎲 EXPLORAÇÃO ────";
 input double InitialExplorationRate   = 0.40;         // Taxa inicial de exploração (40%)
 input double MinExplorationRate       = 0.20;         // Taxa mínima de exploração (20%)
-input double ExplorationDecay         = 0.995;        // Decay da exploração
+input double ExplorationDecay         = 0.999;        // Decay da exploração (0.1% por vitória)
 input int    MinStateVisitsToTrade    = 2;            // Visitas mínimas para operar
 
 input group "──── 🔄 SISTEMA HÍBRIDO ────";
@@ -3306,12 +3306,8 @@ int ChooseAction(int state)
    // Para estados conhecidos, usar taxa de exploração normal
    double eps = g_currentExplorationRate;
    
-   // ⚠️ GARANTIR que não fique preso em exploração
-   if(g_currentExplorationRate > 0.7 && g_totalTrades > 100)
-   {
-      eps = 0.7; // Forçar redução
-      g_currentExplorationRate = 0.7;
-   }
+   // ⚠️ CAP REMOVIDO - Permitir exploração natural sem limite artificial
+   // (Cap de 70% após 100 trades removido para permitir descoberta adequada de estados)
 
    if(((double)MathRand() / 32767.0) < eps) 
    {
