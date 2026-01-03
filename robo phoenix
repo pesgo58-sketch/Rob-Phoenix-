@@ -57,6 +57,11 @@ CHistoryOrderInfo historyOrderInfo;
 // ============================================================
 const int MIN_VISITS_FOR_BLOCK = 30;
 
+// ✅ CONSTANTE PARA BOLLINGER BANDS
+// Quando a banda tem range zero (inválida), usar 0.5 (meio da banda)
+// como valor neutro, indicando que o preço está no centro
+const double BB_NEUTRAL_POSITION = 0.5;
+
 // Persistência
 #define FILE_MAGIC   0x50484F45
 #define FILE_VERSION 3073
@@ -1144,6 +1149,18 @@ void AutoUnblockGoodStates()
 // ======================================================================
 // ✅ FUNÇÃO SAFEDIVIDE - PROTEÇÃO GLOBAL CONTRA DIVISÃO POR ZERO
 // ======================================================================
+// Função de divisão segura que previne erros de divisão por zero
+// Parâmetros:
+//   numerator - O valor a ser dividido (numerador)
+//   denominator - O valor pelo qual dividir (denominador)
+//   defaultValue - Valor a retornar se divisão não for possível (padrão: 0.0)
+// Retorna:
+//   - O resultado da divisão se denominador válido
+//   - defaultValue se denominador for zero ou muito próximo de zero
+// Exemplos:
+//   SafeDivide(10.0, 2.0, 0.0) retorna 5.0
+//   SafeDivide(10.0, 0.0, 0.0) retorna 0.0 (valor padrão)
+//   SafeDivide(price - lower, range, 0.5) retorna 0.5 se range for zero
 double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
 {
    if(denominator == 0.0 || MathAbs(denominator) < 0.0000001)
@@ -3035,6 +3052,14 @@ void ManageDynamicTrailingStop()
          SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      
+      // Validar point antes de usar - valor zero indica problema de configuração
+      if(point <= 0 || point < 0.0000001)
+      {
+         Print("⚠️ ERRO: Point inválido para símbolo ", _Symbol, ": ", point);
+         continue;
+      }
+      
       double currentProfit = isBuy ? 
          SafeDivide(currentPrice - entryPrice, point, 0.0) : 
          SafeDivide(entryPrice - currentPrice, point, 0.0);
@@ -3926,9 +3951,9 @@ int GetCurrentState()
    double bbPosition = 0;
    double bbRange = bb_upper[0] - bb_lower[0];
    if(bbRange > 0)
-      bbPosition = SafeDivide(price - bb_lower[0], bbRange, 0.5);
+      bbPosition = SafeDivide(price - bb_lower[0], bbRange, BB_NEUTRAL_POSITION);
    else
-      bbPosition = 0.5;
+      bbPosition = BB_NEUTRAL_POSITION;  // Usar posição neutra se range inválido
    
    // ✅ Calcular buckets otimizados
    int maBucket = GetMADistanceBucket(maDistance);
@@ -4441,7 +4466,7 @@ bool ValidateWithBollingerBands(bool isBuy)
    
    if(bb_range <= 0) return false;
    
-   double bb_position = SafeDivide(price - bb_lower[0], bb_range, 0.5);
+   double bb_position = SafeDivide(price - bb_lower[0], bb_range, BB_NEUTRAL_POSITION);
    
    if(isBuy)
    {
