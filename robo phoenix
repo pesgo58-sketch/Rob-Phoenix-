@@ -2050,7 +2050,7 @@ void DebugTradeCounting()
    Print("Total Losses: ", g_totalLosses);
    Print("Soma Wins+Losses: ", g_totalWins + g_totalLosses);
    Print("Diferença (NOPs): ", g_totalTrades - (g_totalWins + g_totalLosses));
-   Print("Win Rate: ", g_totalTrades > 0 ? DoubleToString((double)g_totalWins/g_totalTrades*100, 1) : "0.0", "%");
+   Print("Win Rate: ", g_totalTrades > 0 ? DoubleToString(SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0)*100, 1) : "0.0", "%");
    
    int estadosComProblema = 0;
    int totalVisitas = 0;
@@ -2107,7 +2107,7 @@ void DebugTradeCounting()
    Print("Total vitórias em todos estados: ", totalVitórias);
    Print("Total perdas em todos estados: ", totalPerdas);
    Print("Taxa de vitória global estados: ", totalVisitas > 0 ? 
-         DoubleToString((double)totalVitórias/totalVisitas*100, 1) : "0.0", "%");
+         DoubleToString(SafeDivide((double)totalVitórias, (double)totalVisitas, 0.0)*100, 1) : "0.0", "%");
    
    if(estadosComProblema > 0)
    {
@@ -2494,7 +2494,7 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
    
    if(currentWinRate < 0.25)
    {
@@ -4275,11 +4275,11 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
    if(UseFixedSL && slPrice > 0)
    {
       double slDistance = MathAbs(entryPrice - slPrice);
-      double slPoints = slDistance / point;
+      double slPoints = SafeDivide(slDistance, point, 0.0);
       
       long minStopsLevel = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minSL = minStopsLevel * point;
-      double minSLPoints = minSL / point;
+      double minSLPoints = SafeDivide(minSL, point, 0.0);
       
       Print("SL Distance: ", DoubleToString(slDistance, 5), " (", DoubleToString(slPoints, 0), " pontos)");
       Print("Min SL required: ", DoubleToString(minSL, 5), " (", DoubleToString(minSLPoints, 0), " pontos)");
@@ -4313,11 +4313,11 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
    if(UseFixedTP && tpPrice > 0)
    {
       double tpDistance = MathAbs(entryPrice - tpPrice);
-      double tpPoints = tpDistance / point;
+      double tpPoints = SafeDivide(tpDistance, point, 0.0);
       
       long minStopsLevel = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minTP = minStopsLevel * point;
-      double minTPPoints = minTP / point;
+      double minTPPoints = SafeDivide(minTP, point, 0.0);
       
       Print("TP Distance: ", DoubleToString(tpDistance, 5), " (", DoubleToString(tpPoints, 0), " pontos)");
       Print("Min TP required: ", DoubleToString(minTP, 5), " (", DoubleToString(minTPPoints, 0), " pontos)");
@@ -5198,7 +5198,7 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
       
       if(currentWinRate < 0.20)
       {
@@ -5411,7 +5411,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    string blockedInfo = "Estados bloqueados: " + IntegerToString(CountBlockedStates());
    FileWrite(file_handle, blockedInfo);
    
-   double discoveryRate = (double)g_activeStatesCount / NUM_STATES * 100;
+   double discoveryRate = SafeDivide((double)g_activeStatesCount, (double)NUM_STATES, 0.0) * 100;
    string discoveryInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
    FileWrite(file_handle, discoveryInfo);
    
@@ -5432,8 +5432,8 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       
       if(g_totalTrades > 0)
       {
-         double winRate = (double)g_totalWins/g_totalTrades*100;
-         double lossRate = (double)g_totalLosses/g_totalTrades*100;
+         double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
+         double lossRate = SafeDivide((double)g_totalLosses, (double)g_totalTrades, 0.0) * 100;
          
          string winsInfo = "  Vitórias REAIS: " + IntegerToString(g_totalWins) + 
                           " (" + DoubleToString(winRate, 1) + "%)";
@@ -5510,7 +5510,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       int visits = sortedStates[i][1];
       int losses = g_stateLosses[state];
       int wins = g_stateWins[state];
-      double winRate = visits > 0 ? (double)wins / visits * 100 : 0;
+      double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
       bool isBlocked = g_stateBlocked[state];
       
       string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
