@@ -230,8 +230,8 @@ input bool   ExportMemoryToTextFile   = true;         // Exportar para texto
 input int    TextExportIntervalMinutes = 60;          // Intervalo export texto (min)
 
 input group "──── 📄 EXPORTAÇÃO TEXTO ────";
-input bool   EnableTextExport         = true;         // Habilitar export texto
-input int    TextExportMinInterval    = 30;           // Intervalo mínimo (min)
+input bool   EnableTextExport         = false;        // Habilitar export texto (apenas binário recomendado)
+input int    TextExportMinInterval    = 60;           // Intervalo mínimo (min)
 input bool   ExportAllStates          = false;        // Exportar todos estados
 input bool   IncludeQValues           = true;         // Incluir Q-values
 input bool   IncludeStatistics        = true;         // Incluir estatísticas
@@ -4999,16 +4999,21 @@ void ForceTextExport()
 // ======================================================================
 void CreateDailySummaryReport()
 {
-   string filename = "Phoenix_Files/Text_Logs/Daily_Summary_" + 
-                     TimeToString(TimeCurrent(), TIME_DATE) + "_CORRIGIDO.txt";
+   // ✅ OTIMIZAÇÃO: Usar arquivo consolidado de logs ao invés de criar múltiplos arquivos diários
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_Daily_Log_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
    
    if(!CreateDirectoryForFile(filename)) return;
    
-   int file_handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(file_handle == INVALID_HANDLE) return;
    
+   // Posicionar no final para append
+   FileSeek(file_handle, 0, SEEK_END);
+   
+   FileWrite(file_handle, "");
    FileWrite(file_handle, "================================================================");
-   FileWrite(file_handle, "RELATÓRIO DIÁRIO - PHOENIX TRADER v307F SUPER CORRIGIDO");
+   FileWrite(file_handle, "RELATÓRIO DIÁRIO - PHOENIX TRADER v307F");
    FileWrite(file_handle, "Data: " + TimeToString(TimeCurrent(), TIME_DATE));
    FileWrite(file_handle, "================================================================");
    FileWrite(file_handle, "");
@@ -5248,7 +5253,7 @@ void OnTick()
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (ATUALIZADA)
+// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (OTIMIZADA - ARQUIVO ÚNICO)
 // ======================================================================
 bool ExportMemoryToTextFileFunc(bool forceExport = false)
 {
@@ -5261,9 +5266,9 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       if(minutesPassed < TextExportMinInterval) return false;
    }
    
-   string filename = "Phoenix_Files/Text_Logs/Memory_" + _Symbol + "_" + 
-                     EnumToString((ENUM_TIMEFRAMES)_Period) + "_" + 
-                     TimeToString(currentTime, TIME_DATE) + "_SUPER_CORRIGIDO.txt";
+   // ✅ OTIMIZAÇÃO: Usar arquivo único ao invés de criar múltiplos arquivos
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_Memory_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
    
    if(!CreateDirectoryForFile(filename))
    {
@@ -5271,29 +5276,23 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       return false;
    }
    
-   int file_handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   // Abrir em modo APPEND para adicionar ao arquivo existente
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(file_handle == INVALID_HANDLE)
    {
       Print("❌ Erro ao abrir arquivo texto: ", filename, " | Erro: ", GetLastError());
       return false;
    }
    
+   // ✅ Posicionar no final do arquivo para append
+   FileSeek(file_handle, 0, SEEK_END);
+   
+   // ✅ Separador de entrada
+   FileWrite(file_handle, "");
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "PHOENIX TRADER v307F - SISTEMA SUPER CORRIGIDO");
-   FileWrite(file_handle, "Data/Hora: " + TimeToString(currentTime));
+   FileWrite(file_handle, "PHOENIX TRADER v307F - SNAPSHOT " + TimeToString(currentTime));
    FileWrite(file_handle, "Symbol: " + _Symbol + " | Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "");
-   FileWrite(file_handle, "🛡️ SISTEMA SUPER CORRIGIDO - MELHORIAS IMPLEMENTADAS");
-   FileWrite(file_handle, "----------------------------------------");
-   FileWrite(file_handle, "✅ CORREÇÕES CRÍTICAS IMPLEMENTADAS:");
-   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (576 estados)");
-   FileWrite(file_handle, "2. ✅ Reset automático funcionando");
-   FileWrite(file_handle, "3. ✅ Estados não travam mais em 10 visitas");
-   FileWrite(file_handle, "4. ✅ Regras de bloqueio mais agressivas");
-   FileWrite(file_handle, "5. ✅ Debug de estados travados implementado");
-   FileWrite(file_handle, "6. ✅ Reset de emergência disponível");
-   FileWrite(file_handle, "");
    
    string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)";
    FileWrite(file_handle, systemInfo);
