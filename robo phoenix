@@ -726,6 +726,9 @@ void ResetBadStatesEnhanced()
       Print("   Estados desbloqueados: ", statesUnblocked);
       Print("   Total resets acumulados: ", g_totalBadStateResets);
       
+      // ✅ CORREÇÃO: Invalidar cache do HUD após reset
+      InvalidateHUDCache();
+      
       g_memoryDirty = true;
       SaveState();
    }
@@ -972,6 +975,7 @@ void BlockState(int state)
               " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
         
         g_memoryDirty = true;
+        InvalidateHUDCache(); // ✅ CORREÇÃO: Invalidar cache do HUD
     }
     else
     {
@@ -995,6 +999,8 @@ void UnblockState(int state)
     {
         g_stateBlocked[state] = false;
         g_stateLastUnblockTime[state] = TimeCurrent();
+        
+        InvalidateHUDCache(); // ✅ CORREÇÃO: Invalidar cache do HUD
         
         Print("✅ ESTADO DESBLOQUEADO: ", state, 
               " | Visitas: ", g_stateVisits[state], 
@@ -1906,6 +1912,7 @@ void MonitorBadStates()
             Print("⛔ BLOQUEIO Estado ", state, 
                   " | Win Rate: ", DoubleToString(winRate*100,1), "%",
                   " | Visitas: ", g_stateVisits[state]);
+            InvalidateHUDCache(); // ✅ CORREÇÃO: Invalidar cache do HUD
          }
          
          // 2. RESETAR estados catastróficos (win rate < 15%)
@@ -1928,6 +1935,7 @@ void MonitorBadStates()
             
             resetados++;
             g_totalBadStateResets++; // ✅ INCREMENTAR CONTADOR
+            InvalidateHUDCache(); // ✅ CORREÇÃO: Invalidar cache do HUD
          }
          
          // 3. DESBLOQUEAR estados bons
@@ -1936,6 +1944,7 @@ void MonitorBadStates()
             g_stateBlocked[state] = false;
             Print("✅ DESBLOQUEIO Estado ", state,
                   " | Win Rate boa: ", DoubleToString(winRate*100,1), "%");
+            InvalidateHUDCache(); // ✅ CORREÇÃO: Invalidar cache do HUD
          }
       }
    }
@@ -2297,6 +2306,9 @@ void EmergencyCounterFix()
    Print("     Win Rate: ", totalVisits > 0 ? 
          DoubleToString((double)totalWins/totalVisits*100, 1) : "0.0", "%");
    
+   // ✅ CORREÇÃO: Invalidar cache do HUD após correção de emergência
+   InvalidateHUDCache();
+   
    // Forçar save
    g_memoryDirty = true;
    SaveState();
@@ -2371,6 +2383,9 @@ void OverhaulBlockingSystem()
    }
    
    int blockedAfter = CountBlockedStates();
+   
+   // ✅ CORREÇÃO: Invalidar cache do HUD após revisão completa
+   InvalidateHUDCache();
    
    Print("📊 RESULTADO DA REVISÃO:");
    Print("   Estados visitados: ", totalVisited);
@@ -2464,6 +2479,9 @@ void IntelligentPartialReset()
    Print("   Estados mantidos (com redução): ", statesRetained);
    Print("   Total estados ativos após reset: ", g_activeStatesCount);
    
+   // ✅ CORREÇÃO: Invalidar cache do HUD após reset
+   InvalidateHUDCache();
+   
    g_memoryDirty = true;
    SaveState();
 }
@@ -2476,7 +2494,16 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   // 🔧 PROTEÇÃO: Verificar divisão por zero
+   double currentWinRate = 0.0;
+   if(g_totalTrades > 0)
+   {
+      currentWinRate = (double)g_totalWins / g_totalTrades;
+   }
+   else
+   {
+      Print("⚠️ PROTEÇÃO: g_totalTrades = 0, usando win rate padrão 0.0");
+   }
    
    if(currentWinRate < 0.25)
    {
@@ -3252,12 +3279,14 @@ void UpdateQ(int state, int action, double reward)
          g_stateBlocked[state] = true;
          Print("⛔ Estado ", state, " bloqueado - Win rate muito baixa: ", 
                DoubleToString(winRate*100,1), "%");
+         InvalidateHUDCache(); // ✅ CORREÇÃO: Invalidar cache do HUD
       }
       else if(g_stateBlocked[state] && winRate >= 0.40)
       {
          g_stateBlocked[state] = false;
          Print("✅ Estado ", state, " desbloqueado - Win rate melhorou: ", 
                DoubleToString(winRate*100,1), "%");
+         InvalidateHUDCache(); // ✅ CORREÇÃO: Invalidar cache do HUD
       }
    }
    
@@ -5180,7 +5209,16 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      // 🔧 PROTEÇÃO: Verificar divisão por zero
+      double currentWinRate = 0.0;
+      if(g_totalTrades > 0)
+      {
+         currentWinRate = (double)g_totalWins / g_totalTrades;
+      }
+      else
+      {
+         Print("⚠️ PROTEÇÃO: g_totalTrades = 0 no monitoramento de performance");
+      }
       
       if(currentWinRate < 0.20)
       {
@@ -5200,7 +5238,17 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      // 🔧 PROTEÇÃO: Verificar divisão por zero
+      double blockedRatio = 0.0;
+      if(g_activeStatesCount > 0)
+      {
+         blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      }
+      else
+      {
+         Print("⚠️ PROTEÇÃO: g_activeStatesCount = 0 no cálculo de bloqueios");
+      }
+      
       if(blockedRatio > 0.7 && g_activeStatesCount > 50)
       {
          Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
