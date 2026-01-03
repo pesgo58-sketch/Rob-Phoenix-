@@ -207,6 +207,7 @@ input double DecayFactor              = 0.05;         // Fator de decay (5%)
 input bool   EnableIntelligentReset   = true;         // Reset inteligente
 input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
 input int    BadStateMinVisits        = 20;           // Visitas mínimas para reset
+input int    MinStatesBeforeReset     = 100;          // Mínimo de estados aprendidos antes de permitir resets
 input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
 input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
@@ -698,6 +699,12 @@ void ApplyStateDecay()
 void ResetBadStates()
 {
    if(!EnableIntelligentReset) return;
+   
+   // Verificar se temos estados suficientes antes de permitir resets
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Não resetar até ter aprendido estados suficientes
+   }
    
    int statesReset = 0;
    
@@ -5550,6 +5557,7 @@ int OnInit()
    Print("   • MinVisitsToTrade: 2");
    Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
+   Print("   • MinStatesBeforeReset: 100 (previne resets prematuros)");
    
    if(EnableUnifiedBlockingSystem)
    {
