@@ -972,6 +972,7 @@ void BlockState(int state)
               " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
         
         g_memoryDirty = true;
+        InvalidateHUDCache();
     }
     else
     {
@@ -1003,6 +1004,7 @@ void UnblockState(int state)
               " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
         
         g_memoryDirty = true;
+        InvalidateHUDCache();
     }
 }
 
@@ -1317,6 +1319,7 @@ void AddActiveState(int state)
    }
    
    g_stateLastUpdate[state] = g_totalTrades;
+   InvalidateHUDCache();
    
    if(EnableUnifiedBlockingSystem)
    {
@@ -1910,18 +1913,19 @@ void MonitorBadStates()
          
          // ✅ CORREÇÃO: REGRAS MAIS AGRESSIVAS
          
-         // 1. BLOQUEAR estados com win rate < 25% e mais de 3 visitas
-         if(g_stateVisits[state] >= 3 && winRate < 0.25 && !g_stateBlocked[state])
+         // 1. BLOQUEAR estados com win rate < 25% e mais de MinVisitsForBlockDecision visitas
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.25 && !g_stateBlocked[state])
          {
             g_stateBlocked[state] = true;
             bloqueados++;
+            InvalidateHUDCache();
             Print("⛔ BLOQUEIO Estado ", state, 
                   " | Win Rate: ", DoubleToString(winRate*100,1), "%",
                   " | Visitas: ", g_stateVisits[state]);
          }
          
          // 2. RESETAR estados catastróficos (win rate < 15%)
-         if(g_stateVisits[state] >= 5 && winRate < 0.15)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)
          {
             Print("🔥 RESET Estado ", state, 
                   " | Win Rate catastrófica: ", DoubleToString(winRate*100,1), "%",
@@ -1940,12 +1944,14 @@ void MonitorBadStates()
             
             resetados++;
             g_totalBadStateResets++; // ✅ INCREMENTAR CONTADOR
+            InvalidateHUDCache();
          }
          
          // 3. DESBLOQUEAR estados bons
-         if(g_stateBlocked[state] && winRate > 0.55 && g_stateVisits[state] >= 5)
+         if(g_stateBlocked[state] && winRate > 0.55 && g_stateVisits[state] >= MinVisitsForBlockDecision)
          {
             g_stateBlocked[state] = false;
+            InvalidateHUDCache();
             Print("✅ DESBLOQUEIO Estado ", state,
                   " | Win Rate boa: ", DoubleToString(winRate*100,1), "%");
          }
@@ -2819,13 +2825,13 @@ void UpdateHUDLight()
    ObjectSetString(0, "HUD_States", OBJPROP_TEXT, newStates);
    
    string progressBar = CreateProgressBarFast(visitedStates, NUM_STATES);
-   double progressPercent = (double)visitedStates / NUM_STATES * 100.0;
+   double progressPercent = SafeDivide((double)visitedStates, (double)NUM_STATES, 0.0) * 100.0;
    
    // 🔧 CORREÇÃO: Converter double para string corretamente
    string newProgress = StringFormat("   [%s] (%.1f%%)", progressBar, progressPercent);
    ObjectSetString(0, "HUD_Progress", OBJPROP_TEXT, newProgress);
    
-   double blockedPercent = visitedStates > 0 ? (double)blockedStates/visitedStates*100 : 0;
+   double blockedPercent = SafeDivide((double)blockedStates, (double)visitedStates, 0.0) * 100.0;
    string newBlocked = StringFormat("   Bloqueados: %d (%.1f%%)", blockedStates, blockedPercent);
    color blockedColor = (blockedStates > 0) ? HUD_WarningColor : HUD_TextColor;
    ObjectSetInteger(0, "HUD_Blocked", OBJPROP_COLOR, blockedColor);
