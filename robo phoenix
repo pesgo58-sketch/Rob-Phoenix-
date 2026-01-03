@@ -448,13 +448,38 @@ int g_textExportCount = 0;
 // ✅✅✅ CORREÇÃO CRÍTICA: FUNÇÃO SEGURA PARA DIVISÃO (ANTI DIVISÃO POR ZERO)
 // ======================================================================
 
+// Constante para comparação de ponto flutuante
+#define DIVISION_EPSILON 0.0000001
+
+// Controle de logging para evitar spam
+static datetime g_lastDivisionWarningTime = 0;
+static int g_divisionWarningsSkipped = 0;
+
 // Função SafeDivide: Previne divisão por zero em todas as operações
 double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
 {
-   if(denominator == 0.0 || MathAbs(denominator) < 0.0000001)
+   if(denominator == 0.0 || MathAbs(denominator) < DIVISION_EPSILON)
    {
-      Print("⚠️ DIVISÃO POR ZERO DETECTADA E PREVENIDA! Numerador: ", DoubleToString(numerator, 8), 
-            " | Denominador: ", DoubleToString(denominator, 8), " | Retornando: ", DoubleToString(defaultValue, 8));
+      // Rate limiter: logar no máximo 1 vez por segundo
+      datetime currentTime = TimeCurrent();
+      if(currentTime - g_lastDivisionWarningTime >= 1)
+      {
+         Print("⚠️ DIVISÃO POR ZERO DETECTADA E PREVENIDA! Numerador: ", DoubleToString(numerator, 8), 
+               " | Denominador: ", DoubleToString(denominator, 8), " | Retornando: ", DoubleToString(defaultValue, 8));
+         
+         if(g_divisionWarningsSkipped > 0)
+         {
+            Print("   (", g_divisionWarningsSkipped, " avisos similares foram suprimidos)");
+            g_divisionWarningsSkipped = 0;
+         }
+         
+         g_lastDivisionWarningTime = currentTime;
+      }
+      else
+      {
+         g_divisionWarningsSkipped++;
+      }
+      
       return defaultValue;
    }
    
@@ -466,8 +491,26 @@ double SafeDivideInt(int numerator, int denominator, double defaultValue = 0.0)
 {
    if(denominator == 0)
    {
-      Print("⚠️ DIVISÃO POR ZERO (INT) DETECTADA E PREVENIDA! Numerador: ", IntegerToString(numerator), 
-            " | Denominador: ", IntegerToString(denominator), " | Retornando: ", DoubleToString(defaultValue, 8));
+      // Rate limiter: logar no máximo 1 vez por segundo
+      datetime currentTime = TimeCurrent();
+      if(currentTime - g_lastDivisionWarningTime >= 1)
+      {
+         Print("⚠️ DIVISÃO POR ZERO (INT) DETECTADA E PREVENIDA! Numerador: ", IntegerToString(numerator), 
+               " | Denominador: ", IntegerToString(denominator), " | Retornando: ", DoubleToString(defaultValue, 8));
+         
+         if(g_divisionWarningsSkipped > 0)
+         {
+            Print("   (", g_divisionWarningsSkipped, " avisos similares foram suprimidos)");
+            g_divisionWarningsSkipped = 0;
+         }
+         
+         g_lastDivisionWarningTime = currentTime;
+      }
+      else
+      {
+         g_divisionWarningsSkipped++;
+      }
+      
       return defaultValue;
    }
    
@@ -2986,7 +3029,15 @@ bool CheckRealVolume()
       sumVol += volumeArray[i];
    }
    
-   g_volumeAverage = (long)SafeDivideInt((int)sumVol, (barsToCopy - 1), (double)sumVol);
+   // Se barsToCopy == 1, usar volume atual como média
+   if(barsToCopy <= 1)
+   {
+      g_volumeAverage = g_currentVolume;
+   }
+   else
+   {
+      g_volumeAverage = (long)SafeDivideInt((int)sumVol, (barsToCopy - 1), (double)g_currentVolume);
+   }
    
    if(g_volumeAverage > 0)
    {
@@ -3754,8 +3805,7 @@ double ComputeRewardFromTrade(double profit)
    }
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double lotPointValue = LotSize * point * 100;
-   double profit_points = SafeDivide(profit, lotPointValue, 0.0);
+   double profit_points = SafeDivide(profit, (LotSize * point * 100), 0.0);
    
    if(profit > 0)
    {
