@@ -94,6 +94,7 @@ O volume é integrado diretamente como um indicador na análise de entradas do r
 | `UseRealVolumeFilter` | bool | true | Ativa/desativa o uso de volume como indicador |
 | `VolumeMAPeriod` | int | 15 | Período da média móvel de volume |
 | `MinVolumeMultiplier` | double | 0.5 | Multiplicador mínimo (volume > média × multiplicador = sinal positivo) |
+| `VolumeStrongThreshold` | double | 1.5 | Multiplicador para volume "forte" (MinVolumeMultiplier × este valor) |
 
 ### Como Funciona
 

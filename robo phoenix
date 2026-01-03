@@ -130,6 +130,7 @@ input group "=== FILTRO DE VOLUME REAL (INDICADOR) ===";
 input bool   UseRealVolumeFilter     = true;     // Ativa/Desativa o uso de volume como indicador
 input int    VolumeMAPeriod          = 15;       // Período da média móvel de volume
 input double MinVolumeMultiplier     = 0.5;      // Multiplicador mínimo (volume > média * multiplicador = sinal positivo)
+input double VolumeStrongThreshold   = 1.5;      // Limiar para volume "forte" (MinVolumeMultiplier * este valor)
 
 // ✅ CONFIGURAÇÕES DE INDICADORES
 input group "=== CONFIGURAÇÕES DE INDICADORES ===";
@@ -3527,10 +3528,12 @@ void ExecuteAction(int action, int state)
    if(UseRealVolumeFilter)
    {
       bool volumeOk = CheckRealVolume();
-      if(volumeOk && g_volumeMultiplier > MinVolumeMultiplier * 1.5)
+      double strongVolumeThreshold = MinVolumeMultiplier * VolumeStrongThreshold;
+      
+      if(volumeOk && g_volumeMultiplier > strongVolumeThreshold)
       {
          Print("✅ Volume FORTE detectado (", DoubleToString(g_volumeMultiplier, 2), 
-               "x) - Sinal positivo para entrada!");
+               "x > ", DoubleToString(strongVolumeThreshold, 2), "x) - Sinal positivo para entrada!");
       }
       else if(!volumeOk && g_volumeMultiplier < MinVolumeMultiplier)
       {
@@ -3829,7 +3832,7 @@ double GetStateQuality(int state)
    {
       // Volume acima do mínimo é um sinal positivo
       double volumeBonus = (g_volumeMultiplier - MinVolumeMultiplier) * VolumeQualityBonus;
-      // Limitar o bonus para não dominar a qualidade
+      // Limita o bonus para não dominar a qualidade
       if(volumeBonus > MaxVolumeBonus) volumeBonus = MaxVolumeBonus;
       quality += volumeBonus;
       
