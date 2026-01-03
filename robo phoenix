@@ -526,6 +526,12 @@ void ResetBadStatesEnhanced()
 {
    if(!EnableIntelligentReset) return;
    
+   // ✅ PROTEÇÃO: Não resetar até ter base sólida de estados aprendidos
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Não resetar até ter aprendido estados suficientes
+   }
+   
    int statesReset = 0;
    int statesUnblocked = 0;
    
@@ -2307,6 +2313,12 @@ void OverhaulBlockingSystem()
 // ======================================================================
 void IntelligentPartialReset()
 {
+   // ✅ PROTEÇÃO: Não resetar até ter base sólida de estados aprendidos
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Não resetar até ter aprendido estados suficientes
+   }
+   
    Print("🧠 RESET PARCIAL INTELIGENTE");
    
    int statesReset = 0;
