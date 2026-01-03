@@ -447,6 +447,11 @@ int g_textExportCount = 0;
 // ======================================================================
 // ✅✅✅ FUNÇÃO SAFEDIVIDE - PROTEÇÃO CONTRA DIVISÃO POR ZERO
 // ======================================================================
+
+// Constante compartilhada para detecção de zero em cálculos financeiros
+// Valor 1e-10 apropriado para MQL5 onde preços têm precisão de 5-8 casas decimais
+#define SAFE_EPSILON 1e-10
+
 //+------------------------------------------------------------------+
 //| Função SafeDivide - Realiza divisão segura evitando divisão por zero
 //| Parâmetros:
@@ -458,10 +463,7 @@ int g_textExportCount = 0;
 //+------------------------------------------------------------------+
 double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
 {
-   // Static epsilon for performance - only calculated once
-   static const double EPSILON = MathMax(DBL_EPSILON * 1000, 1e-10);
-   
-   if(denominator == 0.0 || MathAbs(denominator) < EPSILON)
+   if(MathAbs(denominator) < SAFE_EPSILON)
    {
       static datetime lastWarningTime = 0;
       datetime currentTime = TimeCurrent();
@@ -3936,7 +3938,7 @@ int GetCurrentState()
    // ✅ Cálculo da distância da MA
    // Usar ATR se disponível, senão usar point * 10 como fallback
    double atrValue = atr[0];
-   double divisor = (atrValue > DBL_EPSILON * 1000) ? atrValue : (point * 10);
+   double divisor = (atrValue > SAFE_EPSILON) ? atrValue : (point * 10);
    double maDistance = SafeDivide((price - ma[0]), divisor, 0.0);
    
    // ✅ Cálculo da posição nas Bollinger Bands
