@@ -7,6 +7,22 @@
 //|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
 //|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
+//|                                                                  |
+//|  RECURSOS PRINCIPAIS:                                            |
+//|  1. AJUSTE DINÂMICO DE LOTES BASEADO NA QUALIDADE DAS ENTRADAS  |
+//|     - O robô aumenta automaticamente o lote quando detecta      |
+//|       entradas de alta confiança (baseado em Q-values e         |
+//|       win rate histórica)                                        |
+//|     - Configurável via EnableSmartLot, HighQualityThreshold,    |
+//|       UltraQualityThreshold                                      |
+//|                                                                  |
+//|  2. VOLUME INCORPORADO COMO INDICADOR                            |
+//|     - Volume integrado ao cálculo de estado do robô             |
+//|     - Volume alto (acima da média) é considerado sinal positivo |
+//|     - Influencia tanto o aprendizado quanto a qualidade da      |
+//|       entrada em tempo real                                      |
+//|     - Configurável via UseRealVolumeFilter, VolumeMAPeriod,     |
+//|       MinVolumeMultiplier                                        |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
@@ -102,12 +118,19 @@ input double BBDeviation = 2.2;
 input int    ATRPeriod   = 18;
 
 // ======================================================================
-// ✅ FILTRO DE VOLUME REAL CORRIGIDO
+// ✅ FILTRO DE VOLUME REAL - INCORPORADO COMO INDICADOR
 // ======================================================================
-input group "=== FILTRO DE VOLUME REAL (NOVO) ===";
-input bool   UseRealVolumeFilter     = true;
-input int    VolumeMAPeriod          = 15;
-input double MinVolumeMultiplier     = 0.5;
+// O sistema utiliza o volume como um indicador na análise de entradas.
+// Quando o volume atual é maior que a média móvel do volume multiplicada
+// pelo MinVolumeMultiplier, isso é considerado um sinal POSITIVO.
+// O volume também é integrado ao cálculo de estado, influenciando o
+// aprendizado do robô sobre quais condições de volume geram melhores resultados.
+// ======================================================================
+input group "=== FILTRO DE VOLUME REAL (INDICADOR) ===";
+input bool   UseRealVolumeFilter     = true;     // Ativa/Desativa o uso de volume como indicador
+input int    VolumeMAPeriod          = 15;       // Período da média móvel de volume
+input double MinVolumeMultiplier     = 0.5;      // Multiplicador mínimo (volume > média * multiplicador = sinal positivo)
+input double VolumeStrongThreshold   = 1.5;      // Limiar para volume "forte" (MinVolumeMultiplier * este valor)
 
 // ✅ CONFIGURAÇÕES DE INDICADORES
 input group "=== CONFIGURAÇÕES DE INDICADORES ===";
@@ -150,15 +173,28 @@ input int    BreakevenTriggerPoints = 15000;
 input bool   TrailBothSLandTP       = false;
 
 // ======================================================================
-// ✅ BET SIZING CORRIGIDO
+// ✅ AJUSTE DINÂMICO DE LOTES BASEADO NA QUALIDADE DAS ENTRADAS
 // ======================================================================
-input group "=== BET SIZING (MAO PESADA) ===";
-input bool   EnableSmartLot        = true;
-input double HighQualityThreshold  = 0.3;
-input double UltraQualityThreshold = 0.8;
-input double SmartLotMultiplier    = 1.8;
-input double UltraLotMultiplier    = 3.0;
-input double MaxAllowedLot         = 1.0;
+// O sistema aumenta automaticamente o tamanho do lote quando detecta
+// entradas de alta qualidade. A qualidade é calculada com base em:
+// - Q-values aprendidos (confiança interna do modelo)
+// - Taxa de vitórias histórica do estado
+// - Condições de mercado (incluindo volume quando ativo)
+// 
+// Níveis de qualidade:
+// - Quality >= HighQualityThreshold: Lote * SmartLotMultiplier
+// - Quality >= UltraQualityThreshold: Lote * UltraLotMultiplier
+// ======================================================================
+input group "=== AJUSTE DINÂMICO DE LOTES (SMART LOT) ===";
+input bool   EnableSmartLot        = true;       // Ativa/Desativa ajuste automático de lotes
+input double HighQualityThreshold  = 0.3;        // Limiar para entrada de alta qualidade
+input double UltraQualityThreshold = 0.8;        // Limiar para entrada de qualidade ultra
+input double SmartLotMultiplier    = 1.8;        // Multiplicador para entradas de alta qualidade
+input double UltraLotMultiplier    = 3.0;        // Multiplicador para entradas de qualidade ultra
+input double MaxAllowedLot         = 1.0;        // Tamanho máximo permitido de lote
+input double MinQualityThreshold   = -0.5;       // Limiar mínimo de qualidade (abaixo disso, cancela trade)
+input double VolumeQualityBonus    = 0.2;        // Multiplicador para bonus de volume na qualidade
+input double MaxVolumeBonus        = 0.3;        // Bonus máximo que volume pode adicionar à qualidade
 
 // ✅ CONTROLE DE TEMPO ENTRE TRADES
 input int    MinMinutesBetweenTrades = 3;
@@ -3488,12 +3524,25 @@ void ExecuteAction(int action, int state)
       return;
    }
    
+   // ✅ VERIFICAÇÃO DE VOLUME COMO SINAL POSITIVO
    if(UseRealVolumeFilter)
    {
       bool volumeOk = CheckRealVolume();
-      if(!volumeOk && g_volumeMultiplier < 0.6)
+      double strongVolumeThreshold = MinVolumeMultiplier * VolumeStrongThreshold;
+      
+      if(volumeOk && g_volumeMultiplier > strongVolumeThreshold)
       {
-         Print("⚠️ Volume moderado, mantendo lote mínimo");
+         Print("✅ Volume FORTE detectado (", DoubleToString(g_volumeMultiplier, 2), 
+               "x > ", DoubleToString(strongVolumeThreshold, 2), "x) - Sinal positivo para entrada!");
+      }
+      else if(!volumeOk && g_volumeMultiplier < MinVolumeMultiplier)
+      {
+         Print("⚠️ Volume baixo (", DoubleToString(g_volumeMultiplier, 2), 
+               "x < ", DoubleToString(MinVolumeMultiplier, 2), "x) - Entrada com cautela");
+      }
+      else
+      {
+         Print("📊 Volume normal (", DoubleToString(g_volumeMultiplier, 2), "x)");
       }
    }
    
@@ -3552,9 +3601,10 @@ void ExecuteAction(int action, int state)
       else if(quality < -0.3)
       {
          Print("⚠️⚠️ SETUP NEGATIVO DETECTADO - Considerando cancelar trade");
-         if(quality < -0.5)
+         if(quality < MinQualityThreshold)
          {
-            Print("⛔ TRADE CANCELADO - Qualidade muito baixa: ", quality);
+            Print("⛔ TRADE CANCELADO - Qualidade muito baixa: ", DoubleToString(quality, 3), 
+                  " (limiar: ", DoubleToString(MinQualityThreshold, 2), ")");
             g_statusMessage = "⛔ Setup Negativo - Trade Cancelado";
             UpdateQ_NOP(state);
             return;
@@ -3737,7 +3787,7 @@ double ComputeRewardFromTrade(double profit)
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO GetStateQuality - VERSÃO MELHORADA
+// ✅✅✅ FUNÇÃO GetStateQuality - VERSÃO MELHORADA COM VOLUME
 // ======================================================================
 double GetStateQuality(int state)
 {
@@ -3774,6 +3824,23 @@ double GetStateQuality(int state)
       if(winRate > 0.7 && g_stateVisits[state] >= 10)
       {
          quality += (winRate - 0.7) * 2.0;
+      }
+   }
+   
+   // ✅ NOVO: Bonus de qualidade baseado em volume forte
+   if(UseRealVolumeFilter && g_volumeMultiplier > MinVolumeMultiplier)
+   {
+      // Volume acima do mínimo é um sinal positivo
+      double volumeBonus = (g_volumeMultiplier - MinVolumeMultiplier) * VolumeQualityBonus;
+      // Limita o bonus para não dominar a qualidade
+      if(volumeBonus > MaxVolumeBonus) volumeBonus = MaxVolumeBonus;
+      quality += volumeBonus;
+      
+      // Log apenas quando bonus significativo
+      if(volumeBonus > 0.1)
+      {
+         Print("📊 Bonus de qualidade por volume: +", DoubleToString(volumeBonus, 3), 
+               " (volume: ", DoubleToString(g_volumeMultiplier, 2), "x)");
       }
    }
    
@@ -3833,8 +3900,9 @@ int GetVolumeBucket()
 {
    if(!UseRealVolumeFilter) return 1;    // Volume normal (default)
    
-   if(g_volumeMultiplier < 0.7) return 0;  // Volume baixo
-   else return 1;                         // Volume normal/alto
+   // Usa MinVolumeMultiplier como referência para classificação
+   if(g_volumeMultiplier < MinVolumeMultiplier) return 0;  // Volume baixo
+   else return 1;                                           // Volume normal/alto
 }
 
 // ✅ Função para calcular bucket de tempo
