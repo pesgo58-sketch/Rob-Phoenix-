@@ -183,17 +183,17 @@ Os dois recursos trabalham em conjunto para otimizar o desempenho:
 ## Localização no Código
 
 ### Ajuste Dinâmico de Lotes
-- **Parâmetros**: Linhas 155-177
-- **Cálculo de Qualidade**: `GetStateQuality()` linhas 3744-3845
-- **Decisão de Lote**: `ExecuteAction()` linhas 3531-3567
+- **Parâmetros**: Linhas 187-193
+- **Cálculo de Qualidade**: `GetStateQuality()` linhas 3785-3862
+- **Decisão de Lote**: `ExecuteAction()` linhas 3574-3610
 
 ### Volume como Indicador
-- **Parâmetros**: Linhas 105-117
-- **Cálculo de Volume**: `CheckRealVolume()` linhas 2933-2977
-- **Integração no Estado**: `GetVolumeBucket()` linhas 3832-3838
-- **Uso no Estado**: `GetCurrentState()` linha 3921
-- **Bônus de Qualidade**: `GetStateQuality()` linhas 3823-3840
-- **Feedback**: `ExecuteAction()` linhas 3491-3510
+- **Parâmetros**: Linhas 129-132
+- **Cálculo de Volume**: `CheckRealVolume()` linhas 2965-3009
+- **Integração no Estado**: `GetVolumeBucket()` linhas 3892-3898
+- **Uso no Estado**: `GetCurrentState()` linha 3981
+- **Bônus de Qualidade**: `GetStateQuality()` linhas 3843-3860
+- **Feedback**: `ExecuteAction()` linhas 3523-3542
 
 ---
 
