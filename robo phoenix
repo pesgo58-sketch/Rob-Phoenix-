@@ -2837,7 +2837,7 @@ void UpdateHUDLight()
    ObjectSetString(0, "HUD_States", OBJPROP_TEXT, newStates);
    
    string progressBar = CreateProgressBarFast(visitedStates, NUM_STATES);
-   double progressPercent = (double)visitedStates / NUM_STATES * 100.0;
+   double progressPercent = SafeDivideInt(visitedStates, NUM_STATES, 0.0) * 100.0;
    
    // 🔧 CORREÇÃO: Converter double para string corretamente
    string newProgress = StringFormat("   [%s] (%.1f%%)", progressBar, progressPercent);
