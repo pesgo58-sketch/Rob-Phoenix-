@@ -272,75 +272,63 @@ input color  HUD_SuccessColor     = clrCyan;
 input bool   HUD_Minimal          = false;
 
 // ======================================================================
-// ✅✅✅ VARIÁVEIS GLOBAIS ADICIONADAS
 // ======================================================================
-double g_volumeRatio = 1.0;
-bool AllowBreakoutOverride = true;
+// 📊 VARIÁVEIS GLOBAIS - ORGANIZADAS POR CATEGORIA
+// ======================================================================
 
-// ======================================================================
-// ✅✅✅ ✅ PASSO 1 — CRIAR UM VETOR DE BLOQUEIO REAL (CORREÇÃO DO HUD)
-// ======================================================================
-bool g_stateBlocked[];
+// ──────────────────────────────────────────────────────────────────────
+// 🧠 1. SISTEMA DE APRENDIZADO (Q-Learning e Estados)
+// ──────────────────────────────────────────────────────────────────────
+double g_Q[];                          // Q-table principal para aprendizado
+int g_stateVisits[];                   // Contador de visitas por estado
+int g_stateWins[];                     // Contadores de vitórias por estado
+int g_stateLosses[];                   // Contadores de perdas por estado
+int g_stateLastUpdate[];               // Último update de cada estado
+bool g_stateBlocked[];                 // Estados bloqueados por má performance
+datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
+datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio
+double g_stateWinRate[];               // Win rate calculado por estado
+double g_stateAvgProfit[];             // Lucro médio por estado
 
-// ======================================================================
-// ✅✅✅ NOVO: CONTADORES SEPARADOS PARA VITÓRIAS E PERDAS REAIS
-// ======================================================================
-int g_stateWins[];
-bool g_lastTradeExecuted = false;
-int g_lastTradeStateExecuted = -1;
+// Aprendizado - Controle
+bool g_learningInitialized = false;
+double g_currentExplorationRate = 0.0;
+int g_totalStatesDiscovered = 0;
+int g_totalQUpdates = 0;
+double g_averageQValue = 0.0;
+double g_maxQValue = 0.0;
+double g_minQValue = 0.0;
 
-// ======================================================================
-// ✅✅✅ ✅✅✅ NOVO: SISTEMA DE COOLDOWN PARA BLOQUEIO
-// ======================================================================
-datetime g_stateLastBlockTime[];
-datetime g_stateLastUnblockTime[];
-
-// ======================================================================
-// ✅✅✅ SISTEMA DE MEMÓRIA OTIMIZADA - VARIÁVEIS
-// ======================================================================
-double g_Q[];
-int g_stateVisits[];
-int g_stateLosses[];
-int g_stateLastUpdate[];
-
-// Cache para estados ativos (otimização)
-int g_activeStates[];
-int g_activeStatesCount = 0;
-bool g_memoryDirty = false;
-int g_memorySaveCounter = 0;
-int g_memoryCleanCounter = 0;
-
-// ======================================================================
-// ✅✅✅ VARIÁVEIS PARA PROTEÇÃO CONTRA ESTADO CONGELADO
-// ======================================================================
+// Aprendizado - Proteção contra estados congelados
 static int g_lastCalculatedState = -1;
 static int g_sameStateCount = 0;
 static datetime g_lastStateChangeTime = 0;
 
-// ======================================================================
-// ✅✅✅ VARIÁVEIS PARA DECAY E RESET
-// ======================================================================
+// ──────────────────────────────────────────────────────────────────────
+// 💾 2. SISTEMA DE MEMÓRIA E PERSISTÊNCIA
+// ──────────────────────────────────────────────────────────────────────
+int g_activeStates[];                  // Cache de estados ativos (otimização)
+int g_activeStatesCount = 0;
+bool g_memoryDirty = false;
+int g_memorySaveCounter = 0;
+int g_memoryCleanCounter = 0;
+string g_memoryFileName = "";
+bool g_memoryInitialized = false;
+datetime g_lastSaveTime = 0;
+int g_qUpdatesSinceSave = 0;
+bool g_lastSaveSuccess = false;
+
+// Decay e Reset
 datetime g_lastMaintenanceTime = 0;
 int g_totalDecayCycles = 0;
 int g_totalBadStateResets = 0;
+int g_stateResets = 0;
+int g_stateDecays = 0;
+static int g_lastDecayTradeCount = 0;
 
-// ======================================================================
-// Variáveis do HUD OTIMIZADAS
-// ======================================================================
-string hudObjects[15];
-int hudObjectCount = 0;
-datetime hudLastUpdate = 0;
-int cachedVisitedStates = -1;
-int cachedBlockedStates = -1;
-int cachedPositions = -1;
-int cachedDirection = -1;
-string cachedStatus = "";
-double cachedVolume = -1;
-int cachedTradesToday = -1;
-
-// ====
-// VARIÁVEIS GLOBAIS
-// ============================================================
+// ──────────────────────────────────────────────────────────────────────
+// 📈 3. INDICADORES TÉCNICOS
+// ──────────────────────────────────────────────────────────────────────
 string g_currentSymbol;
 int g_adxHandle = INVALID_HANDLE;
 int g_maHandle  = INVALID_HANDLE;
@@ -348,61 +336,55 @@ int g_rsiHandle = INVALID_HANDLE;
 int g_bbHandle  = INVALID_HANDLE;
 int g_atrHandle = INVALID_HANDLE;
 
-bool g_learningInitialized = false;
-double g_currentExplorationRate = 0.0;
-
-string g_memoryFileName = "";
-bool g_memoryInitialized = false;
-datetime g_lastSaveTime = 0;
-int g_qUpdatesSinceSave = 0;
-
+// ──────────────────────────────────────────────────────────────────────
+// 💰 4. CONTROLE DE TRADES E POSIÇÕES
+// ──────────────────────────────────────────────────────────────────────
+// Última trade executada
 int g_lastTradeState = -1;
 double g_lastTradeProfit = 0.0;
 int g_lastTradeAction = 0;
 double g_lastLotUsed = 0.0;
 double g_lastSLPrice = 0.0;
 double g_lastTPPrice = 0.0;
+bool g_lastTradeExecuted = false;
+int g_lastTradeStateExecuted = -1;
 
-int g_tradesToday = 0;
-datetime g_lastTradeDate = 0;
-int g_consecutiveLosses = 0;
-string g_statusMessage = "Inicializando...";
-datetime g_lastResetDate = 0;
-
-int g_totalTrades = 0;
-int g_totalWins   = 0;
-int g_totalLosses = 0;
-double g_sumProfit = 0.0;
-
+// Controle de direção e posições
 int g_currentDirection = 0;
 int g_positionsCount = 0;
 datetime g_directionStartTime = 0;
 
-datetime g_lastExportTime = 0;
-int g_exportCount = 0;
-
+// Controle de timing
 datetime g_lastEntryTime = 0;
 datetime g_lastTradeTime = 0;
 datetime g_lastBuyTime = 0;
 datetime g_lastSellTime = 0;
-bool g_lastSaveSuccess = false;
 int g_lastBarProcessed = 0;
 
-long g_currentVolume = 0;
-long g_volumeAverage = 0;
-double g_volumeMultiplier = 1.0;
-double g_volumeStrength = 0.0;
-datetime g_lastVolumeCheck = 0;
+// Controle diário
+int g_tradesToday = 0;
+datetime g_lastTradeDate = 0;
+datetime g_lastResetDate = 0;
 
-double g_recentProfits[];
-int g_recentProfitsIndex = 0;
+// ──────────────────────────────────────────────────────────────────────
+// 📊 5. ESTATÍSTICAS E PERFORMANCE
+// ──────────────────────────────────────────────────────────────────────
+// Estatísticas gerais
+int g_totalTrades = 0;
+int g_totalWins   = 0;
+int g_totalLosses = 0;
+double g_sumProfit = 0.0;
+int g_consecutiveLosses = 0;
 
-int g_totalStatesDiscovered = 0;
-int g_totalQUpdates = 0;
-double g_averageQValue = 0.0;
-double g_maxQValue = 0.0;
-double g_minQValue = 0.0;
+// Estatísticas por direção
+int g_totalBuys = 0;
+int g_totalSells = 0;
+int g_buyWins = 0;
+int g_sellWins = 0;
+double g_buyProfit = 0.0;
+double g_sellProfit = 0.0;
 
+// Recordes e streaks
 datetime g_firstTradeDate = 0;
 double g_highestProfit = 0.0;
 double g_lowestProfit = 0.0;
@@ -411,30 +393,24 @@ int g_worstLossStreak = 0;
 int g_currentWinStreak = 0;
 int g_currentLossStreak = 0;
 
-int g_totalBuys = 0;
-int g_totalSells = 0;
-int g_buyWins = 0;
-int g_sellWins = 0;
-double g_buyProfit = 0.0;
-double g_sellProfit = 0.0;
+// Performance recente
+double g_recentProfits[];
+int g_recentProfitsIndex = 0;
 
-// Variáveis para DEBUG
-int g_debugState = -1;
-int g_debugVisitas = 0;
-int g_debugPerdas = 0;
+// ──────────────────────────────────────────────────────────────────────
+// 📊 6. VOLUME E FILTROS
+// ──────────────────────────────────────────────────────────────────────
+long g_currentVolume = 0;
+long g_volumeAverage = 0;
+double g_volumeMultiplier = 1.0;
+double g_volumeStrength = 0.0;
+double g_volumeRatio = 1.0;
+datetime g_lastVolumeCheck = 0;
+bool AllowBreakoutOverride = true;
 
-// ======================================================================
-// ✅✅✅ VARIÁVEIS DO SISTEMA DE APRENDIZADO INTELIGENTE
-// ======================================================================
-double g_stateWinRate[];
-double g_stateAvgProfit[];
-int g_stateResets = 0;
-int g_stateDecays = 0;
-static int g_lastDecayTradeCount = 0;
-
-// ======================================================================
-// ✅ VARIÁVEIS PARA TRAILING STOP DINÂMICO
-// ======================================================================
+// ──────────────────────────────────────────────────────────────────────
+// 🎯 7. TRAILING STOP DINÂMICO
+// ──────────────────────────────────────────────────────────────────────
 ulong   g_trailingTickets[];
 double  g_trailingBestPrices[];
 double  g_trailingCurrentSL[];
@@ -443,11 +419,37 @@ datetime g_trailingLastTrailTimes[];
 bool    g_trailingBreakevenActivated[];
 int     g_trailingCount = 0;
 
-// ======================================================================
-// ✅✅✅ VARIÁVEIS PARA EXPORTAÇÃO DE TEXTO
-// ======================================================================
+// ──────────────────────────────────────────────────────────────────────
+// 🖥️ 8. HUD (INTERFACE VISUAL)
+// ──────────────────────────────────────────────────────────────────────
+string hudObjects[15];
+int hudObjectCount = 0;
+datetime hudLastUpdate = 0;
+string g_statusMessage = "Inicializando...";
+
+// Cache do HUD (otimização)
+int cachedVisitedStates = -1;
+int cachedBlockedStates = -1;
+int cachedPositions = -1;
+int cachedDirection = -1;
+string cachedStatus = "";
+double cachedVolume = -1;
+int cachedTradesToday = -1;
+
+// ──────────────────────────────────────────────────────────────────────
+// 📤 9. EXPORTAÇÃO E LOGS
+// ──────────────────────────────────────────────────────────────────────
+datetime g_lastExportTime = 0;
+int g_exportCount = 0;
 datetime g_lastTextExportTime = 0;
 int g_textExportCount = 0;
+
+// ──────────────────────────────────────────────────────────────────────
+// 🐛 10. DEBUG E DIAGNÓSTICO
+// ──────────────────────────────────────────────────────────────────────
+int g_debugState = -1;
+int g_debugVisitas = 0;
+int g_debugPerdas = 0;
 
 // ======================================================================
 // ✅✅✅ CORREÇÕES AGUDAS PARA O PROBLEMA DE ESTADOS TRAVADOS
