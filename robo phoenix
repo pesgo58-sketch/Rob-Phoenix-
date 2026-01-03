@@ -73,203 +73,183 @@ const double BB_NEUTRAL_POSITION = 0.5;
   #define DBL_MAX 1.7e308
 #endif
 
-// ======================================================================
-// Inputs — organização por grupos
-// ======================================================================
+// ══════════════════════════════════════════════════════════════════════
+// 📋 PARÂMETROS DE ENTRADA - ORGANIZADOS POR CATEGORIA
+// ══════════════════════════════════════════════════════════════════════
 
-input group "=== LIMITES DIÁRIOS ===";
-input int    MaxTradesPerDay    = 30;
-input int    ConsecutiveLossLimit    = 15;
+// ──────────────────────────────────────────────────────────────────────
+// 🛡️ 1. CONTROLE DE RISCO E LIMITES
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🛡️ LIMITES DIÁRIOS ────";
+input int    MaxTradesPerDay          = 30;           // Máximo de trades por dia
+input int    ConsecutiveLossLimit     = 15;           // Limite de perdas consecutivas
 
-// ======================================================================
-// ✅ APRENDIZADO CORRIGIDO
-// ======================================================================
-input group "=== APRENDIZADO CORRIGIDO ===";
-input bool   UseSimpleRewardSystem   = true;
-input double RewardWin     = 5.0;
-input double RewardLoss    = -2.0;
+input group "──── 💰 NEGOCIAÇÃO BÁSICA ────";
+input double LotSize                  = 0.01;         // Tamanho do lote padrão
+input int    MagicNumber              = 27101;        // Número mágico das ordens
+input int    MinMinutesBetweenTrades  = 3;            // Tempo mínimo entre trades
 
-input group "=== SISTEMA DE DECAY E RESET ===";
-input bool   EnableMemoryDecay       = true;
-input double DecayFactor            = 0.05;  // ⚠️ ALTERADO: 5% de esquecimento por ciclo (mais agressivo)
-input bool   EnableIntelligentReset  = true;
-input double BadStateLossThreshold   = 0.60;   // ⚠️ ALTERADO: 60% de perdas para reset
-input int    BadStateMinVisits       = 3;      // ⚠️ ALTERADO: Apenas 3 visitas
-input int    DecayCheckIntervalHours = 1;      // Verificar decay a cada hora
-input bool   ExcludeNOPFromVisits    = true;   // NOP não conta como visita
+// ──────────────────────────────────────────────────────────────────────
+// 📈 2. INDICADORES TÉCNICOS
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 📊 INDICADORES PRINCIPAIS ────";
+input int    MAPeriod                 = 200;          // Período da Média Móvel
+input ENUM_MA_METHOD  MAMethod        = MODE_EMA;     // Tipo da Média Móvel
+input int    RSIPeriod                = 20;           // Período do RSI
+input int    BBPeriod                 = 24;           // Período das Bandas de Bollinger
+input double BBDeviation              = 2.2;          // Desvio das Bandas de Bollinger
+input int    ATRPeriod                = 18;           // Período do ATR
 
-input group "=== INDICADORES ===";
-input int    MAPeriod    = 200;
-input ENUM_MA_METHOD  MAMethod    = MODE_EMA;
-input int    RSIPeriod   = 20;
-input int    BBPeriod    = 24;
-input double BBDeviation = 2.2;
-input int    ATRPeriod   = 18;
+input group "──── ✅ VALIDAÇÕES DE INDICADORES ────";
+input bool   UseRSIValidation         = true;         // Usar validação por RSI
+input double RSI_Overbought           = 75.0;         // RSI sobrecomprado
+input double RSI_Oversold             = 25.0;         // RSI sobrevendido
+input bool   UseBBValidation          = true;         // Usar validação por BB
+input double BB_UpperThreshold        = 0.7;          // Threshold superior BB
+input double BB_LowerThreshold        = 0.3;          // Threshold inferior BB
+input bool   UseADXValidation         = true;         // Usar validação por ADX
+input double MinADXStrength           = 20.0;         // Força mínima do ADX
+input bool   UseTrendValidation       = true;         // Usar validação de tendência
+input double MinDistanceFromMA        = 0.3;          // Distância mínima da MA
 
-// ======================================================================
-// ✅ FILTRO DE VOLUME REAL CORRIGIDO
-// ======================================================================
-input group "=== FILTRO DE VOLUME REAL (NOVO) ===";
-input bool   UseRealVolumeFilter     = true;
-input int    VolumeMAPeriod          = 15;
-input double MinVolumeMultiplier     = 0.5;
+input group "──── 📊 FILTRO DE VOLUME ────";
+input bool   UseRealVolumeFilter      = true;         // Usar filtro de volume
+input int    VolumeMAPeriod           = 15;           // Período MA de volume
+input double MinVolumeMultiplier      = 0.5;          // Multiplicador mínimo de volume
 
-// ✅ CONFIGURAÇÕES DE INDICADORES
-input group "=== CONFIGURAÇÕES DE INDICADORES ===";
-input bool   UseRSIValidation    = true;
-input double RSI_Overbought      = 75.0;
-input double RSI_Oversold        = 25.0;
-input bool   UseBBValidation     = true;
-input double BB_UpperThreshold   = 0.7;
-input double BB_LowerThreshold   = 0.3;
-input bool   UseADXValidation    = true;
-input double MinADXStrength      = 20.0;
-input bool   UseTrendValidation  = true;
-input double MinDistanceFromMA   = 0.3;
+// ──────────────────────────────────────────────────────────────────────
+// 🎯 3. GESTÃO DE STOPS E ALVOS
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🛑 STOP LOSS (PONTOS) ────";
+input bool   UseFixedSL               = true;         // Usar stop loss fixo
+input int    FixedSL_Points           = 35000;        // Stop loss em pontos
 
-input group "=== NEGOCIAÇÃO COM STOPS 100% POR PONTOS ===";
-input double LotSize    = 0.01;
-input int    MagicNumber    = 27101;
+input group "──── 🎯 TAKE PROFIT (PONTOS) ────";
+input bool   UseFixedTP               = true;         // Usar take profit fixo
+input int    FixedTP_Points           = 70000;        // Take profit em pontos
 
-// ✅ STOPS 100% POR PONTOS
-input group "=== STOP LOSS 100% POR PONTOS ===";
-input bool   UseFixedSL          = true;
-input int    FixedSL_Points      = 35000;
+input group "──── 🎯 TRAILING STOP DINÂMICO ────";
+input bool   UseDynamicTrailingStop   = false;        // Usar trailing stop dinâmico
+input int    TrailingStopPoints       = 20000;        // Trailing stop em pontos
+input int    TrailingStepPoints       = 5000;         // Passo do trailing em pontos
+input int    TrailingStartPoints      = 10000;        // Início do trailing em pontos
+input bool   UseATRTrailing           = false;        // Usar ATR para trailing
+input double ATRTrailingMultiplier    = 2.5;          // Multiplicador ATR trailing
+input bool   UseBreakevenStop         = false;        // Usar breakeven
+input int    BreakevenTriggerPoints   = 15000;        // Trigger do breakeven em pontos
+input bool   TrailBothSLandTP         = false;        // Trailing em SL e TP
 
-input group "=== TAKE PROFIT COM TRAILING (APENAS TP SE MOVE) ===";
-input bool   UseFixedTP          = true;
-input int    FixedTP_Points      = 70000;
+// ──────────────────────────────────────────────────────────────────────
+// 💼 4. GESTÃO DE POSIÇÕES
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 💎 BET SIZING INTELIGENTE ────";
+input bool   EnableSmartLot           = true;         // Habilitar lote inteligente
+input double HighQualityThreshold     = 0.3;          // Threshold alta qualidade
+input double UltraQualityThreshold    = 0.8;          // Threshold ultra qualidade
+input double SmartLotMultiplier       = 1.8;          // Multiplicador lote normal
+input double UltraLotMultiplier       = 3.0;          // Multiplicador lote ultra
+input double MaxAllowedLot            = 1.0;          // Lote máximo permitido
 
-// ======================================================================
-// ✅✅✅ TRAILING STOP DINÂMICO COMPLETO (CORRIGIDO)
-// ======================================================================
-input group "=== TRAILING STOP DINÂMICO COMPLETO ===";
-input bool   UseDynamicTrailingStop  = false;
-input int    TrailingStopPoints      = 20000;
-input int    TrailingStepPoints      = 5000;
-input int    TrailingStartPoints     = 10000;
-input bool   UseATRTrailing         = false;
-input double ATRTrailingMultiplier  = 2.5;
-input bool   UseBreakevenStop       = false;
-input int    BreakevenTriggerPoints = 15000;
-input bool   TrailBothSLandTP       = false;
+input group "──── 📊 PIRAMIDAÇÃO ────";
+input bool   EnablePyramiding         = true;         // Habilitar piramidação
+input int    MaxPyramidPositions      = 4;            // Máximo de posições pirâmide
+input double PyramidingDistanceATR    = 0.4;          // Distância entre posições (ATR)
+input bool   ReduceLotOnPyramiding    = false;        // Reduzir lote na piramidação
+input double PyramidingLotMultiplier  = 0.8;          // Multiplicador lote pirâmide
 
-// ======================================================================
-// ✅ BET SIZING CORRIGIDO
-// ======================================================================
-input group "=== BET SIZING (MAO PESADA) ===";
-input bool   EnableSmartLot        = true;
-input double HighQualityThreshold  = 0.3;
-input double UltraQualityThreshold = 0.8;
-input double SmartLotMultiplier    = 1.8;
-input double UltraLotMultiplier    = 3.0;
-input double MaxAllowedLot         = 1.0;
+input group "──── 🎯 CONTROLE DE DIREÇÃO ────";
+input bool   AllowOnlyOneDirection    = true;         // Permitir só uma direção
+input bool   CloseOppositeOnNewSignal = false;        // Fechar oposto em novo sinal
+input bool   WaitForAllCloseBeforeNew = true;         // Aguardar fechamento total
 
-// ✅ CONTROLE DE TEMPO ENTRE TRADES
-input int    MinMinutesBetweenTrades = 3;
+input group "──── 🎮 CONTROLE DE ENTRADAS ────";
+input int    MaxTradesPerDirection    = 4;            // Máximo trades por direção
+input int    MinBarsBetweenSameDirection = 2;         // Barras mínimas entre entradas
+input bool   UseVolatilityFilter      = true;         // Usar filtro de volatilidade
+input double MaxATRMultiplier         = 4.0;          // Multiplicador máximo ATR
 
-// ======================================================================
-// ✅ PIRAMIDAÇÃO CORRIGIDA
-// ======================================================================
-input group "=== PIRAMIDAÇÃO (SOMENTE MESMA DIREÇÃO) ===";
-input bool   EnablePyramiding = true;
-input int    MaxPyramidPositions = 4;
-input double PyramidingDistanceATR = 0.4;
-input bool   ReduceLotOnPyramiding = false;
-input double PyramidingLotMultiplier = 0.8;
+// ──────────────────────────────────────────────────────────────────────
+// 🧠 5. SISTEMA DE APRENDIZADO (Q-Learning)
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🧠 APRENDIZADO BÁSICO ────";
+input bool   UseSimpleRewardSystem    = true;         // Sistema de recompensa simples
+input double RewardWin                = 5.0;          // Recompensa por vitória
+input double RewardLoss               = -2.0;         // Penalidade por perda
+double LearningRate                   = 0.03;         // Taxa de aprendizado (fixo)
 
-// ======================================================================
-// ✅ DIREÇÃO ÚNICA POR CICLO
-// ======================================================================
-input group "=== CONTROLE DE DIREÇÃO ===";
-input bool   AllowOnlyOneDirection = true;
-input bool   CloseOppositeOnNewSignal = false;
-input bool   WaitForAllCloseBeforeNew = true;
+input group "──── 🎲 EXPLORAÇÃO ────";
+input double InitialExplorationRate   = 0.40;         // Taxa inicial de exploração (40%)
+input double MinExplorationRate       = 0.20;         // Taxa mínima de exploração (20%)
+input double ExplorationDecay         = 0.995;        // Decay da exploração
+input int    MinStateVisitsToTrade    = 2;            // Visitas mínimas para operar
 
-// ======================================================================
-// ✅ CONTROLE DE ENTRADAS
-// ======================================================================
-input group "=== CONTROLE DE ENTRADAS ===";
-input int    MaxTradesPerDirection = 4;
-input int    MinBarsBetweenSameDirection = 2;
-input bool   UseVolatilityFilter = true;
-input double MaxATRMultiplier = 4.0;
+input group "──── 🔄 SISTEMA HÍBRIDO ────";
+input bool   EnablePyramidingLearning = true;         // Aprendizado de piramidação
+input int    PyramidLearningBonus     = 10;           // Bônus aprendizado pirâmide
+input double PyramidBlockingMultiplier = 1.5;         // Multiplicador bloqueio pirâmide
+input int    MinPyramidVisitsForBlock = 50;           // Visitas mín. para bloquear pirâmide
 
-// ======================================================================
-// ✅ APRENDIZADO (CONFIGURAÇÕES OTIMIZADAS PARA PIRAMIDAÇÃO)
-// ======================================================================
-input group "=== APRENDIZADO OTIMIZADO PARA PIRAMIDAÇÃO ===";
-double LearningRate    = 0.03;      // ⚠️ ALTERADO: REDUZIDO - Aprender mais devagar
-input double InitialExplorationRate  = 0.40;  // ⚠️ ALTERADO: 40% inicial
-input double MinExplorationRate    = 0.20;    // ⚠️ ALTERADO: Mínimo 20%
-input double ExplorationDecay    = 0.995;     // ⚠️ ALTERADO: Decay mais rápido
-input int    MinStateVisitsToTrade = 2;       // ⚠️ ALTERADO: Apenas 2 visitas
+// ──────────────────────────────────────────────────────────────────────
+// 💾 6. MEMÓRIA E PERSISTÊNCIA
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 💾 OTIMIZAÇÃO DE MEMÓRIA ────";
+input bool   EnableMemoryOptimization = true;         // Habilitar otimização memória
+input int    MaxMemoryStates          = 1000;         // Máximo de estados na memória
+input bool   CompressQValues          = true;         // Comprimir Q-values
+input double QValuePrecision          = 2;            // Precisão dos Q-values
+input bool   AutoCleanMemory          = true;         // Limpeza automática
+input int    CleanMemoryAfterTrades   = 100;          // Limpar após N trades
+input bool   UseIncrementalSave       = true;         // Salvamento incremental
 
-// ⚡ SISTEMA HÍBRIDO OTIMIZADO PARA PIRAMIDAÇÃO
-input group "=== SISTEMA HÍBRIDO OTIMIZADO PARA PIRAMIDAÇÃO ===";
-input bool   EnablePyramidingLearning = true;
-input int    PyramidLearningBonus     = 10;
-input double PyramidBlockingMultiplier = 1.5;
-input int    MinPyramidVisitsForBlock = 50;
+input group "──── 🔄 DECAY E RESET ────";
+input bool   EnableMemoryDecay        = true;         // Habilitar decay de memória
+input double DecayFactor              = 0.05;         // Fator de decay (5%)
+input bool   EnableIntelligentReset   = true;         // Reset inteligente
+input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
+input int    BadStateMinVisits        = 3;            // Visitas mínimas para reset
+input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
+input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
-// ======================================================================
-// ⚡ SISTEMA DE MEMÓRIA OTIMIZADA (NOVO DO V30.7)
-// ======================================================================
-input group "=== SISTEMA DE MEMÓRIA OTIMIZADA ===";
-input bool   EnableMemoryOptimization = true;
-input int    MaxMemoryStates = 1000;  // Ajustado para número gerenciável
-input bool   CompressQValues = true;
-input double QValuePrecision = 2;
-input bool   AutoCleanMemory = true;
-input int    CleanMemoryAfterTrades = 100;
-input bool   UseIncrementalSave = true;
+input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
+input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
+input double BlockLossRateThreshold   = 0.75;         // Taxa perda para bloquear
+input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
+int MinVisitsForBlockDecision         = 30;           // Visitas mín. decisão bloqueio
 
-// ======================================================================
-// ✅✅✅ SISTEMA DE BLOQUEIO UNIFICADO (NOVA VERSÃO CORRIGIDA)
-// ======================================================================
-input group "=== SISTEMA DE BLOQUEIO UNIFICADO ===";
-input bool   EnableUnifiedBlockingSystem = true;
-input double BlockLossRateThreshold = 0.75;
-input double UnblockWinRateThreshold = 0.55;
-int MinVisitsForBlockDecision = 30;
+// ──────────────────────────────────────────────────────────────────────
+// 📤 7. EXPORTAÇÃO E LOGS
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 💾 EXPORTAÇÃO BINÁRIA ────";
+input bool   EnableMemoryExport       = true;         // Habilitar exportação
+input int    AutoExportMinutes        = 30;           // Intervalo auto-export (min)
+input bool   ExportOnDeinit           = true;         // Exportar ao finalizar
+input bool   CreateBackupFiles        = true;         // Criar backups
+input int    MaxBackupFiles           = 5;            // Máximo de backups
+input bool   ExportMemoryToTextFile   = true;         // Exportar para texto
+input int    TextExportIntervalMinutes = 60;          // Intervalo export texto (min)
 
-// ======================================================================
-// ✅ CONFIGURAÇÕES DE EXPORTAÇÃO DE MEMÓRIA
-// ======================================================================
-input group "=== EXPORTAÇÃO DE MEMÓRIA ===";
-input bool   EnableMemoryExport   = true;
-input int    AutoExportMinutes    = 30;
-input bool   ExportOnDeinit       = true;
-input bool   CreateBackupFiles    = true;
-input int    MaxBackupFiles       = 5;
-input bool   ExportMemoryToTextFile   = true;
-input int    TextExportIntervalMinutes = 60;
+input group "──── 📄 EXPORTAÇÃO TEXTO ────";
+input bool   EnableTextExport         = true;         // Habilitar export texto
+input int    TextExportMinInterval    = 30;           // Intervalo mínimo (min)
+input bool   ExportAllStates          = false;        // Exportar todos estados
+input bool   IncludeQValues           = true;         // Incluir Q-values
+input bool   IncludeStatistics        = true;         // Incluir estatísticas
+input int    MaxStatesToExport        = 500;          // Máximo estados exportar
 
-// ======================================================================
-// ✅ EXPORTAÇÃO PARA TEXTO (COMPLEMENTAR AO BINÁRIO)
-// ======================================================================
-input group "=== EXPORTAÇÃO PARA TEXTO ===";
-input bool   EnableTextExport     = true;
-input int    TextExportMinInterval   = 30;
-input bool   ExportAllStates      = false;
-input bool   IncludeQValues       = true;
-input bool   IncludeStatistics    = true;
-input int    MaxStatesToExport    = 500;
-
-// ======================================================================
-// ✅ HUD LEVE - CONFIGURAÇÕES OTIMIZADAS
-// ======================================================================
-input group "=== HUD LEVE ===";
-input bool   ShowHUD              = true;
-input int    HUD_X                = 10;
-input int    HUD_Y                = 20;
-input int    HUD_UpdateMS         = 500;
-input color  HUD_TitleColor       = clrLime;
-input color  HUD_TextColor        = clrWhite;
-input color  HUD_WarningColor     = clrOrange;
-input color  HUD_ErrorColor       = clrRed;
-input color  HUD_SuccessColor     = clrCyan;
-input bool   HUD_Minimal          = false;
+// ──────────────────────────────────────────────────────────────────────
+// 🖥️ 8. INTERFACE (HUD)
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🖥️ HUD (INTERFACE VISUAL) ────";
+input bool   ShowHUD                  = true;         // Mostrar HUD
+input int    HUD_X                    = 10;           // Posição X
+input int    HUD_Y                    = 20;           // Posição Y
+input int    HUD_UpdateMS             = 500;          // Intervalo atualização (ms)
+input color  HUD_TitleColor           = clrLime;      // Cor título
+input color  HUD_TextColor            = clrWhite;     // Cor texto
+input color  HUD_WarningColor         = clrOrange;    // Cor aviso
+input color  HUD_ErrorColor           = clrRed;       // Cor erro
+input color  HUD_SuccessColor         = clrCyan;      // Cor sucesso
+input bool   HUD_Minimal              = false;        // Modo minimalista
 
 // ======================================================================
 // ======================================================================
