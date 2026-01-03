@@ -1,7 +1,7 @@
 # Phoenix Robot - Resumo das Correções Implementadas
 
 ## Data: 2026-01-03
-## Atualização Final: 2026-01-03 (Correção de Bloqueio Prematuro)
+## Última Atualização: 2026-01-03 (Correção de Decay e Limitação de Visitas)
 
 ## Problemas Corrigidos
 
@@ -87,17 +87,32 @@
   - `UpdateQ()`: Removida verificação redundante de 8 visitas
   - `ChooseAction()`: 5 → MinVisitsForBlockDecision (30)
   - `GetStateQuality()`: 5, 10 → MinVisitsForBlockDecision (30)
+
+- **⚠️ CORREÇÃO FINAL #2 - Decay e Limitação de Visitas (commit d651ec8):**
+  - **Problema identificado:** Estados limitados a 5-9 visitas, impedindo bloqueio
+  - **Causa 1 - Fórmula de Decay Incorreta:**
+    - Bug: `g_stateVisits * DECAY_FACTOR` (0.05) → mantinha apenas 5%
+    - Fix: `g_stateVisits * (1.0 - DECAY_FACTOR)` → remove 5%, preserva 95%
+    - Com 21.447 ciclos de decay, estava destruindo contadores
+  - **Causa 2 - Funções de Limitação Artificial:**
+    - `FixStuckStatesProblem()`: Resetava estados de 10→9 visitas
+    - `ResetBlockingSystem()`: Resetava estados de 10→5 visitas
+    - Chamadas a cada hora + na inicialização
+    - Ambas desabilitadas (não mais necessárias)
   
 - **Consistência nas Regras:**
   - `BlockState()`: Respeita `MinVisitsForBlockDecision`
   - `ShouldBlockState()`: Respeita `MinVisitsForBlockDecision`
   - `MonitorBadStates()`: Respeita `MinVisitsForBlockDecision`
   - `ResetBadStates()`: Usa `BadStateMinVisits` (parâmetro configurável)
-  - **TODAS as 25+ funções agora consistentes**
+  - **TODAS as 27+ funções agora consistentes**
+  - **Decay funciona corretamente**
+  - **Sem limitações artificiais de visitas**
 
 **Parâmetros de Controle:**
 - `MinVisitsForBlockDecision = 30` (visitas mínimas para decisão de bloqueio)
 - `BadStateMinVisits = 3` (visitas mínimas para reset de estados ruins)
+- `DecayFactor = 0.05` (5% de esquecimento por ciclo - AGORA FUNCIONAL)
 - `BlockLossRateThreshold = 0.75` (75% de perdas para bloqueio)
 - `UnblockWinRateThreshold = 0.55` (55% de vitórias para desbloqueio)
 
@@ -141,7 +156,7 @@
 18. `OptimizeParametersDynamically()` - Usa SafeDivide
 19. `ExportMemoryToTextFileFunc()` - Usa SafeDivide
 
-**Segunda Rodada (correção final - commit e869c33):**
+**Segunda Rodada (thresholds hardcodados - commit e869c33):**
 20. `ResetBadStatesEnhanced()` - Corrigido para usar MinVisitsForBlockDecision
 21. `OverhaulBlockingSystem()` - Corrigido para usar MinVisitsForBlockDecision
 22. `IntelligentPartialReset()` - Corrigido para usar MinVisitsForBlockDecision
@@ -149,8 +164,14 @@
 24. `ChooseAction()` - Corrigido para usar MinVisitsForBlockDecision
 25. `GetStateQuality()` - Corrigido para usar MinVisitsForBlockDecision
 
-**Total: 25 funções modificadas**
+**Terceira Rodada (decay e limitação - commit d651ec8):**
+26. `ApplyStateDecay()` - Fórmula de decay corrigida (remove % ao invés de manter %)
+27. `FixStuckStatesProblem()` - Desabilitada (limitava visitas artificialmente)
+28. `ResetBlockingSystem()` - Desabilitada (resetava visitas de 10→5)
 
+**Total: 28 funções modificadas**
+
+## Testes Recomendados
 ## Testes Recomendados
 
 1. **Teste de Divisão por Zero:**
