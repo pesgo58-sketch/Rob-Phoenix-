@@ -454,10 +454,17 @@ int g_textExportCount = 0;
 // ======================================================================
 
 // ======================================================================
-// ✅✅✅ 1. FUNÇÃO: REMOVER LIMITE DE 10 VISITAS (CORREÇÃO DEFINITIVA)
+// ✅✅✅ 1. FUNÇÃO: REMOVER LIMITE DE 10 VISITAS (DESABILITADA)
 // ======================================================================
+// ⚠️ DESABILITADA: Esta função estava limitando artificialmente o crescimento
+// de visitas, impedindo que estados atingissem MinVisitsForBlockDecision (30).
+// Com as correções de bloqueio implementadas, não é mais necessária.
 void FixStuckStatesProblem()
 {
+   // Função desabilitada - não faz nada
+   return;
+   
+   /* CÓDIGO ORIGINAL COMENTADO
    Print("🔥🔥🔥 CORREÇÃO DE ESTADOS TRAVADOS EM 10 VISITAS");
    
    int fixedStates = 0;
@@ -522,14 +529,25 @@ void FixStuckStatesProblem()
       // Forçar save
       g_memoryDirty = true;
       SaveState();
+      SaveBrain();
+   }
+   */
+      SaveState();
    }
 }
 
 // ======================================================================
-// ✅✅✅ 2. FUNÇÃO: RESETAR SISTEMA DE BLOQUEIO (CORREÇÃO RADICAL)
+// ✅✅✅ 2. FUNÇÃO: RESETAR SISTEMA DE BLOQUEIO (DESABILITADA)
 // ======================================================================
+// ⚠️ DESABILITADA: Esta função estava reduzindo visitas de 10 para 5,
+// impedindo que estados acumulassem visitas suficientes para atingir
+// MinVisitsForBlockDecision (30). Não é mais necessária.
 void ResetBlockingSystem()
 {
+   // Função desabilitada - não faz nada
+   return;
+   
+   /* CÓDIGO ORIGINAL COMENTADO
    Print("🔄 RESETANDO SISTEMA DE BLOQUEIO COMPLETAMENTE");
    
    int unblocked = 0;
@@ -563,6 +581,9 @@ void ResetBlockingSystem()
    Print("   Contadores zerados: stateResets, stateDecays, totalBadStateResets");
    
    g_memoryDirty = true;
+   SaveState();
+   SaveBrain();
+   */
    SaveState();
    SaveBrain();
 }
@@ -741,13 +762,13 @@ void ResetBadStatesEnhanced()
 // ======================================================================
 
 // ======================================================================
-// ✅✅✅ 1. FUNÇÃO DE DECAIMENTO SUAVE (OBRIGATÓRIA)
+// ✅✅✅ 1. FUNÇÃO DE DECAIMENTO SUAVE (CORRIGIDA)
 // ======================================================================
 void ApplyStateDecay()
 {
    if(!EnableMemoryDecay) return;
    
-   const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário
+   const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário (% a esquecer)
    int statesDecayed = 0;
    double totalMemoryBefore = 0;
    double totalMemoryAfter = 0;
@@ -761,9 +782,11 @@ void ApplyStateDecay()
          // Aplicar decay somente em estados com histórico significativo
          if(g_stateVisits[s] > 10)
          {
-            g_stateVisits[s] = (int)(g_stateVisits[s] * DECAY_FACTOR);
-            g_stateLosses[s] = (int)(g_stateLosses[s] * DECAY_FACTOR);
-            g_stateWins[s] = (int)(g_stateWins[s] * DECAY_FACTOR);
+            // ✅ CORREÇÃO: Decay deve REMOVER X%, não MANTER X%
+            // Se DecayFactor = 0.05 (5%), deve manter 95% (1.0 - 0.05)
+            g_stateVisits[s] = (int)(g_stateVisits[s] * (1.0 - DECAY_FACTOR));
+            g_stateLosses[s] = (int)(g_stateLosses[s] * (1.0 - DECAY_FACTOR));
+            g_stateWins[s] = (int)(g_stateWins[s] * (1.0 - DECAY_FACTOR));
             
             // Garantir valores mínimos
             if(g_stateVisits[s] < 1 && g_stateVisits[s] > 0) g_stateVisits[s] = 1;
@@ -778,7 +801,7 @@ void ApplyStateDecay()
                int idx = s * NUM_ACTIONS + a;
                if(g_Q[idx] != 0.0)
                {
-                  g_Q[idx] *= DECAY_FACTOR;
+                  g_Q[idx] *= (1.0 - DECAY_FACTOR);
                }
             }
          }
