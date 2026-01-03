@@ -451,9 +451,16 @@ int g_textExportCount = 0;
 // Constante para comparação de ponto flutuante
 #define DIVISION_EPSILON 0.0000001
 
-// Controle de logging para evitar spam
+// Constante para posição padrão das Bollinger Bands
+#define BB_DEFAULT_POSITION 0.5
+
+// Controle de logging para evitar spam - SafeDivide
 static datetime g_lastDivisionWarningTime = 0;
 static int g_divisionWarningsSkipped = 0;
+
+// Controle de logging para evitar spam - SafeDivideInt
+static datetime g_lastDivisionIntWarningTime = 0;
+static int g_divisionIntWarningsSkipped = 0;
 
 // Função SafeDivide: Previne divisão por zero em todas as operações
 double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
@@ -491,24 +498,24 @@ double SafeDivideInt(int numerator, int denominator, double defaultValue = 0.0)
 {
    if(denominator == 0)
    {
-      // Rate limiter: logar no máximo 1 vez por segundo
+      // Rate limiter: logar no máximo 1 vez por segundo (variáveis separadas)
       datetime currentTime = TimeCurrent();
-      if(currentTime - g_lastDivisionWarningTime >= 1)
+      if(currentTime - g_lastDivisionIntWarningTime >= 1)
       {
          Print("⚠️ DIVISÃO POR ZERO (INT) DETECTADA E PREVENIDA! Numerador: ", IntegerToString(numerator), 
                " | Denominador: ", IntegerToString(denominator), " | Retornando: ", DoubleToString(defaultValue, 8));
          
-         if(g_divisionWarningsSkipped > 0)
+         if(g_divisionIntWarningsSkipped > 0)
          {
-            Print("   (", g_divisionWarningsSkipped, " avisos similares foram suprimidos)");
-            g_divisionWarningsSkipped = 0;
+            Print("   (", g_divisionIntWarningsSkipped, " avisos similares foram suprimidos)");
+            g_divisionIntWarningsSkipped = 0;
          }
          
-         g_lastDivisionWarningTime = currentTime;
+         g_lastDivisionIntWarningTime = currentTime;
       }
       else
       {
-         g_divisionWarningsSkipped++;
+         g_divisionIntWarningsSkipped++;
       }
       
       return defaultValue;
@@ -3036,7 +3043,8 @@ bool CheckRealVolume()
    }
    else
    {
-      g_volumeAverage = (long)SafeDivideInt((int)sumVol, (barsToCopy - 1), (double)g_currentVolume);
+      // Usar SafeDivide com doubles para evitar overflow
+      g_volumeAverage = (long)SafeDivide((double)sumVol, (double)(barsToCopy - 1), (double)g_currentVolume);
    }
    
    if(g_volumeAverage > 0)
@@ -3989,9 +3997,9 @@ int GetCurrentState()
    double bbPosition = 0;
    double bbRange = bb_upper[0] - bb_lower[0];
    if(bbRange > 0)
-      bbPosition = SafeDivide((price - bb_lower[0]), bbRange, 0.5);
+      bbPosition = SafeDivide((price - bb_lower[0]), bbRange, BB_DEFAULT_POSITION);
    else
-      bbPosition = 0.5;
+      bbPosition = BB_DEFAULT_POSITION;
    
    // ✅ Calcular buckets otimizados
    int maBucket = GetMADistanceBucket(maDistance);
@@ -4504,7 +4512,7 @@ bool ValidateWithBollingerBands(bool isBuy)
    
    if(bb_range <= 0) return false;
    
-   double bb_position = SafeDivide((price - bb_lower[0]), bb_range, 0.5);
+   double bb_position = SafeDivide((price - bb_lower[0]), bb_range, BB_DEFAULT_POSITION);
    
    if(isBuy)
    {
