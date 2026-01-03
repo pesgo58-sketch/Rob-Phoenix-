@@ -24,7 +24,7 @@
 // ====
 // ✅ PASSO 1 — CRIAR MEMÓRIA PERSISTENTE (OBRIGATÓRIO)
 // ====
-#define STATE_FILE "state_memory.bin"
+#define STATE_FILE "Phoenix_Files/Backups/state_memory.bin"
 
 // ====
 // Objetos utilitários
