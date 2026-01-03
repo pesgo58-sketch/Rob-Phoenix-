@@ -450,7 +450,7 @@ int g_textExportCount = 0;
 
 // Constante compartilhada para detecção de zero em cálculos financeiros
 // Valor 1e-10 apropriado para MQL5 onde preços têm precisão de 5-8 casas decimais
-#define SAFE_EPSILON 1e-10
+const double SAFE_EPSILON = 1e-10;
 
 //+------------------------------------------------------------------+
 //| Função SafeDivide - Realiza divisão segura evitando divisão por zero
@@ -3936,7 +3936,9 @@ int GetCurrentState()
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    // ✅ Cálculo da distância da MA
-   // Usar ATR se disponível, senão usar point * 10 como fallback
+   // Estratégia: Usar ATR se disponível, senão usar point * 10 como divisor alternativo
+   // Nota: Não podemos usar apenas defaultValue do SafeDivide pois precisamos
+   // de um divisor válido alternativo, não apenas um valor padrão de retorno
    double atrValue = atr[0];
    double divisor = (atrValue > SAFE_EPSILON) ? atrValue : (point * 10);
    double maDistance = SafeDivide((price - ma[0]), divisor, 0.0);
