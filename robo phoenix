@@ -458,10 +458,10 @@ int g_textExportCount = 0;
 //+------------------------------------------------------------------+
 double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
 {
-   // Use DBL_EPSILON scaled by magnitude for more appropriate zero detection
-   double epsilon = MathMax(DBL_EPSILON * 1000, 1e-10);
+   // Static epsilon for performance - only calculated once
+   static const double EPSILON = MathMax(DBL_EPSILON * 1000, 1e-10);
    
-   if(denominator == 0.0 || MathAbs(denominator) < epsilon)
+   if(denominator == 0.0 || MathAbs(denominator) < EPSILON)
    {
       static datetime lastWarningTime = 0;
       datetime currentTime = TimeCurrent();
@@ -3934,11 +3934,10 @@ int GetCurrentState()
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    // ✅ Cálculo da distância da MA
-   double maDistance = 0;
+   // Usar ATR se disponível, senão usar point * 10 como fallback
    double atrValue = atr[0];
-   // Use atrValue if valid, otherwise fallback to point * 10
-   double divisor = (atrValue > 0) ? atrValue : (point * 10);
-   maDistance = SafeDivide((price - ma[0]), divisor, 0.0);
+   double divisor = (atrValue > DBL_EPSILON * 1000) ? atrValue : (point * 10);
+   double maDistance = SafeDivide((price - ma[0]), divisor, 0.0);
    
    // ✅ Cálculo da posição nas Bollinger Bands
    double bbPosition = 0;
