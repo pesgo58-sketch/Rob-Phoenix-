@@ -456,7 +456,7 @@ int g_textExportCount = 0;
 //| Função SafeDivide - Realiza divisão segura evitando divisão por zero
 //| Parâmetros:
 //|   numerator   - O numerador da divisão
-//|   denominator - O denominador da divisão  
+//|   denominator - O denominador da divisão
 //|   defaultValue - Valor padrão a retornar se denominador for zero (padrão: 0.0)
 //| Retorna:
 //|   O resultado da divisão ou defaultValue se denominator == 0
@@ -3942,9 +3942,8 @@ int GetCurrentState()
    double maDistance = SafeDivide((price - ma[0]), divisor, 0.0);
    
    // ✅ Cálculo da posição nas Bollinger Bands
-   double bbPosition = 0;
    double bbRange = bb_upper[0] - bb_lower[0];
-   bbPosition = SafeDivide((price - bb_lower[0]), bbRange, 0.5);
+   double bbPosition = SafeDivide((price - bb_lower[0]), bbRange, 0.5);
    
    // ✅ Calcular buckets otimizados
    int maBucket = GetMADistanceBucket(maDistance);
