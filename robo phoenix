@@ -265,6 +265,7 @@ input color  HUD_WarningColor     = clrOrange;
 input color  HUD_ErrorColor       = clrRed;
 input color  HUD_SuccessColor     = clrCyan;
 input bool   HUD_Minimal          = false;
+input bool   HUD_DebugLog         = false;  // ✅ NOVO: Controlar logs de debug do HUD
 
 // ======================================================================
 // ✅✅✅ VARIÁVEIS GLOBAIS ADICIONADAS
@@ -324,7 +325,7 @@ int g_totalBadStateResets = 0;
 // ======================================================================
 string hudObjects[15];
 int hudObjectCount = 0;
-ulong hudLastUpdateTick = 0; // ✅ CORRIGIDO: Usar GetTickCount64() para precisão em milissegundos
+ulong hudLastUpdateTick = 0; // ✅ CORRIGIDO: Usar GetTickCount64() para precisão em millisegundos
 int cachedVisitedStates = -1;
 int cachedBlockedStates = -1;
 int cachedPositions = -1;
@@ -2776,12 +2777,21 @@ void UpdateHUDLight()
    }
    hudLastUpdateTick = currentTick;
    
-   // ✅ NOVO: Log de atualização do HUD (a cada 10 atualizações para não poluir o log)
-   static int updateCounter = 0;
-   updateCounter++;
-   if(updateCounter % 10 == 0)
+   // ✅ CORRIGIDO: Log de debug opcional com proteção contra overflow
+   if(HUD_DebugLog)
    {
-      Print("🖥️ HUD atualizado - Contador: ", updateCounter, " | Intervalo configurado: ", HUD_UpdateMS, "ms");
+      static int updateCounter = 0;
+      updateCounter++;
+      if(updateCounter % 10 == 0)
+      {
+         Print("🖥️ HUD atualizado - Contador: ", updateCounter, " | Intervalo configurado: ", HUD_UpdateMS, "ms");
+         
+         // Resetar contador se ficar muito grande para evitar overflow
+         if(updateCounter > 1000000)
+         {
+            updateCounter = 0;
+         }
+      }
    }
    
    // ✅ CORRIGIDO: Sempre buscar valores atuais para garantir sincronização em tempo real
@@ -5682,7 +5692,10 @@ int OnInit()
    }
    
    // ✅ NOVO: Configurar timer para atualização periódica do HUD
-   // O timer dispara a cada 1 segundo para garantir atualizações regulares
+   // Timer fixo em 1 segundo (1000ms) para garantir atualizações regulares
+   // mesmo durante inatividade do mercado. O intervalo real de atualização
+   // do HUD é controlado por HUD_UpdateMS dentro de UpdateHUDLight().
+   // Timer de 1s é um bom equilíbrio entre responsividade e eficiência.
    EventSetTimer(1);
    Print("⏰ Timer do HUD configurado para disparar a cada 1 segundo");
    
