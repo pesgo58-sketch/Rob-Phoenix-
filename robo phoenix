@@ -206,7 +206,7 @@ input bool   EnableMemoryDecay        = true;         // Habilitar decay de mem�
 input double DecayFactor              = 0.05;         // Fator de decay (5%)
 input bool   EnableIntelligentReset   = true;         // Reset inteligente
 input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
-input int    BadStateMinVisits        = 3;            // Visitas mínimas para reset
+input int    BadStateMinVisits        = 20;           // Visitas mínimas para reset
 input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
 input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
@@ -5548,7 +5548,7 @@ int OnInit()
    Print("⚙️ Configurações otimizadas forçadas:");
    Print("   • Exploration Rate: 40%");
    Print("   • MinVisitsToTrade: 2");
-   Print("   • BadStateMinVisits: 3");
+   Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
    
    if(EnableUnifiedBlockingSystem)
