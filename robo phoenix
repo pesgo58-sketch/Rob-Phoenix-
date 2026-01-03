@@ -214,7 +214,7 @@ input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
 input double BlockLossRateThreshold   = 0.75;         // Taxa perda para bloquear
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-int MinVisitsForBlockDecision         = 30;           // Visitas mín. decisão bloqueio
+int MinVisitsForBlockDecision         = 20;           // Visitas mín. decisão bloqueio
 
 // ──────────────────────────────────────────────────────────────────────
 // 📤 7. EXPORTAÇÃO E LOGS
@@ -438,7 +438,7 @@ int g_debugPerdas = 0;
 // ======================================================================
 // ✅✅✅ FUNÇÕES REMOVIDAS (d651ec8): FixStuckStatesProblem() e ResetBlockingSystem()
 // Essas funções limitavam artificialmente as visitas dos estados, impedindo
-// que atingissem MinVisitsForBlockDecision (30). Foram completamente removidas.
+// que atingissem MinVisitsForBlockDecision (20). Foram completamente removidas.
 // ======================================================================
 
 // ======================================================================
