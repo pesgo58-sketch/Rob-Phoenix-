@@ -1,6 +1,7 @@
 # Phoenix Robot - Resumo das Correções Implementadas
 
 ## Data: 2026-01-03
+## Atualização Final: 2026-01-03 (Correção de Bloqueio Prematuro)
 
 ## Problemas Corrigidos
 
@@ -77,12 +78,22 @@
   - Alterado de 3 visitas para `MinVisitsForBlockDecision`
   - Alterado de 5 visitas para `MinVisitsForBlockDecision` no reset
   - Adicionadas chamadas `InvalidateHUDCache()` para refletir mudanças
+
+- **⚠️ CORREÇÃO FINAL - Hardcoded Thresholds Eliminados:**
+  - Após feedback do usuário, identificadas 6 funções adicionais com thresholds hardcodados
+  - `ResetBadStatesEnhanced()`: 5, 8, 10, 15 → MinVisitsForBlockDecision (30)
+  - `OverhaulBlockingSystem()`: 5, 8, 10 → MinVisitsForBlockDecision (30)
+  - `IntelligentPartialReset()`: 5, 8, 10, 20 → MinVisitsForBlockDecision (30)
+  - `UpdateQ()`: Removida verificação redundante de 8 visitas
+  - `ChooseAction()`: 5 → MinVisitsForBlockDecision (30)
+  - `GetStateQuality()`: 5, 10 → MinVisitsForBlockDecision (30)
   
 - **Consistência nas Regras:**
   - `BlockState()`: Respeita `MinVisitsForBlockDecision`
   - `ShouldBlockState()`: Respeita `MinVisitsForBlockDecision`
   - `MonitorBadStates()`: Respeita `MinVisitsForBlockDecision`
   - `ResetBadStates()`: Usa `BadStateMinVisits` (parâmetro configurável)
+  - **TODAS as 25+ funções agora consistentes**
 
 **Parâmetros de Controle:**
 - `MinVisitsForBlockDecision = 30` (visitas mínimas para decisão de bloqueio)
@@ -109,6 +120,7 @@
 
 ## Funções Modificadas
 
+**Primeira Rodada (commits iniciais):**
 1. `SafeDivide()` - **NOVA** - Proteção global contra divisão por zero
 2. `CalculateWinRate()` - Usa SafeDivide
 3. `BlockState()` - Usa SafeDivide + InvalidateHUDCache
@@ -116,7 +128,7 @@
 5. `ShouldBlockState()` - Usa SafeDivide
 6. `ResetBadStates()` - Usa SafeDivide
 7. `AddActiveState()` - Adiciona InvalidateHUDCache
-8. `MonitorBadStates()` - Usa MinVisitsForBlockDecision + InvalidateHUDCache
+8. `MonitorBadStates()` - Usa MinVisitsForBlockDecision + InvalidateHUDCache (primeira correção)
 9. `UpdateHUDLight()` - Usa SafeDivide
 10. `DebugTradeCounting()` - Usa SafeDivide
 11. `CheckRealVolume()` - Usa SafeDivide
@@ -128,6 +140,16 @@
 17. `OnTick()` - Usa SafeDivide
 18. `OptimizeParametersDynamically()` - Usa SafeDivide
 19. `ExportMemoryToTextFileFunc()` - Usa SafeDivide
+
+**Segunda Rodada (correção final - commit e869c33):**
+20. `ResetBadStatesEnhanced()` - Corrigido para usar MinVisitsForBlockDecision
+21. `OverhaulBlockingSystem()` - Corrigido para usar MinVisitsForBlockDecision
+22. `IntelligentPartialReset()` - Corrigido para usar MinVisitsForBlockDecision
+23. `UpdateQ()` - Verificação redundante removida
+24. `ChooseAction()` - Corrigido para usar MinVisitsForBlockDecision
+25. `GetStateQuality()` - Corrigido para usar MinVisitsForBlockDecision
+
+**Total: 25 funções modificadas**
 
 ## Testes Recomendados
 
