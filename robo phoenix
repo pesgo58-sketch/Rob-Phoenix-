@@ -916,6 +916,9 @@ void PerformMemoryMaintenance()
       AutoUnblockGoodStates();
    }
    
+   // 5. Diagnóstico de bloqueio prematuro
+   DiagnosePrematureBlocking();
+   
    lastMaintenance = TimeCurrent();
    
    // Salvar após manutenção
@@ -927,6 +930,7 @@ void PerformMemoryMaintenance()
    Print("   • Estados resetados: ", g_totalBadStateResets);
    Print("   • Estados ativos: ", g_activeStatesCount);
    Print("   • Estados bloqueados: ", CountBlockedStates());
+   Print("   • MinVisitsForBlockDecision: ", MinVisitsForBlockDecision);
 }
 
 // ======================================================================
@@ -951,32 +955,48 @@ void BlockState(int state)
 
     int visits = g_stateVisits[state];
     int losses = g_stateLosses[state];
+    int wins = g_stateWins[state];
+    
+    // ✅ LOGGING DETALHADO: Sempre logar tentativa de bloqueio
+    Print("🔍 BlockState chamado para Estado ", state, 
+          " | Visitas: ", visits, 
+          " | Vitórias: ", wins,
+          " | Perdas: ", losses,
+          " | MinVisitsForBlockDecision: ", MinVisitsForBlockDecision);
     
     if(visits < MinVisitsForBlockDecision)
     {
-        Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
+        Print("✅ Estado ", state, " tem poucas visitas (", visits, "/", MinVisitsForBlockDecision, ") - NÃO bloqueando");
         return;
     }
     
     double lossRate = (double)losses / (double)visits;
+    double winRate = (double)wins / (double)visits;
+    
+    Print("📊 BlockState - Estado ", state, 
+          " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
+          " | Taxa de vitória: ", DoubleToString(winRate*100, 1), "%",
+          " | Threshold: ", DoubleToString(BlockLossRateThreshold*100, 1), "%");
     
     if(lossRate >= BlockLossRateThreshold)
     {
         g_stateBlocked[state] = true;
         g_stateLastBlockTime[state] = TimeCurrent();
         
-        Print("⛔ ESTADO BLOQUEADO CORRETAMENTE: ", state, 
+        Print("⛔⛔⛔ ESTADO BLOQUEADO: ", state, 
               " | Visitas REAIS: ", visits, 
+              " | Vitórias REAIS: ", wins,
               " | Perdas REAIS: ", losses, 
               " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
+              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
+              " | Threshold: ", DoubleToString(BlockLossRateThreshold*100, 1), "%");
         
         g_memoryDirty = true;
     }
     else
     {
         Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
-              DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
+              DoubleToString(lossRate*100, 1), "% (limite: ", DoubleToString(BlockLossRateThreshold*100, 1), "%)");
     }
 }
 
@@ -1896,16 +1916,17 @@ void MonitorBadStates()
          estadosAnalisados++;
          double winRate = CalculateWinRate(state);
          
-         // ✅ CORREÇÃO: REGRAS MAIS AGRESSIVAS
+         // ✅ CORREÇÃO: RESPEITAR MinVisitsForBlockDecision
          
-         // 1. BLOQUEAR estados com win rate < 25% e mais de 3 visitas
-         if(g_stateVisits[state] >= 3 && winRate < 0.25 && !g_stateBlocked[state])
+         // 1. BLOQUEAR estados somente após MinVisitsForBlockDecision visitas
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.25 && !g_stateBlocked[state])
          {
             g_stateBlocked[state] = true;
             bloqueados++;
             Print("⛔ BLOQUEIO Estado ", state, 
                   " | Win Rate: ", DoubleToString(winRate*100,1), "%",
-                  " | Visitas: ", g_stateVisits[state]);
+                  " | Visitas: ", g_stateVisits[state],
+                  " | Mínimo requerido: ", MinVisitsForBlockDecision);
          }
          
          // 2. RESETAR estados catastróficos (win rate < 15%)
@@ -2207,6 +2228,87 @@ int CountStatesWithMinVisits(int minVisits)
 }
 
 // ======================================================================
+// ✅✅✅ FUNÇÃO: DIAGNÓSTICO DE BLOQUEIO PREMATURO (NOVA)
+// ======================================================================
+void DiagnosePrematureBlocking()
+{
+   Print("=== DIAGNÓSTICO DE BLOQUEIO PREMATURO ===");
+   Print("⚙️ Configuração: MinVisitsForBlockDecision = ", MinVisitsForBlockDecision);
+   Print("⚙️ Configuração: BlockLossRateThreshold = ", DoubleToString(BlockLossRateThreshold*100, 1), "%");
+   
+   int totalBlocked = 0;
+   int prematureBlocked = 0; // Bloqueados com menos de MinVisitsForBlockDecision
+   int properlyBlocked = 0;   // Bloqueados com MinVisitsForBlockDecision ou mais
+   
+   for(int state = 0; state < NUM_STATES; state++)
+   {
+      if(g_stateBlocked[state])
+      {
+         totalBlocked++;
+         int visits = g_stateVisits[state];
+         int wins = g_stateWins[state];
+         int losses = g_stateLosses[state];
+         double winRate = CalculateWinRate(state);
+         
+         if(visits < MinVisitsForBlockDecision)
+         {
+            prematureBlocked++;
+            Print("❌❌❌ BLOQUEIO PREMATURO DETECTADO - Estado ", state,
+                  " | Visitas: ", visits, " (mínimo: ", MinVisitsForBlockDecision, ")",
+                  " | Win Rate: ", DoubleToString(winRate*100, 1), "%",
+                  " | Vitórias: ", wins, " | Perdas: ", losses);
+         }
+         else
+         {
+            properlyBlocked++;
+            if(properlyBlocked <= 5) // Mostrar apenas os primeiros 5
+            {
+               Print("✅ Bloqueio correto - Estado ", state,
+                     " | Visitas: ", visits,
+                     " | Win Rate: ", DoubleToString(winRate*100, 1), "%");
+            }
+         }
+      }
+   }
+   
+   Print("📊 RESUMO DO DIAGNÓSTICO:");
+   Print("   Total de estados bloqueados: ", totalBlocked);
+   Print("   Bloqueados PREMATURAMENTE (< ", MinVisitsForBlockDecision, " visitas): ", prematureBlocked);
+   Print("   Bloqueados CORRETAMENTE (>= ", MinVisitsForBlockDecision, " visitas): ", properlyBlocked);
+   
+   if(prematureBlocked > 0)
+   {
+      Print("⚠️⚠️⚠️ ATENÇÃO: ", prematureBlocked, " estados bloqueados prematuramente!");
+      Print("   Isso indica que há lógica de bloqueio não respeitando MinVisitsForBlockDecision");
+      
+      // Desbloquear estados bloqueados prematuramente
+      int unblocked = 0;
+      for(int state = 0; state < NUM_STATES; state++)
+      {
+         if(g_stateBlocked[state] && g_stateVisits[state] < MinVisitsForBlockDecision)
+         {
+            g_stateBlocked[state] = false;
+            unblocked++;
+            Print("🔓 Estado ", state, " DESBLOQUEADO (bloqueio prematuro corrigido)");
+         }
+      }
+      Print("✅ ", unblocked, " estados desbloqueados automaticamente");
+      
+      if(unblocked > 0)
+      {
+         g_memoryDirty = true;
+         SaveState();
+      }
+   }
+   else
+   {
+      Print("✅✅✅ Nenhum bloqueio prematuro detectado!");
+   }
+   
+   Print("=== FIM DO DIAGNÓSTICO ===");
+}
+
+// ======================================================================
 // ✅✅✅ ✅✅✅ NOVAS FUNÇÕES ADICIONADAS
 // ======================================================================
 
@@ -2313,30 +2415,29 @@ void OverhaulBlockingSystem()
    int blockedBefore = CountBlockedStates();
    int totalVisited = g_activeStatesCount;
    
-   // ✅ NOVAS REGRAS INTELIGENTES
+   // ✅ NOVAS REGRAS INTELIGENTES - RESPEITANDO MinVisitsForBlockDecision
    for(int state = 0; state < NUM_STATES; state++)
    {
       if(g_stateVisits[state] > 0)
       {
          double winRate = CalculateWinRate(state);
          
-         // ✅ REGRAS PARA BLOQUEIO (MAIS RESTRITIVAS)
+         // ✅ REGRAS PARA BLOQUEIO (RESPEITANDO MÍNIMO DE VISITAS)
          bool shouldBeBlocked = false;
          
-         // 1. Muito ruim com histórico suficiente
-         if(g_stateVisits[state] >= 10 && winRate < 0.20)
+         // Só bloquear se tiver visitado o mínimo necessário
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision)
          {
-            shouldBeBlocked = true;
-         }
-         // 2. Catastrófico mesmo com menos visitas
-         else if(g_stateVisits[state] >= 5 && winRate < 0.10)
-         {
-            shouldBeBlocked = true;
-         }
-         // 3. Nunca ganhou com visitas significativas
-         else if(g_stateVisits[state] >= 8 && winRate == 0.0)
-         {
-            shouldBeBlocked = true;
+            // 1. Muito ruim com histórico suficiente
+            if(winRate < 0.20)
+            {
+               shouldBeBlocked = true;
+            }
+            // 2. Nunca ganhou com visitas muito significativas
+            else if(g_stateVisits[state] >= (MinVisitsForBlockDecision * 1.5) && winRate == 0.0)
+            {
+               shouldBeBlocked = true;
+            }
          }
          
          // ✅ REGRAS PARA DESBLOQUEIO (MAIS LENIENTES)
@@ -2348,7 +2449,7 @@ void OverhaulBlockingSystem()
             shouldBeUnblocked = true;
          }
          // 2. Poucas visitas, não bloquear prematuramente
-         else if(g_stateVisits[state] < 5)
+         else if(g_stateVisits[state] < MinVisitsForBlockDecision)
          {
             shouldBeUnblocked = true;
          }
@@ -2362,10 +2463,14 @@ void OverhaulBlockingSystem()
          if(shouldBeBlocked && !g_stateBlocked[state])
          {
             g_stateBlocked[state] = true;
+            Print("⛔ OverhaulBlockingSystem - Estado ", state, " bloqueado | Win rate: ", 
+                  DoubleToString(winRate*100,1), "% | Visitas: ", g_stateVisits[state]);
          }
          else if(shouldBeUnblocked && g_stateBlocked[state])
          {
             g_stateBlocked[state] = false;
+            Print("✅ OverhaulBlockingSystem - Estado ", state, " desbloqueado | Win rate: ", 
+                  DoubleToString(winRate*100,1), "% | Visitas: ", g_stateVisits[state]);
          }
       }
    }
@@ -2379,6 +2484,7 @@ void OverhaulBlockingSystem()
    Print("   Bloqueados depois: ", blockedAfter, " (", 
          totalVisited > 0 ? DoubleToString((double)blockedAfter/totalVisited*100,1) : "0", "%)");
    Print("   Mudança: ", blockedAfter - blockedBefore);
+   Print("   MinVisitsForBlockDecision: ", MinVisitsForBlockDecision);
    
    g_memoryDirty = true;
 }
@@ -2399,12 +2505,14 @@ void IntelligentPartialReset()
       {
          double winRate = CalculateWinRate(state);
          
-         // ✅ CRITÉRIOS PARA RESET COMPLETO
-         if((g_stateVisits[state] >= 10 && winRate < 0.15) || // Muito ruim
-            (g_stateVisits[state] >= 5 && winRate == 0.0) ||  // Nunca ganhou
-            (g_stateVisits[state] > 20 && winRate < 0.25))    // Histórico longo ruim
+         // ✅ CRITÉRIOS PARA RESET COMPLETO - RESPEITANDO MÍNIMO DE VISITAS
+         if((g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15) || // Muito ruim com visitas suficientes
+            (g_stateVisits[state] >= (MinVisitsForBlockDecision * 1.5) && winRate < 0.25))    // Histórico longo ruim
          {
             // Reset completo
+            int oldVisits = g_stateVisits[state];
+            double oldWinRate = winRate;
+            
             g_stateVisits[state] = 0;
             g_stateWins[state] = 0;
             g_stateLosses[state] = 0;
@@ -2415,11 +2523,16 @@ void IntelligentPartialReset()
                g_Q[state * NUM_ACTIONS + a] = 0.0;
             }
             
+            Print("♻️ IntelligentPartialReset - Estado ", state, " RESETADO | Visitas antigas: ", 
+                  oldVisits, " | Win rate antiga: ", DoubleToString(oldWinRate*100,1), "%");
+            
             statesReset++;
          }
-         // ✅ RESET PARCIAL PARA ESTADOS MÉDIOS
-         else if(g_stateVisits[state] >= 8 && winRate < 0.30)
+         // ✅ RESET PARCIAL PARA ESTADOS MÉDIOS - Apenas se tiver visitas suficientes
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.30)
          {
+            int oldVisits = g_stateVisits[state];
+            
             // Manter 30% da memória
             g_stateVisits[state] = (int)(g_stateVisits[state] * 0.3);
             g_stateWins[state] = (int)(g_stateWins[state] * 0.3);
@@ -2435,6 +2548,9 @@ void IntelligentPartialReset()
             {
                g_Q[state * NUM_ACTIONS + a] *= 0.3;
             }
+            
+            Print("🔄 IntelligentPartialReset - Estado ", state, " PARCIALMENTE RESETADO | Visitas: ", 
+                  oldVisits, " -> ", g_stateVisits[state]);
             
             statesRetained++;
          }
@@ -3246,12 +3362,13 @@ void UpdateQ(int state, int action, double reward)
    {
       double winRate = CalculateWinRate(state);
       
-      // Só bloquear se realmente for muito ruim
-      if(winRate < 0.25 && g_stateVisits[state] >= 8)
+      // Só bloquear se realmente for muito ruim E tiver visitas suficientes
+      if(winRate < 0.25 && g_stateVisits[state] >= MinVisitsForBlockDecision)
       {
          g_stateBlocked[state] = true;
          Print("⛔ Estado ", state, " bloqueado - Win rate muito baixa: ", 
-               DoubleToString(winRate*100,1), "%");
+               DoubleToString(winRate*100,1), "% | Visitas: ", g_stateVisits[state],
+               " | Mínimo: ", MinVisitsForBlockDecision);
       }
       else if(g_stateBlocked[state] && winRate >= 0.40)
       {
@@ -5663,16 +5780,21 @@ int OnInit()
    Print("   3. ✅ Reset parcial em vez de completo");
    Print("   4. ✅ Correção automática de estados travados");
    Print("   5. ✅ Sistema anti-bloqueio-erroneo ativado");
+   Print("   6. ✅ NOVO: Bloqueio apenas após ", MinVisitsForBlockDecision, " visitas");
    Print("🔥 NOVAS FUNÇÕES ADICIONADAS:");
    Print("   • EmergencyCounterFix() - Correção emergencial de contadores");
    Print("   • OverhaulBlockingSystem() - Revisão completa do bloqueio");
    Print("   • IntelligentPartialReset() - Reset parcial inteligente");
    Print("   • OptimizeParametersDynamically() - Otimização dinâmica");
+   Print("   • DiagnosePrematureBlocking() - Diagnóstico de bloqueio prematuro");
    Print("===============================================================");
    
    // ✅ EXECUTAR CORREÇÃO INICIAL
    FixStuckStatesProblem();
    ResetBlockingSystem();
+   
+   // ✅ DIAGNÓSTICO DE BLOQUEIO PREMATURO
+   DiagnosePrematureBlocking();
    
    if(ShowHUD)
    {
