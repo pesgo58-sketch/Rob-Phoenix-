@@ -445,6 +445,40 @@ datetime g_lastTextExportTime = 0;
 int g_textExportCount = 0;
 
 // ======================================================================
+// ✅✅✅ FUNÇÃO SAFEDIVIDE - PROTEÇÃO CONTRA DIVISÃO POR ZERO
+// ======================================================================
+//+------------------------------------------------------------------+
+//| Função SafeDivide - Realiza divisão segura evitando divisão por zero
+//| Parâmetros:
+//|   numerator   - O numerador da divisão
+//|   denominator - O denominador da divisão  
+//|   defaultValue - Valor padrão a retornar se denominador for zero (padrão: 0.0)
+//| Retorna:
+//|   O resultado da divisão ou defaultValue se denominator == 0
+//+------------------------------------------------------------------+
+double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
+{
+   if(denominator == 0.0 || MathAbs(denominator) < 0.0000001)
+   {
+      static datetime lastWarningTime = 0;
+      datetime currentTime = TimeCurrent();
+      
+      // Log warning apenas uma vez por minuto para evitar spam
+      if(currentTime - lastWarningTime > 60)
+      {
+         Print("⚠️ DIVISÃO POR ZERO EVITADA | Numerador: ", DoubleToString(numerator, 8), 
+               " | Denominador: ", DoubleToString(denominator, 8), 
+               " | Retornando valor padrão: ", DoubleToString(defaultValue, 8));
+         lastWarningTime = currentTime;
+      }
+      
+      return defaultValue;
+   }
+   
+   return numerator / denominator;
+}
+
+// ======================================================================
 // ✅✅✅ CORREÇÕES AGUDAS PARA O PROBLEMA DE ESTADOS TRAVADOS
 // ======================================================================
 
@@ -799,7 +833,7 @@ void ApplyStateDecay()
    g_totalDecayCycles++;
    
    double memoryReduction = totalMemoryBefore > 0 ? 
-                          (1.0 - (totalMemoryAfter / totalMemoryBefore)) * 100 : 0;
+                          (1.0 - SafeDivide(totalMemoryAfter, totalMemoryBefore, 1.0)) * 100 : 0;
    
    Print("🔄 DECAY APLICADO: ", 
          "Estados ajustados: ", statesDecayed,
@@ -823,7 +857,7 @@ void ResetBadStates()
    {
       if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
       
-      double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+      double lossRate = SafeDivide((double)g_stateLosses[s], (double)g_stateVisits[s], 0.0);
       
       // ⚠️ MODIFICAÇÃO CRÍTICA: Condição mais agressiva
       if((lossRate > BadStateLossThreshold || (g_stateVisits[s] > 10 && g_stateWins[s] == 0)) 
@@ -958,7 +992,7 @@ void BlockState(int state)
         return;
     }
     
-    double lossRate = (double)losses / (double)visits;
+    double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     
     if(lossRate >= BlockLossRateThreshold)
     {
@@ -1016,7 +1050,7 @@ bool ShouldBlockState(int state)
     
     if(visits < MinVisitsForBlockDecision) return false;
     
-    double lossRate = (double)losses / (double)visits;
+    double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     
     return (lossRate >= BlockLossRateThreshold);
 }
@@ -1144,7 +1178,7 @@ double CalculateWinRate(int state)
     if(state < 0 || state >= NUM_STATES) return 0.0;
     if(g_stateVisits[state] == 0) return 0.0;
     
-    return (double)g_stateWins[state] / (double)g_stateVisits[state];
+    return SafeDivide((double)g_stateWins[state], (double)g_stateVisits[state], 0.0);
 }
 
 int CountBlockedStates()
@@ -2072,7 +2106,7 @@ void DebugTradeCounting()
          // Verificar estados que deveriam estar bloqueados
          if(g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
-            double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+            double lossRate = SafeDivide((double)g_stateLosses[s], (double)g_stateVisits[s], 0.0);
             if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
             {
                Print("⚠️ Estado ", s, " deveria estar bloqueado! Loss rate: ", 
@@ -2476,7 +2510,7 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
    
    if(currentWinRate < 0.25)
    {
@@ -2960,7 +2994,7 @@ bool CheckRealVolume()
    
    if(g_volumeAverage > 0)
    {
-      g_volumeMultiplier = (double)g_currentVolume / (double)g_volumeAverage;
+      g_volumeMultiplier = SafeDivide((double)g_currentVolume, (double)g_volumeAverage, 1.0);
       g_volumeStrength = g_volumeMultiplier;
       cachedVolume = -1;
    }
@@ -3822,7 +3856,7 @@ int GetBBBucket(double bbPosition)
 // ✅ Função para calcular bucket volatilidade
 int GetVolatilityBucket(double atrCurrent, double atrPrevious)
 {
-   double ratio = (atrPrevious > 0) ? atrCurrent / atrPrevious : 1.0;
+   double ratio = SafeDivide(atrCurrent, atrPrevious, 1.0);
    
    if(ratio < 0.8) return 0;             // Volatilidade diminuindo
    else return 1;                        // Volatilidade estável/aumentando
@@ -3900,15 +3934,15 @@ int GetCurrentState()
    double maDistance = 0;
    double atrValue = atr[0];
    if(atrValue > 0)
-      maDistance = (price - ma[0]) / atrValue;
+      maDistance = SafeDivide((price - ma[0]), atrValue, 0.0);
    else
-      maDistance = (price - ma[0]) / (point * 10);
+      maDistance = SafeDivide((price - ma[0]), (point * 10), 0.0);
    
    // ✅ Cálculo da posição nas Bollinger Bands
    double bbPosition = 0;
    double bbRange = bb_upper[0] - bb_lower[0];
    if(bbRange > 0)
-      bbPosition = (price - bb_lower[0]) / bbRange;
+      bbPosition = SafeDivide((price - bb_lower[0]), bbRange, 0.5);
    else
       bbPosition = 0.5;
    
@@ -4423,7 +4457,7 @@ bool ValidateWithBollingerBands(bool isBuy)
    
    if(bb_range <= 0) return false;
    
-   double bb_position = (price - bb_lower[0]) / bb_range;
+   double bb_position = SafeDivide((price - bb_lower[0]), bb_range, 0.5);
    
    if(isBuy)
    {
@@ -4529,7 +4563,7 @@ bool ValidateWithTrend(bool isBuy)
       atr_value = price * 0.005;
    }
    
-   double distance_from_ma = (price - ma[0]) / atr_value;
+   double distance_from_ma = SafeDivide((price - ma[0]), atr_value, 0.0);
    
    if(isBuy)
    {
@@ -5002,7 +5036,7 @@ void UpdateLearningStats()
    
    if(qCount > 0)
    {
-      g_averageQValue = sumQ / qCount;
+      g_averageQValue = SafeDivide(sumQ, (double)qCount, 0.0);
    }
    else
    {
@@ -5180,7 +5214,7 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
       
       if(currentWinRate < 0.20)
       {
@@ -5200,7 +5234,7 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
       if(blockedRatio > 0.7 && g_activeStatesCount > 50)
       {
          Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
@@ -5414,8 +5448,8 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       
       if(g_totalTrades > 0)
       {
-         double winRate = (double)g_totalWins/g_totalTrades*100;
-         double lossRate = (double)g_totalLosses/g_totalTrades*100;
+         double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
+         double lossRate = SafeDivide((double)g_totalLosses, (double)g_totalTrades, 0.0) * 100;
          
          string winsInfo = "  Vitórias REAIS: " + IntegerToString(g_totalWins) + 
                           " (" + DoubleToString(winRate, 1) + "%)";
@@ -5492,7 +5526,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       int visits = sortedStates[i][1];
       int losses = g_stateLosses[state];
       int wins = g_stateWins[state];
-      double winRate = visits > 0 ? (double)wins / visits * 100 : 0;
+      double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
       bool isBlocked = g_stateBlocked[state];
       
       string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
