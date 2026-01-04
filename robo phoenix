@@ -1494,16 +1494,25 @@ bool SaveBrainToFile(string filename)
 
 bool LoadBrainFromFile(string filename)
 {
-   if(!FileIsExist(filename, FILE_COMMON)) return false;
+   if(!FileIsExist(filename, FILE_COMMON))
+   {
+      Print("❌ Arquivo não existe: ", filename);
+      return false;
+   }
 
    int h = FileOpen(filename, FILE_READ|FILE_BIN|FILE_COMMON);
-   if(h == INVALID_HANDLE) return false;
+   if(h == INVALID_HANDLE)
+   {
+      Print("❌ Erro ao abrir arquivo: ", filename, " (Erro: ", GetLastError(), ")");
+      return false;
+   }
 
    int magic = FileReadInteger(h);
    int version = FileReadInteger(h);
    
    if(magic != FILE_MAGIC || version != FILE_VERSION)
    {
+      Print("❌ Versão incompatível. Magic: ", magic, " (esperado: ", FILE_MAGIC, "), Versão: ", version, " (esperada: ", FILE_VERSION, ")");
       FileClose(h);
       return false;
    }
@@ -1538,6 +1547,8 @@ bool LoadBrainFromFile(string filename)
    int tempActiveStatesCount = FileReadInteger(h);
    g_activeStatesCount = tempActiveStatesCount;
    
+   Print("📊 Carregando ", g_activeStatesCount, " estados ativos...");
+   
    for(int i = 0; i < g_activeStatesCount; i++)
    {
       int state = FileReadInteger(h);
@@ -1558,6 +1569,10 @@ bool LoadBrainFromFile(string filename)
             double qValue = FileReadDouble(h);
             g_Q[state * NUM_ACTIONS + a] = qValue;
          }
+      }
+      else
+      {
+         Print("⚠️ Estado inválido encontrado: ", state, " (ignorando)");
       }
    }
    
@@ -1611,9 +1626,12 @@ bool LoadBrainFromFile(string filename)
    FileClose(h);
    
    Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
-   Print("📊 Estados bloqueados carregados: ", CountBlockedStates());
+   Print("📊 Estados bloqueados: ", CountBlockedStates());
    Print("📊 Ciclos de decay: ", g_totalDecayCycles);
    Print("📊 Estados resetados: ", g_totalBadStateResets);
+   Print("📊 Total de trades: ", g_totalTrades, " (Wins: ", g_totalWins, ", Losses: ", g_totalLosses, ")");
+   Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+   
    return true;
 }
 
@@ -1716,25 +1734,66 @@ bool LoadBrain()
 {
    string fn = GetBrainFileName();
    
+   Print("🔍 Tentando carregar arquivo principal: ", fn);
+   
    if(!FileIsExist(fn, FILE_COMMON))
    {
-      Print("⚠️ Arquivo principal não encontrado, procurando backup...");
+      Print("⚠️ Arquivo principal não encontrado: ", fn);
+      Print("🔍 Procurando backups...");
+      
+      for(int i = 0; i <= MaxBackupFiles; i++)
+      {
+         string backupFile = GetBackupFileName(i);
+         Print("   Verificando: ", backupFile);
+         if(FileIsExist(backupFile, FILE_COMMON))
+         {
+            Print("✅ Backup encontrado: ", backupFile);
+            Print("🔄 Carregando backup...");
+            bool result = LoadBrainFromFile(backupFile);
+            if(result)
+            {
+               Print("✅ Backup carregado com sucesso!");
+               // Salva como arquivo principal para próxima vez
+               SaveBrainToFile(fn);
+               Print("✅ Backup copiado para arquivo principal");
+            }
+            return result;
+         }
+      }
+      
+      Print("❌ Nenhum backup encontrado, será criada nova memória");
+      return false;
+   }
+   
+   Print("✅ Arquivo principal encontrado, carregando...");
+   bool result = LoadBrainFromFile(fn);
+   if(result)
+   {
+      Print("✅ Arquivo principal carregado com sucesso!");
+   }
+   else
+   {
+      Print("❌ ERRO ao carregar arquivo principal!");
+      Print("🔍 Tentando carregar backup como fallback...");
       
       for(int i = 0; i <= MaxBackupFiles; i++)
       {
          string backupFile = GetBackupFileName(i);
          if(FileIsExist(backupFile, FILE_COMMON))
          {
-            Print("🔄 Carregando backup: ", backupFile);
-            return LoadBrainFromFile(backupFile);
+            Print("🔄 Tentando backup: ", backupFile);
+            result = LoadBrainFromFile(backupFile);
+            if(result)
+            {
+               Print("✅ Backup carregado com sucesso!");
+               return result;
+            }
          }
       }
-      
-      Print("❌ Nenhum backup encontrado, criando nova memória");
-      return false;
+      Print("❌ Falha ao carregar qualquer arquivo");
    }
    
-   return LoadBrainFromFile(fn);
+   return result;
 }
 
 void ResetQTable()
@@ -5803,26 +5862,51 @@ int OnInit()
 // ======================================================================
 void OnDeinit(const int reason)
 {
-   Print("💾 Salvando memória antes de fechar...");
+   Print("💾 Salvando memória antes de fechar... (Razão: ", reason, ")");
    
-   if(g_memoryInitialized)
+   // Força salvamento do arquivo principal independente do estado de memória
+   string mainFile = GetBrainFileName();
+   if(!CreateDirectoryForFile(mainFile))
    {
-      SaveBrain();
+      Print("❌ ERRO: Não foi possível criar diretório para arquivo principal");
+   }
+   else
+   {
+      if(SaveBrainToFile(mainFile))
+      {
+         Print("✅ Arquivo principal salvo com sucesso: ", mainFile);
+      }
+      else
+      {
+         Print("❌ ERRO: Falha ao salvar arquivo principal");
+      }
    }
    
+   // Salva estado adicional
    SaveState();
    
+   // Salva backup final se habilitado
    if(CreateBackupFiles)
    {
       string finalBackup = "Phoenix_Files/Backups/final_backup_" + 
-                          TimeToString(TimeCurrent(), TIME_DATE) + "_SUPER_CORRIGIDO.bin";
-      SaveBrainToFile(finalBackup);
+                          TimeToString(TimeCurrent(), TIME_DATE) + ".bin";
+      if(SaveBrainToFile(finalBackup))
+      {
+         Print("✅ Backup final salvo: ", finalBackup);
+      }
+      else
+      {
+         Print("⚠️ Falha ao salvar backup final");
+      }
    }
    
+   // Export texto se habilitado
    if(EnableTextExport)
    {
       ExportMemoryToTextFileFunc(true);
    }
+   
+   Print("💾 Processo de salvamento concluído");
    
    IndicatorRelease(g_maHandle);
    IndicatorRelease(g_adxHandle);
