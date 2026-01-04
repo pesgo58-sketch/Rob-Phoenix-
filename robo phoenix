@@ -24,7 +24,7 @@
 // ====
 // ✅ PASSO 1 — CRIAR MEMÓRIA PERSISTENTE (OBRIGATÓRIO)
 // ====
-#define STATE_FILE "state_memory.bin"
+#define STATE_FILE "Phoenix_Files/Backups/state_memory.bin"
 
 // ====
 // Objetos utilitários
@@ -57,6 +57,11 @@ CHistoryOrderInfo historyOrderInfo;
 // ============================================================
 const int MIN_VISITS_FOR_BLOCK = 30;
 
+// ✅ CONSTANTE PARA BOLLINGER BANDS
+// Quando a banda tem range zero (inválida), usar 0.5 (meio da banda)
+// como valor neutro, indicando que o preço está no centro
+const double BB_NEUTRAL_POSITION = 0.5;
+
 // Persistência
 #define FILE_MAGIC   0x50484F45
 #define FILE_VERSION 3073
@@ -68,274 +73,244 @@ const int MIN_VISITS_FOR_BLOCK = 30;
   #define DBL_MAX 1.7e308
 #endif
 
-// ======================================================================
-// Inputs — organização por grupos
-// ======================================================================
+// ══════════════════════════════════════════════════════════════════════
+// 📋 PARÂMETROS DE ENTRADA - ORGANIZADOS POR CATEGORIA
+// ══════════════════════════════════════════════════════════════════════
 
-input group "=== LIMITES DIÁRIOS ===";
-input int    MaxTradesPerDay    = 30;
-input int    ConsecutiveLossLimit    = 15;
+// ──────────────────────────────────────────────────────────────────────
+// 🛡️ 1. CONTROLE DE RISCO E LIMITES
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🛡️ LIMITES DIÁRIOS ────";
+input int    MaxTradesPerDay          = 30;           // Máximo de trades por dia
+input int    ConsecutiveLossLimit     = 15;           // Limite de perdas consecutivas
 
-// ======================================================================
-// ✅ APRENDIZADO CORRIGIDO
-// ======================================================================
-input group "=== APRENDIZADO CORRIGIDO ===";
-input bool   UseSimpleRewardSystem   = true;
-input double RewardWin     = 5.0;
-input double RewardLoss    = -2.0;
+input group "──── 💰 NEGOCIAÇÃO BÁSICA ────";
+input double LotSize                  = 0.01;         // Tamanho do lote padrão
+input int    MagicNumber              = 27101;        // Número mágico das ordens
+input int    MinMinutesBetweenTrades  = 3;            // Tempo mínimo entre trades
 
-input group "=== SISTEMA DE DECAY E RESET ===";
-input bool   EnableMemoryDecay       = true;
-input double DecayFactor            = 0.05;  // ⚠️ ALTERADO: 5% de esquecimento por ciclo (mais agressivo)
-input bool   EnableIntelligentReset  = true;
-input double BadStateLossThreshold   = 0.60;   // ⚠️ ALTERADO: 60% de perdas para reset
-input int    BadStateMinVisits       = 3;      // ⚠️ ALTERADO: Apenas 3 visitas
-input int    DecayCheckIntervalHours = 1;      // Verificar decay a cada hora
-input bool   ExcludeNOPFromVisits    = true;   // NOP não conta como visita
+// ──────────────────────────────────────────────────────────────────────
+// 📈 2. INDICADORES TÉCNICOS
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 📊 INDICADORES PRINCIPAIS ────";
+input int    MAPeriod                 = 200;          // Período da Média Móvel
+input ENUM_MA_METHOD  MAMethod        = MODE_EMA;     // Tipo da Média Móvel
+input int    RSIPeriod                = 20;           // Período do RSI
+input int    BBPeriod                 = 24;           // Período das Bandas de Bollinger
+input double BBDeviation              = 2.2;          // Desvio das Bandas de Bollinger
+input int    ATRPeriod                = 18;           // Período do ATR
 
-input group "=== INDICADORES ===";
-input int    MAPeriod    = 200;
-input ENUM_MA_METHOD  MAMethod    = MODE_EMA;
-input int    RSIPeriod   = 20;
-input int    BBPeriod    = 24;
-input double BBDeviation = 2.2;
-input int    ATRPeriod   = 18;
+input group "──── ✅ VALIDAÇÕES DE INDICADORES ────";
+input bool   UseRSIValidation         = true;         // Usar validação por RSI
+input double RSI_Overbought           = 75.0;         // RSI sobrecomprado
+input double RSI_Oversold             = 25.0;         // RSI sobrevendido
+input bool   UseBBValidation          = true;         // Usar validação por BB
+input double BB_UpperThreshold        = 0.7;          // Threshold superior BB
+input double BB_LowerThreshold        = 0.3;          // Threshold inferior BB
+input bool   UseADXValidation         = true;         // Usar validação por ADX
+input double MinADXStrength           = 20.0;         // Força mínima do ADX
+input bool   UseTrendValidation       = true;         // Usar validação de tendência
+input double MinDistanceFromMA        = 0.3;          // Distância mínima da MA
 
-// ======================================================================
-// ✅ FILTRO DE VOLUME REAL CORRIGIDO
-// ======================================================================
-input group "=== FILTRO DE VOLUME REAL (NOVO) ===";
-input bool   UseRealVolumeFilter     = true;
-input int    VolumeMAPeriod          = 15;
-input double MinVolumeMultiplier     = 0.5;
+input group "──── 📊 FILTRO DE VOLUME ────";
+input bool   UseRealVolumeFilter      = true;         // Usar filtro de volume
+input int    VolumeMAPeriod           = 15;           // Período MA de volume
+input double MinVolumeMultiplier      = 0.5;          // Multiplicador mínimo de volume
 
-// ✅ CONFIGURAÇÕES DE INDICADORES
-input group "=== CONFIGURAÇÕES DE INDICADORES ===";
-input bool   UseRSIValidation    = true;
-input double RSI_Overbought      = 75.0;
-input double RSI_Oversold        = 25.0;
-input bool   UseBBValidation     = true;
-input double BB_UpperThreshold   = 0.7;
-input double BB_LowerThreshold   = 0.3;
-input bool   UseADXValidation    = true;
-input double MinADXStrength      = 20.0;
-input bool   UseTrendValidation  = true;
-input double MinDistanceFromMA   = 0.3;
+// ──────────────────────────────────────────────────────────────────────
+// 🎯 3. GESTÃO DE STOPS E ALVOS
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🛑 STOP LOSS (PONTOS) ────";
+input bool   UseFixedSL               = true;         // Usar stop loss fixo
+input int    FixedSL_Points           = 35000;        // Stop loss em pontos
 
-input group "=== NEGOCIAÇÃO COM STOPS 100% POR PONTOS ===";
-input double LotSize    = 0.01;
-input int    MagicNumber    = 27101;
+input group "──── 🎯 TAKE PROFIT (PONTOS) ────";
+input bool   UseFixedTP               = true;         // Usar take profit fixo
+input int    FixedTP_Points           = 70000;        // Take profit em pontos
 
-// ✅ STOPS 100% POR PONTOS
-input group "=== STOP LOSS 100% POR PONTOS ===";
-input bool   UseFixedSL          = true;
-input int    FixedSL_Points      = 35000;
+input group "──── 🎯 TRAILING STOP DINÂMICO ────";
+input bool   UseDynamicTrailingStop   = false;        // Usar trailing stop dinâmico
+input int    TrailingStopPoints       = 20000;        // Trailing stop em pontos
+input int    TrailingStepPoints       = 5000;         // Passo do trailing em pontos
+input int    TrailingStartPoints      = 10000;        // Início do trailing em pontos
+input bool   UseATRTrailing           = false;        // Usar ATR para trailing
+input double ATRTrailingMultiplier    = 2.5;          // Multiplicador ATR trailing
+input bool   UseBreakevenStop         = false;        // Usar breakeven
+input int    BreakevenTriggerPoints   = 15000;        // Trigger do breakeven em pontos
+input bool   TrailBothSLandTP         = false;        // Trailing em SL e TP
 
-input group "=== TAKE PROFIT COM TRAILING (APENAS TP SE MOVE) ===";
-input bool   UseFixedTP          = true;
-input int    FixedTP_Points      = 70000;
+// ──────────────────────────────────────────────────────────────────────
+// 💼 4. GESTÃO DE POSIÇÕES
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 💎 BET SIZING INTELIGENTE ────";
+input bool   EnableSmartLot           = true;         // Habilitar lote inteligente
+input double HighQualityThreshold     = 0.3;          // Threshold alta qualidade
+input double UltraQualityThreshold    = 0.8;          // Threshold ultra qualidade
+input double SmartLotMultiplier       = 1.8;          // Multiplicador lote normal
+input double UltraLotMultiplier       = 3.0;          // Multiplicador lote ultra
+input double MaxAllowedLot            = 1.0;          // Lote máximo permitido
 
-// ======================================================================
-// ✅✅✅ TRAILING STOP DINÂMICO COMPLETO (CORRIGIDO)
-// ======================================================================
-input group "=== TRAILING STOP DINÂMICO COMPLETO ===";
-input bool   UseDynamicTrailingStop  = false;
-input int    TrailingStopPoints      = 20000;
-input int    TrailingStepPoints      = 5000;
-input int    TrailingStartPoints     = 10000;
-input bool   UseATRTrailing         = false;
-input double ATRTrailingMultiplier  = 2.5;
-input bool   UseBreakevenStop       = false;
-input int    BreakevenTriggerPoints = 15000;
-input bool   TrailBothSLandTP       = false;
+input group "──── 📊 PIRAMIDAÇÃO ────";
+input bool   EnablePyramiding         = true;         // Habilitar piramidação
+input int    MaxPyramidPositions      = 4;            // Máximo de posições pirâmide
+input double PyramidingDistanceATR    = 0.4;          // Distância entre posições (ATR)
+input bool   ReduceLotOnPyramiding    = false;        // Reduzir lote na piramidação
+input double PyramidingLotMultiplier  = 0.8;          // Multiplicador lote pirâmide
 
-// ======================================================================
-// ✅ BET SIZING CORRIGIDO
-// ======================================================================
-input group "=== BET SIZING (MAO PESADA) ===";
-input bool   EnableSmartLot        = true;
-input double HighQualityThreshold  = 0.3;
-input double UltraQualityThreshold = 0.8;
-input double SmartLotMultiplier    = 1.8;
-input double UltraLotMultiplier    = 3.0;
-input double MaxAllowedLot         = 1.0;
+input group "──── 🎯 CONTROLE DE DIREÇÃO ────";
+input bool   AllowOnlyOneDirection    = true;         // Permitir só uma direção
+input bool   CloseOppositeOnNewSignal = false;        // Fechar oposto em novo sinal
+input bool   WaitForAllCloseBeforeNew = true;         // Aguardar fechamento total
 
-// ✅ CONTROLE DE TEMPO ENTRE TRADES
-input int    MinMinutesBetweenTrades = 3;
+input group "──── 🎮 CONTROLE DE ENTRADAS ────";
+input int    MaxTradesPerDirection    = 4;            // Máximo trades por direção
+input int    MinBarsBetweenSameDirection = 2;         // Barras mínimas entre entradas
+input bool   UseVolatilityFilter      = true;         // Usar filtro de volatilidade
+input double MaxATRMultiplier         = 4.0;          // Multiplicador máximo ATR
 
-// ======================================================================
-// ✅ PIRAMIDAÇÃO CORRIGIDA
-// ======================================================================
-input group "=== PIRAMIDAÇÃO (SOMENTE MESMA DIREÇÃO) ===";
-input bool   EnablePyramiding = true;
-input int    MaxPyramidPositions = 4;
-input double PyramidingDistanceATR = 0.4;
-input bool   ReduceLotOnPyramiding = false;
-input double PyramidingLotMultiplier = 0.8;
+// ──────────────────────────────────────────────────────────────────────
+// 🧠 5. SISTEMA DE APRENDIZADO (Q-Learning)
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🧠 APRENDIZADO BÁSICO ────";
+input bool   UseSimpleRewardSystem    = true;         // Sistema de recompensa simples
+input double RewardWin                = 5.0;          // Recompensa por vitória
+input double RewardLoss               = -2.0;         // Penalidade por perda
+double LearningRate                   = 0.03;         // Taxa de aprendizado (fixo)
 
-// ======================================================================
-// ✅ DIREÇÃO ÚNICA POR CICLO
-// ======================================================================
-input group "=== CONTROLE DE DIREÇÃO ===";
-input bool   AllowOnlyOneDirection = true;
-input bool   CloseOppositeOnNewSignal = false;
-input bool   WaitForAllCloseBeforeNew = true;
+input group "──── 🎲 EXPLORAÇÃO ────";
+input double InitialExplorationRate   = 0.40;         // Taxa inicial de exploração (40%)
+input double MinExplorationRate       = 0.20;         // Taxa mínima de exploração (20%)
+input double ExplorationDecay         = 0.999;        // Decay da exploração (0.1% por vitória)
+input int    MinStateVisitsToTrade    = 2;            // Visitas mínimas para operar
 
-// ======================================================================
-// ✅ CONTROLE DE ENTRADAS
-// ======================================================================
-input group "=== CONTROLE DE ENTRADAS ===";
-input int    MaxTradesPerDirection = 4;
-input int    MinBarsBetweenSameDirection = 2;
-input bool   UseVolatilityFilter = true;
-input double MaxATRMultiplier = 4.0;
+input group "──── 🔄 SISTEMA HÍBRIDO ────";
+input bool   EnablePyramidingLearning = true;         // Aprendizado de piramidação
+input int    PyramidLearningBonus     = 10;           // Bônus aprendizado pirâmide
+input double PyramidBlockingMultiplier = 1.5;         // Multiplicador bloqueio pirâmide
+input int    MinPyramidVisitsForBlock = 50;           // Visitas mín. para bloquear pirâmide
 
-// ======================================================================
-// ✅ APRENDIZADO (CONFIGURAÇÕES OTIMIZADAS PARA PIRAMIDAÇÃO)
-// ======================================================================
-input group "=== APRENDIZADO OTIMIZADO PARA PIRAMIDAÇÃO ===";
-double LearningRate    = 0.03;      // ⚠️ ALTERADO: REDUZIDO - Aprender mais devagar
-input double InitialExplorationRate  = 0.40;  // ⚠️ ALTERADO: 40% inicial
-input double MinExplorationRate    = 0.20;    // ⚠️ ALTERADO: Mínimo 20%
-input double ExplorationDecay    = 0.995;     // ⚠️ ALTERADO: Decay mais rápido
-input int    MinStateVisitsToTrade = 2;       // ⚠️ ALTERADO: Apenas 2 visitas
+// ──────────────────────────────────────────────────────────────────────
+// 💾 6. MEMÓRIA E PERSISTÊNCIA
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 💾 OTIMIZAÇÃO DE MEMÓRIA ────";
+input bool   EnableMemoryOptimization = true;         // Habilitar otimização memória
+input int    MaxMemoryStates          = 1000;         // Máximo de estados na memória
+input bool   CompressQValues          = true;         // Comprimir Q-values
+input double QValuePrecision          = 2;            // Precisão dos Q-values
+input bool   AutoCleanMemory          = true;         // Limpeza automática
+input int    CleanMemoryAfterTrades   = 100;          // Limpar após N trades
+input bool   UseIncrementalSave       = true;         // Salvamento incremental
 
-// ⚡ SISTEMA HÍBRIDO OTIMIZADO PARA PIRAMIDAÇÃO
-input group "=== SISTEMA HÍBRIDO OTIMIZADO PARA PIRAMIDAÇÃO ===";
-input bool   EnablePyramidingLearning = true;
-input int    PyramidLearningBonus     = 10;
-input double PyramidBlockingMultiplier = 1.5;
-input int    MinPyramidVisitsForBlock = 50;
+input group "──── 🔄 DECAY E RESET ────";
+input bool   EnableMemoryDecay        = true;         // Habilitar decay de memória
+input double DecayFactor              = 0.05;         // Fator de decay (5%)
+input bool   EnableIntelligentReset   = true;         // Reset inteligente
+input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
+input int    BadStateMinVisits        = 20;           // Visitas mínimas para reset
+input int    MinStatesBeforeReset     = 150;          // Mínimo de estados aprendidos antes de permitir resets
+input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
+input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
-// ======================================================================
-// ⚡ SISTEMA DE MEMÓRIA OTIMIZADA (NOVO DO V30.7)
-// ======================================================================
-input group "=== SISTEMA DE MEMÓRIA OTIMIZADA ===";
-input bool   EnableMemoryOptimization = true;
-input int    MaxMemoryStates = 1000;  // Ajustado para número gerenciável
-input bool   CompressQValues = true;
-input double QValuePrecision = 2;
-input bool   AutoCleanMemory = true;
-input int    CleanMemoryAfterTrades = 100;
-input bool   UseIncrementalSave = true;
+input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
+input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
+input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
+input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
+int MinVisitsForBlockDecision         = 30;           // Visitas mín. decisão bloqueio
 
-// ======================================================================
-// ✅✅✅ SISTEMA DE BLOQUEIO UNIFICADO (NOVA VERSÃO CORRIGIDA)
-// ======================================================================
-input group "=== SISTEMA DE BLOQUEIO UNIFICADO ===";
-input bool   EnableUnifiedBlockingSystem = true;
-input double BlockLossRateThreshold = 0.75;
-input double UnblockWinRateThreshold = 0.55;
-int MinVisitsForBlockDecision = 30;
+// ──────────────────────────────────────────────────────────────────────
+// 📤 7. EXPORTAÇÃO E LOGS
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 💾 EXPORTAÇÃO BINÁRIA ────";
+input bool   EnableMemoryExport       = true;         // Habilitar exportação
+input int    AutoExportMinutes        = 30;           // Intervalo auto-export (min)
+input bool   ExportOnDeinit           = true;         // Exportar ao finalizar
+input bool   CreateBackupFiles        = true;         // Criar backups
+input int    MaxBackupFiles           = 5;            // Máximo de backups
+input bool   ExportMemoryToTextFile   = true;         // Exportar para texto
+input int    TextExportIntervalMinutes = 60;          // Intervalo export texto (min)
 
-// ======================================================================
-// ✅ CONFIGURAÇÕES DE EXPORTAÇÃO DE MEMÓRIA
-// ======================================================================
-input group "=== EXPORTAÇÃO DE MEMÓRIA ===";
-input bool   EnableMemoryExport   = true;
-input int    AutoExportMinutes    = 30;
-input bool   ExportOnDeinit       = true;
-input bool   CreateBackupFiles    = true;
-input int    MaxBackupFiles       = 5;
-input bool   ExportMemoryToTextFile   = true;
-input int    TextExportIntervalMinutes = 60;
+input group "──── 📄 EXPORTAÇÃO TEXTO ────";
+input bool   EnableTextExport         = false;        // Habilitar export texto (apenas binário recomendado)
+input int    TextExportMinInterval    = 60;           // Intervalo mínimo (min)
+input bool   ExportAllStates          = false;        // Exportar todos estados
+input bool   IncludeQValues           = true;         // Incluir Q-values
+input bool   IncludeStatistics        = true;         // Incluir estatísticas
+input int    MaxStatesToExport        = 500;          // Máximo estados exportar
 
-// ======================================================================
-// ✅ EXPORTAÇÃO PARA TEXTO (COMPLEMENTAR AO BINÁRIO)
-// ======================================================================
-input group "=== EXPORTAÇÃO PARA TEXTO ===";
-input bool   EnableTextExport     = true;
-input int    TextExportMinInterval   = 30;
-input bool   ExportAllStates      = false;
-input bool   IncludeQValues       = true;
-input bool   IncludeStatistics    = true;
-input int    MaxStatesToExport    = 500;
+// ──────────────────────────────────────────────────────────────────────
+// 🖥️ 8. INTERFACE (HUD)
+// ──────────────────────────────────────────────────────────────────────
+input group "──── 🖥️ HUD (INTERFACE VISUAL) ────";
+input bool   ShowHUD                  = true;         // Mostrar HUD
+input int    HUD_X                    = 10;           // Posição X
+input int    HUD_Y                    = 20;           // Posição Y
+input int    HUD_UpdateMS             = 500;          // Intervalo atualização (ms)
+input color  HUD_TitleColor           = clrLime;      // Cor título
+input color  HUD_TextColor            = clrWhite;     // Cor texto
+input color  HUD_WarningColor         = clrOrange;    // Cor aviso
+input color  HUD_ErrorColor           = clrRed;       // Cor erro
+input color  HUD_SuccessColor         = clrCyan;      // Cor sucesso
+input bool   HUD_Minimal              = false;        // Modo minimalista
 
 // ======================================================================
-// ✅ HUD LEVE - CONFIGURAÇÕES OTIMIZADAS
 // ======================================================================
-input group "=== HUD LEVE ===";
-input bool   ShowHUD              = true;
-input int    HUD_X                = 10;
-input int    HUD_Y                = 20;
-input int    HUD_UpdateMS         = 500;
-input color  HUD_TitleColor       = clrLime;
-input color  HUD_TextColor        = clrWhite;
-input color  HUD_WarningColor     = clrOrange;
-input color  HUD_ErrorColor       = clrRed;
-input color  HUD_SuccessColor     = clrCyan;
-input bool   HUD_Minimal          = false;
+// 📊 VARIÁVEIS GLOBAIS - ORGANIZADAS POR CATEGORIA
+// ======================================================================
 
-// ======================================================================
-// ✅✅✅ VARIÁVEIS GLOBAIS ADICIONADAS
-// ======================================================================
-double g_volumeRatio = 1.0;
-bool AllowBreakoutOverride = true;
+// ──────────────────────────────────────────────────────────────────────
+// 🧠 1. SISTEMA DE APRENDIZADO (Q-Learning e Estados)
+// ──────────────────────────────────────────────────────────────────────
+double g_Q[];                          // Q-table principal para aprendizado
+int g_stateVisits[];                   // Contador de visitas por estado
+int g_stateWins[];                     // Contadores de vitórias por estado
+int g_stateLosses[];                   // Contadores de perdas por estado
+int g_stateLastUpdate[];               // Último update de cada estado
+bool g_stateBlocked[];                 // Estados bloqueados por má performance
+datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
+datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio
+double g_stateWinRate[];               // Win rate calculado por estado
+double g_stateAvgProfit[];             // Lucro médio por estado
 
-// ======================================================================
-// ✅✅✅ ✅ PASSO 1 — CRIAR UM VETOR DE BLOQUEIO REAL (CORREÇÃO DO HUD)
-// ======================================================================
-bool g_stateBlocked[];
+// Aprendizado - Controle
+bool g_learningInitialized = false;
+double g_currentExplorationRate = 0.0;
+int g_totalStatesDiscovered = 0;
+int g_totalQUpdates = 0;
+double g_averageQValue = 0.0;
+double g_maxQValue = 0.0;
+double g_minQValue = 0.0;
 
-// ======================================================================
-// ✅✅✅ NOVO: CONTADORES SEPARADOS PARA VITÓRIAS E PERDAS REAIS
-// ======================================================================
-int g_stateWins[];
-bool g_lastTradeExecuted = false;
-int g_lastTradeStateExecuted = -1;
-
-// ======================================================================
-// ✅✅✅ ✅✅✅ NOVO: SISTEMA DE COOLDOWN PARA BLOQUEIO
-// ======================================================================
-datetime g_stateLastBlockTime[];
-datetime g_stateLastUnblockTime[];
-
-// ======================================================================
-// ✅✅✅ SISTEMA DE MEMÓRIA OTIMIZADA - VARIÁVEIS
-// ======================================================================
-double g_Q[];
-int g_stateVisits[];
-int g_stateLosses[];
-int g_stateLastUpdate[];
-
-// Cache para estados ativos (otimização)
-int g_activeStates[];
-int g_activeStatesCount = 0;
-bool g_memoryDirty = false;
-int g_memorySaveCounter = 0;
-int g_memoryCleanCounter = 0;
-
-// ======================================================================
-// ✅✅✅ VARIÁVEIS PARA PROTEÇÃO CONTRA ESTADO CONGELADO
-// ======================================================================
+// Aprendizado - Proteção contra estados congelados
 static int g_lastCalculatedState = -1;
 static int g_sameStateCount = 0;
 static datetime g_lastStateChangeTime = 0;
 
-// ======================================================================
-// ✅✅✅ VARIÁVEIS PARA DECAY E RESET
-// ======================================================================
+// ──────────────────────────────────────────────────────────────────────
+// 💾 2. SISTEMA DE MEMÓRIA E PERSISTÊNCIA
+// ──────────────────────────────────────────────────────────────────────
+int g_activeStates[];                  // Cache de estados ativos (otimização)
+int g_activeStatesCount = 0;
+bool g_memoryDirty = false;
+int g_memorySaveCounter = 0;
+int g_memoryCleanCounter = 0;
+string g_memoryFileName = "";
+bool g_memoryInitialized = false;
+datetime g_lastSaveTime = 0;
+int g_qUpdatesSinceSave = 0;
+bool g_lastSaveSuccess = false;
+
+// Decay e Reset
 datetime g_lastMaintenanceTime = 0;
 int g_totalDecayCycles = 0;
 int g_totalBadStateResets = 0;
+int g_stateResets = 0;
+int g_stateDecays = 0;
+static int g_lastDecayTradeCount = 0;
+datetime g_lastUnblockTestTime = 0; // Tempo do último teste de desbloqueio
 
-// ======================================================================
-// Variáveis do HUD OTIMIZADAS
-// ======================================================================
-string hudObjects[15];
-int hudObjectCount = 0;
-datetime hudLastUpdate = 0;
-int cachedVisitedStates = -1;
-int cachedBlockedStates = -1;
-int cachedPositions = -1;
-int cachedDirection = -1;
-string cachedStatus = "";
-double cachedVolume = -1;
-int cachedTradesToday = -1;
-
-// ====
-// VARIÁVEIS GLOBAIS
-// ============================================================
+// ──────────────────────────────────────────────────────────────────────
+// 📈 3. INDICADORES TÉCNICOS
+// ──────────────────────────────────────────────────────────────────────
 string g_currentSymbol;
 int g_adxHandle = INVALID_HANDLE;
 int g_maHandle  = INVALID_HANDLE;
@@ -343,61 +318,55 @@ int g_rsiHandle = INVALID_HANDLE;
 int g_bbHandle  = INVALID_HANDLE;
 int g_atrHandle = INVALID_HANDLE;
 
-bool g_learningInitialized = false;
-double g_currentExplorationRate = 0.0;
-
-string g_memoryFileName = "";
-bool g_memoryInitialized = false;
-datetime g_lastSaveTime = 0;
-int g_qUpdatesSinceSave = 0;
-
+// ──────────────────────────────────────────────────────────────────────
+// 💰 4. CONTROLE DE TRADES E POSIÇÕES
+// ──────────────────────────────────────────────────────────────────────
+// Última trade executada
 int g_lastTradeState = -1;
 double g_lastTradeProfit = 0.0;
 int g_lastTradeAction = 0;
 double g_lastLotUsed = 0.0;
 double g_lastSLPrice = 0.0;
 double g_lastTPPrice = 0.0;
+bool g_lastTradeExecuted = false;
+int g_lastTradeStateExecuted = -1;
 
-int g_tradesToday = 0;
-datetime g_lastTradeDate = 0;
-int g_consecutiveLosses = 0;
-string g_statusMessage = "Inicializando...";
-datetime g_lastResetDate = 0;
-
-int g_totalTrades = 0;
-int g_totalWins   = 0;
-int g_totalLosses = 0;
-double g_sumProfit = 0.0;
-
+// Controle de direção e posições
 int g_currentDirection = 0;
 int g_positionsCount = 0;
 datetime g_directionStartTime = 0;
 
-datetime g_lastExportTime = 0;
-int g_exportCount = 0;
-
+// Controle de timing
 datetime g_lastEntryTime = 0;
 datetime g_lastTradeTime = 0;
 datetime g_lastBuyTime = 0;
 datetime g_lastSellTime = 0;
-bool g_lastSaveSuccess = false;
 int g_lastBarProcessed = 0;
 
-long g_currentVolume = 0;
-long g_volumeAverage = 0;
-double g_volumeMultiplier = 1.0;
-double g_volumeStrength = 0.0;
-datetime g_lastVolumeCheck = 0;
+// Controle diário
+int g_tradesToday = 0;
+datetime g_lastTradeDate = 0;
+datetime g_lastResetDate = 0;
 
-double g_recentProfits[];
-int g_recentProfitsIndex = 0;
+// ──────────────────────────────────────────────────────────────────────
+// 📊 5. ESTATÍSTICAS E PERFORMANCE
+// ──────────────────────────────────────────────────────────────────────
+// Estatísticas gerais
+int g_totalTrades = 0;
+int g_totalWins   = 0;
+int g_totalLosses = 0;
+double g_sumProfit = 0.0;
+int g_consecutiveLosses = 0;
 
-int g_totalStatesDiscovered = 0;
-int g_totalQUpdates = 0;
-double g_averageQValue = 0.0;
-double g_maxQValue = 0.0;
-double g_minQValue = 0.0;
+// Estatísticas por direção
+int g_totalBuys = 0;
+int g_totalSells = 0;
+int g_buyWins = 0;
+int g_sellWins = 0;
+double g_buyProfit = 0.0;
+double g_sellProfit = 0.0;
 
+// Recordes e streaks
 datetime g_firstTradeDate = 0;
 double g_highestProfit = 0.0;
 double g_lowestProfit = 0.0;
@@ -406,30 +375,24 @@ int g_worstLossStreak = 0;
 int g_currentWinStreak = 0;
 int g_currentLossStreak = 0;
 
-int g_totalBuys = 0;
-int g_totalSells = 0;
-int g_buyWins = 0;
-int g_sellWins = 0;
-double g_buyProfit = 0.0;
-double g_sellProfit = 0.0;
+// Performance recente
+double g_recentProfits[];
+int g_recentProfitsIndex = 0;
 
-// Variáveis para DEBUG
-int g_debugState = -1;
-int g_debugVisitas = 0;
-int g_debugPerdas = 0;
+// ──────────────────────────────────────────────────────────────────────
+// 📊 6. VOLUME E FILTROS
+// ──────────────────────────────────────────────────────────────────────
+long g_currentVolume = 0;
+long g_volumeAverage = 0;
+double g_volumeMultiplier = 1.0;
+double g_volumeStrength = 0.0;
+double g_volumeRatio = 1.0;
+datetime g_lastVolumeCheck = 0;
+bool AllowBreakoutOverride = true;
 
-// ======================================================================
-// ✅✅✅ VARIÁVEIS DO SISTEMA DE APRENDIZADO INTELIGENTE
-// ======================================================================
-double g_stateWinRate[];
-double g_stateAvgProfit[];
-int g_stateResets = 0;
-int g_stateDecays = 0;
-static int g_lastDecayTradeCount = 0;
-
-// ======================================================================
-// ✅ VARIÁVEIS PARA TRAILING STOP DINÂMICO
-// ======================================================================
+// ──────────────────────────────────────────────────────────────────────
+// 🎯 7. TRAILING STOP DINÂMICO
+// ──────────────────────────────────────────────────────────────────────
 ulong   g_trailingTickets[];
 double  g_trailingBestPrices[];
 double  g_trailingCurrentSL[];
@@ -438,129 +401,47 @@ datetime g_trailingLastTrailTimes[];
 bool    g_trailingBreakevenActivated[];
 int     g_trailingCount = 0;
 
-// ======================================================================
-// ✅✅✅ VARIÁVEIS PARA EXPORTAÇÃO DE TEXTO
-// ======================================================================
+// ──────────────────────────────────────────────────────────────────────
+// 🖥️ 8. HUD (INTERFACE VISUAL)
+// ──────────────────────────────────────────────────────────────────────
+string hudObjects[15];
+int hudObjectCount = 0;
+datetime hudLastUpdate = 0;
+string g_statusMessage = "Inicializando...";
+
+// Cache do HUD (otimização)
+int cachedVisitedStates = -1;
+int cachedBlockedStates = -1;
+int cachedPositions = -1;
+int cachedDirection = -1;
+string cachedStatus = "";
+double cachedVolume = -1;
+int cachedTradesToday = -1;
+
+// ──────────────────────────────────────────────────────────────────────
+// 📤 9. EXPORTAÇÃO E LOGS
+// ──────────────────────────────────────────────────────────────────────
+datetime g_lastExportTime = 0;
+int g_exportCount = 0;
 datetime g_lastTextExportTime = 0;
 int g_textExportCount = 0;
+
+// ──────────────────────────────────────────────────────────────────────
+// 🐛 10. DEBUG E DIAGNÓSTICO
+// ──────────────────────────────────────────────────────────────────────
+int g_debugState = -1;
+int g_debugVisitas = 0;
+int g_debugPerdas = 0;
 
 // ======================================================================
 // ✅✅✅ CORREÇÕES AGUDAS PARA O PROBLEMA DE ESTADOS TRAVADOS
 // ======================================================================
 
 // ======================================================================
-// ✅✅✅ 1. FUNÇÃO: REMOVER LIMITE DE 10 VISITAS (CORREÇÃO DEFINITIVA)
+// ✅✅✅ FUNÇÕES REMOVIDAS (d651ec8): FixStuckStatesProblem() e ResetBlockingSystem()
+// Essas funções limitavam artificialmente as visitas dos estados, impedindo
+// que atingissem MinVisitsForBlockDecision (20). Foram completamente removidas.
 // ======================================================================
-void FixStuckStatesProblem()
-{
-   Print("🔥🔥🔥 CORREÇÃO DE ESTADOS TRAVADOS EM 10 VISITAS");
-   
-   int fixedStates = 0;
-   int problemStates = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         // ✅ DETECTAR ESTADOS TRAVADOS EM MÚLTIPLOS DE 10
-         if(g_stateVisits[state] == 10 || g_stateVisits[state] == 20 || g_stateVisits[state] == 30)
-         {
-            problemStates++;
-            
-            // ✅ VERIFICAR SE É UM LIMITE ARTIFICIAL
-            double winRate = CalculateWinRate(state);
-            bool hasRecentActivity = (g_totalTrades - g_stateLastUpdate[state]) < 100;
-            
-            // ✅ REMOVER LIMITE SE FOR ARTIFICIAL
-            if(g_stateVisits[state] == 10 && hasRecentActivity)
-            {
-               Print("⚠️ Estado ", state, " travado em 10 visitas - DESBLOQUEANDO...");
-               
-               // Desbloquear se estiver bloqueado erroneamente
-               if(g_stateBlocked[state] && winRate >= 0.25)
-               {
-                  g_stateBlocked[state] = false;
-                  Print("✅ Estado ", state, " desbloqueado (win rate: ", DoubleToString(winRate*100,1), "%)");
-               }
-               
-               // Permitir mais visitas
-               g_stateVisits[state] = 9; // Resetar para permitir crescimento
-               fixedStates++;
-            }
-         }
-         
-         // ✅ CORRIGIR ESTADOS BLOQUEADOS ERRONEAMENTE
-         if(g_stateBlocked[state] && g_stateVisits[state] >= 5)
-         {
-            double winRate = CalculateWinRate(state);
-            
-            // Estado com win rate boa não deveria estar bloqueado
-            if(winRate >= 0.35 && winRate > 0)
-            {
-               g_stateBlocked[state] = false;
-               Print("✅✅✅ CORREÇÃO: Estado ", state, 
-                     " desbloqueado - Win rate: ", DoubleToString(winRate*100,1), "%");
-               fixedStates++;
-            }
-         }
-      }
-   }
-   
-   if(problemStates > 0 || fixedStates > 0)
-   {
-      Print("📊 RESUMO DA CORREÇÃO:");
-      Print("   Estados com problema (travados): ", problemStates);
-      Print("   Estados corrigidos: ", fixedStates);
-      Print("   Estados ativos totais: ", g_activeStatesCount);
-      Print("   Estados bloqueados após correção: ", CountBlockedStates());
-      
-      // Forçar save
-      g_memoryDirty = true;
-      SaveState();
-   }
-}
-
-// ======================================================================
-// ✅✅✅ 2. FUNÇÃO: RESETAR SISTEMA DE BLOQUEIO (CORREÇÃO RADICAL)
-// ======================================================================
-void ResetBlockingSystem()
-{
-   Print("🔄 RESETANDO SISTEMA DE BLOQUEIO COMPLETAMENTE");
-   
-   int unblocked = 0;
-   int resetVisits = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      // Desbloquear todos os estados
-      if(g_stateBlocked[state])
-      {
-         g_stateBlocked[state] = false;
-         unblocked++;
-      }
-      
-      // Resetar estados com exatamente 10 visitas (possível bug)
-      if(g_stateVisits[state] == 10)
-      {
-         g_stateVisits[state] = 5; // Reduzir para valor mais realista
-         resetVisits++;
-      }
-   }
-   
-   // Resetar contadores do sistema de bloqueio
-   g_stateResets = 0;
-   g_stateDecays = 0;
-   g_totalBadStateResets = 0;
-   
-   Print("✅ SISTEMA DE BLOQUEIO RESETADO:");
-   Print("   Estados desbloqueados: ", unblocked);
-   Print("   Estados com visitas resetadas: ", resetVisits);
-   Print("   Contadores zerados: stateResets, stateDecays, totalBadStateResets");
-   
-   g_memoryDirty = true;
-   SaveState();
-   SaveBrain();
-}
 
 // ======================================================================
 // ✅✅✅ 4. FUNÇÃO: DEBUG MELHORADO PARA ESTADOS TRAVADOS
@@ -646,6 +527,12 @@ void ResetBadStatesEnhanced()
 {
    if(!EnableIntelligentReset) return;
    
+   // ✅ PROTEÇÃO: Não resetar até ter base sólida de estados aprendidos
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Não resetar até ter aprendido estados suficientes
+   }
+   
    int statesReset = 0;
    int statesUnblocked = 0;
    
@@ -653,7 +540,7 @@ void ResetBadStatesEnhanced()
    
    for(int s = 0; s < NUM_STATES; s++)
    {
-      if(g_stateVisits[s] >= 5) // Mínimo de 5 visitas
+      if(g_stateVisits[s] >= MinVisitsForBlockDecision) // Usar MinVisitsForBlockDecision
       {
          double winRate = CalculateWinRate(s);
          double lossRate = 1.0 - winRate;
@@ -662,20 +549,20 @@ void ResetBadStatesEnhanced()
          bool shouldReset = false;
          string reason = "";
          
-         if(lossRate > 0.75 && g_stateVisits[s] >= 8)
+         if(lossRate > 0.75 && g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
             shouldReset = true;
             reason = "Loss rate > 75%";
          }
-         else if(winRate < 0.20 && g_stateVisits[s] >= 10)
+         else if(winRate < 0.20 && g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
             shouldReset = true;
             reason = "Win rate < 20%";
          }
-         else if(g_stateVisits[s] >= 15 && winRate == 0.0)
+         else if(g_stateVisits[s] >= MinVisitsForBlockDecision && winRate == 0.0)
          {
             shouldReset = true;
-            reason = "15+ visitas, 0 vitórias";
+            reason = "Visitas suficientes, 0 vitórias";
          }
          
          if(shouldReset)
@@ -695,8 +582,8 @@ void ResetBadStatesEnhanced()
             if(g_stateWins[s] < 0) g_stateWins[s] = 0;
             if(g_stateLosses[s] < 0) g_stateLosses[s] = 0;
             
-            // Desbloquear
-            g_stateBlocked[s] = false;
+            // ✅ NÃO desbloquear estados ruins - manter bloqueio se existir
+            // g_stateBlocked[s] permanece inalterado
             
             // Reset parcial do Q
             for(int a = 0; a < NUM_ACTIONS; a++)
@@ -709,7 +596,7 @@ void ResetBadStatesEnhanced()
          }
          
          // ✅ DESBLOQUEAR ESTADOS BONS
-         if(g_stateBlocked[s] && winRate >= 0.35 && g_stateVisits[s] >= 5)
+         if(g_stateBlocked[s] && winRate >= 0.35 && g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
             g_stateBlocked[s] = false;
             statesUnblocked++;
@@ -736,13 +623,20 @@ void ResetBadStatesEnhanced()
 // ======================================================================
 
 // ======================================================================
-// ✅✅✅ 1. FUNÇÃO DE DECAIMENTO SUAVE (OBRIGATÓRIA)
+// ✅✅✅ 1. FUNÇÃO DE DECAIMENTO SUAVE (CORRIGIDA)
 // ======================================================================
 void ApplyStateDecay()
 {
    if(!EnableMemoryDecay) return;
    
-   const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário
+   // ✅ PROTEÇÃO: Não aplicar decay antes de ter 100 estados descobertos
+   // Garante fase completa de aprendizado sem perder estados prematuramente
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Decay desabilitado durante fase de descoberta inicial
+   }
+   
+   const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário (% a esquecer)
    int statesDecayed = 0;
    double totalMemoryBefore = 0;
    double totalMemoryAfter = 0;
@@ -753,12 +647,15 @@ void ApplyStateDecay()
       {
          totalMemoryBefore += g_stateVisits[s];
          
-         // Aplicar decay somente em estados com histórico significativo
-         if(g_stateVisits[s] > 10)
+         // Aplicar decay somente em estados com histórico muito significativo
+         // ✅ CORREÇÃO: Aumentado de >10 para >50 para evitar cap artificial em 10 visitas
+         if(g_stateVisits[s] > 50)
          {
-            g_stateVisits[s] = (int)(g_stateVisits[s] * DECAY_FACTOR);
-            g_stateLosses[s] = (int)(g_stateLosses[s] * DECAY_FACTOR);
-            g_stateWins[s] = (int)(g_stateWins[s] * DECAY_FACTOR);
+            // ✅ CORREÇÃO: Decay deve REMOVER X%, não MANTER X%
+            // Se DecayFactor = 0.05 (5%), deve manter 95% (1.0 - 0.05)
+            g_stateVisits[s] = (int)(g_stateVisits[s] * (1.0 - DECAY_FACTOR));
+            g_stateLosses[s] = (int)(g_stateLosses[s] * (1.0 - DECAY_FACTOR));
+            g_stateWins[s] = (int)(g_stateWins[s] * (1.0 - DECAY_FACTOR));
             
             // Garantir valores mínimos
             if(g_stateVisits[s] < 1 && g_stateVisits[s] > 0) g_stateVisits[s] = 1;
@@ -773,7 +670,7 @@ void ApplyStateDecay()
                int idx = s * NUM_ACTIONS + a;
                if(g_Q[idx] != 0.0)
                {
-                  g_Q[idx] *= DECAY_FACTOR;
+                  g_Q[idx] *= (1.0 - DECAY_FACTOR);
                }
             }
          }
@@ -817,13 +714,19 @@ void ResetBadStates()
 {
    if(!EnableIntelligentReset) return;
    
+   // Verificar se temos estados suficientes antes de permitir resets
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Não resetar até ter aprendido estados suficientes
+   }
+   
    int statesReset = 0;
    
    for(int s = 0; s < NUM_STATES; s++)
    {
       if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
       
-      double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+      double lossRate = SafeDivide((double)g_stateLosses[s], (double)g_stateVisits[s], 0.0);
       
       // ⚠️ MODIFICAÇÃO CRÍTICA: Condição mais agressiva
       if((lossRate > BadStateLossThreshold || (g_stateVisits[s] > 10 && g_stateWins[s] == 0)) 
@@ -838,7 +741,8 @@ void ResetBadStates()
          g_stateVisits[s] = 0;
          g_stateLosses[s] = 0;
          g_stateWins[s] = 0;
-         g_stateBlocked[s] = false;
+         // ✅ NÃO desbloquear estado ruim - preservar bloqueio
+         // g_stateBlocked[s] permanece inalterado
          g_stateLastBlockTime[s] = 0;
          g_stateLastUnblockTime[s] = 0;
          
@@ -958,7 +862,7 @@ void BlockState(int state)
         return;
     }
     
-    double lossRate = (double)losses / (double)visits;
+    double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     
     if(lossRate >= BlockLossRateThreshold)
     {
@@ -972,6 +876,7 @@ void BlockState(int state)
               " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
         
         g_memoryDirty = true;
+        InvalidateHUDCache();
     }
     else
     {
@@ -1003,6 +908,7 @@ void UnblockState(int state)
               " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
         
         g_memoryDirty = true;
+        InvalidateHUDCache();
     }
 }
 
@@ -1016,7 +922,7 @@ bool ShouldBlockState(int state)
     
     if(visits < MinVisitsForBlockDecision) return false;
     
-    double lossRate = (double)losses / (double)visits;
+    double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     
     return (lossRate >= BlockLossRateThreshold);
 }
@@ -1136,15 +1042,100 @@ void AutoUnblockGoodStates()
 }
 
 // ======================================================================
+// ✅ TESTAR PERIODICAMENTE ESTADOS BLOQUEADOS
+// ======================================================================
+// Testa estados bloqueados periodicamente para ver se melhoraram
+// Desbloqueia temporariamente para coletar novas amostras
+void TestBlockedStatesPeriodically()
+{
+   datetime currentTime = TimeCurrent();
+   
+   // Testar a cada 7 dias (604800 segundos)
+   if(currentTime - g_lastUnblockTestTime < 604800)
+   {
+      return;
+   }
+   
+   g_lastUnblockTestTime = currentTime;
+   
+   int testedStates = 0;
+   int unblockedForTest = 0;
+   
+   for(int state = 0; state < NUM_STATES; state++)
+   {
+      if(!g_stateBlocked[state]) continue;
+      
+      // Apenas testar estados com histórico significativo
+      if(g_stateVisits[state] < 10) continue;
+      
+      datetime timeSinceBlock = currentTime - g_stateLastBlockTime[state];
+      
+      // Se estado está bloqueado há mais de 30 dias, dar nova chance
+      if(timeSinceBlock > 2592000) // 30 dias em segundos
+      {
+         // Resetar estatísticas mas manter Q-values (aprendizado)
+         g_stateVisits[state] = 0;
+         g_stateWins[state] = 0;
+         g_stateLosses[state] = 0;
+         
+         // Desbloquear temporariamente para teste
+         g_stateBlocked[state] = false;
+         g_stateLastUnblockTime[state] = currentTime;
+         
+         unblockedForTest++;
+         
+         Print("🧪 Estado ", state, " desbloqueado para TESTE (bloqueado há ", 
+               (int)(timeSinceBlock / 86400), " dias)");
+      }
+      
+      testedStates++;
+      
+      // Limitar a 5 estados por ciclo para não sobrecarregar
+      if(unblockedForTest >= 5) break;
+   }
+   
+   if(unblockedForTest > 0)
+   {
+      Print("📊 Teste periódico de estados bloqueados: ", unblockedForTest, 
+            " estados desbloqueados para coleta de novas amostras");
+      InvalidateHUDCache();
+   }
+}
+
+// ======================================================================
 // ✅✅✅ FUNÇÕES AUXILIARES CORRIGIDAS
 // ======================================================================
+
+// ======================================================================
+// ✅ FUNÇÃO SAFEDIVIDE - PROTEÇÃO GLOBAL CONTRA DIVISÃO POR ZERO
+// ======================================================================
+// Função de divisão segura que previne erros de divisão por zero
+// Parâmetros:
+//   numerator - O valor a ser dividido (numerador)
+//   denominator - O valor pelo qual dividir (denominador)
+//   defaultValue - Valor a retornar se divisão não for possível (padrão: 0.0)
+// Retorna:
+//   - O resultado da divisão se denominador válido
+//   - defaultValue se denominador for zero ou muito próximo de zero
+// Exemplos:
+//   SafeDivide(10.0, 2.0, 0.0) retorna 5.0
+//   SafeDivide(10.0, 0.0, 0.0) retorna 0.0 (valor padrão)
+//   SafeDivide(price - lower, range, 0.5) retorna 0.5 se range for zero
+double SafeDivide(double numerator, double denominator, double defaultValue = 0.0)
+{
+   if(denominator == 0.0 || MathAbs(denominator) < 0.0000001)
+   {
+      return defaultValue;
+   }
+   return numerator / denominator;
+}
 
 double CalculateWinRate(int state)
 {
     if(state < 0 || state >= NUM_STATES) return 0.0;
     if(g_stateVisits[state] == 0) return 0.0;
     
-    return (double)g_stateWins[state] / (double)g_stateVisits[state];
+    return SafeDivide((double)g_stateWins[state], (double)g_stateVisits[state], 0.0);
 }
 
 int CountBlockedStates()
@@ -1305,6 +1296,7 @@ void AddActiveState(int state)
    }
    
    g_stateLastUpdate[state] = g_totalTrades;
+   InvalidateHUDCache();
    
    if(EnableUnifiedBlockingSystem)
    {
@@ -1896,44 +1888,31 @@ void MonitorBadStates()
          estadosAnalisados++;
          double winRate = CalculateWinRate(state);
          
-         // ✅ CORREÇÃO: REGRAS MAIS AGRESSIVAS
+         // ✅ APENAS LOG/MONITORAMENTO - Bloqueio real feito pelo sistema unificado
          
-         // 1. BLOQUEAR estados com win rate < 25% e mais de 3 visitas
-         if(g_stateVisits[state] >= 3 && winRate < 0.25 && !g_stateBlocked[state])
+         // Log de estados com win rate baixo (apenas informativo)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.25)
          {
-            g_stateBlocked[state] = true;
-            bloqueados++;
-            Print("⛔ BLOQUEIO Estado ", state, 
+            Print("⚠️ ALERTA Estado ", state, 
                   " | Win Rate: ", DoubleToString(winRate*100,1), "%",
-                  " | Visitas: ", g_stateVisits[state]);
+                  " | Visitas: ", g_stateVisits[state],
+                  " | Bloqueado: ", (g_stateBlocked[state] ? "Sim" : "Não"));
          }
          
-         // 2. RESETAR estados catastróficos (win rate < 15%)
-         if(g_stateVisits[state] >= 5 && winRate < 0.15)
+         // Log de estados críticos (apenas informativo)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)
          {
-            Print("🔥 RESET Estado ", state, 
-                  " | Win Rate catastrófica: ", DoubleToString(winRate*100,1), "%",
-                  " | Visitas: ", g_stateVisits[state]);
-            
-            g_stateVisits[state] = 0;
-            g_stateWins[state] = 0;
-            g_stateLosses[state] = 0;
-            g_stateBlocked[state] = false;
-            g_stateLastUpdate[state] = 0;
-            
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[state * NUM_ACTIONS + a] = 0.0;
-            }
-            
-            resetados++;
-            g_totalBadStateResets++; // ✅ INCREMENTAR CONTADOR
+            Print("🔥 CRÍTICO Estado ", state, 
+                  " | Win Rate crítica: ", DoubleToString(winRate*100,1), "%",
+                  " | Visitas: ", g_stateVisits[state],
+                  " | Bloqueado: ", (g_stateBlocked[state] ? "Sim" : "Não"));
          }
          
          // 3. DESBLOQUEAR estados bons
-         if(g_stateBlocked[state] && winRate > 0.55 && g_stateVisits[state] >= 5)
+         if(g_stateBlocked[state] && winRate > 0.55 && g_stateVisits[state] >= MinVisitsForBlockDecision)
          {
             g_stateBlocked[state] = false;
+            InvalidateHUDCache();
             Print("✅ DESBLOQUEIO Estado ", state,
                   " | Win Rate boa: ", DoubleToString(winRate*100,1), "%");
          }
@@ -2032,7 +2011,7 @@ void DebugTradeCounting()
    Print("Total Losses: ", g_totalLosses);
    Print("Soma Wins+Losses: ", g_totalWins + g_totalLosses);
    Print("Diferença (NOPs): ", g_totalTrades - (g_totalWins + g_totalLosses));
-   Print("Win Rate: ", g_totalTrades > 0 ? DoubleToString((double)g_totalWins/g_totalTrades*100, 1) : "0.0", "%");
+   Print("Win Rate: ", g_totalTrades > 0 ? DoubleToString(SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0)*100, 1) : "0.0", "%");
    
    int estadosComProblema = 0;
    int totalVisitas = 0;
@@ -2060,7 +2039,8 @@ void DebugTradeCounting()
                g_stateVisits[s] = 0;
                g_stateWins[s] = 0;
                g_stateLosses[s] = 0;
-               g_stateBlocked[s] = false;
+               // ✅ NÃO desbloquear - preservar bloqueio se existir
+               // g_stateBlocked[s] permanece inalterado
                
                for(int a = 0; a < NUM_ACTIONS; a++)
                {
@@ -2072,7 +2052,7 @@ void DebugTradeCounting()
          // Verificar estados que deveriam estar bloqueados
          if(g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
-            double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
+            double lossRate = SafeDivide((double)g_stateLosses[s], (double)g_stateVisits[s], 0.0);
             if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
             {
                Print("⚠️ Estado ", s, " deveria estar bloqueado! Loss rate: ", 
@@ -2089,7 +2069,7 @@ void DebugTradeCounting()
    Print("Total vitórias em todos estados: ", totalVitórias);
    Print("Total perdas em todos estados: ", totalPerdas);
    Print("Taxa de vitória global estados: ", totalVisitas > 0 ? 
-         DoubleToString((double)totalVitórias/totalVisitas*100, 1) : "0.0", "%");
+         DoubleToString(SafeDivide((double)totalVitórias, (double)totalVisitas, 0.0)*100, 1) : "0.0", "%");
    
    if(estadosComProblema > 0)
    {
@@ -2324,17 +2304,17 @@ void OverhaulBlockingSystem()
          bool shouldBeBlocked = false;
          
          // 1. Muito ruim com histórico suficiente
-         if(g_stateVisits[state] >= 10 && winRate < 0.20)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.20)
          {
             shouldBeBlocked = true;
          }
-         // 2. Catastrófico mesmo com menos visitas
-         else if(g_stateVisits[state] >= 5 && winRate < 0.10)
+         // 2. Catastrófico mesmo com histórico mínimo
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)
          {
             shouldBeBlocked = true;
          }
          // 3. Nunca ganhou com visitas significativas
-         else if(g_stateVisits[state] >= 8 && winRate == 0.0)
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0)
          {
             shouldBeBlocked = true;
          }
@@ -2343,7 +2323,7 @@ void OverhaulBlockingSystem()
          bool shouldBeUnblocked = false;
          
          // 1. Performance aceitável
-         if(g_stateVisits[state] >= 5 && winRate >= 0.30)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate >= 0.30)
          {
             shouldBeUnblocked = true;
          }
@@ -2388,6 +2368,12 @@ void OverhaulBlockingSystem()
 // ======================================================================
 void IntelligentPartialReset()
 {
+   // ✅ PROTEÇÃO: Não resetar até ter base sólida de estados aprendidos
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Não resetar até ter aprendido estados suficientes
+   }
+   
    Print("🧠 RESET PARCIAL INTELIGENTE");
    
    int statesReset = 0;
@@ -2399,10 +2385,10 @@ void IntelligentPartialReset()
       {
          double winRate = CalculateWinRate(state);
          
-         // ✅ CRITÉRIOS PARA RESET COMPLETO
-         if((g_stateVisits[state] >= 10 && winRate < 0.15) || // Muito ruim
-            (g_stateVisits[state] >= 5 && winRate == 0.0) ||  // Nunca ganhou
-            (g_stateVisits[state] > 20 && winRate < 0.25))    // Histórico longo ruim
+         // ✅ CRITÉRIOS PARA RESET COMPLETO (usar MinVisitsForBlockDecision)
+         if((g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15) || // Muito ruim
+            (g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0) ||  // Nunca ganhou
+            (g_stateVisits[state] > MinVisitsForBlockDecision && winRate < 0.25))    // Histórico longo ruim
          {
             // Reset completo
             g_stateVisits[state] = 0;
@@ -2418,7 +2404,7 @@ void IntelligentPartialReset()
             statesReset++;
          }
          // ✅ RESET PARCIAL PARA ESTADOS MÉDIOS
-         else if(g_stateVisits[state] >= 8 && winRate < 0.30)
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.30)
          {
             // Manter 30% da memória
             g_stateVisits[state] = (int)(g_stateVisits[state] * 0.3);
@@ -2476,7 +2462,7 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
    
    if(currentWinRate < 0.25)
    {
@@ -2700,6 +2686,51 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Trades", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Trades", OBJPROP_TEXT, "Trades hoje: 0/30");
       hudObjects[hudObjectCount++] = "HUD_Trades";
+      currentY += lineHeight;
+   }
+   
+   if(ObjectCreate(0, "HUD_TotalTrades", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_TotalTrades", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_TotalTrades", OBJPROP_TEXT, "Total de Trades: 0");
+      hudObjects[hudObjectCount++] = "HUD_TotalTrades";
+      currentY += lineHeight;
+   }
+   
+   if(ObjectCreate(0, "HUD_WinRate", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_WinRate", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_WinRate", OBJPROP_TEXT, "Win Rate: 0.0%");
+      hudObjects[hudObjectCount++] = "HUD_WinRate";
+      currentY += lineHeight;
+   }
+   
+   if(ObjectCreate(0, "HUD_Accuracy", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_Accuracy", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_Accuracy", OBJPROP_TEXT, "   Vitórias: 0 | Derrotas: 0");
+      hudObjects[hudObjectCount++] = "HUD_Accuracy";
    }
    
    Print("✅ HUD criado com ", hudObjectCount, " objetos");
@@ -2807,13 +2838,13 @@ void UpdateHUDLight()
    ObjectSetString(0, "HUD_States", OBJPROP_TEXT, newStates);
    
    string progressBar = CreateProgressBarFast(visitedStates, NUM_STATES);
-   double progressPercent = (double)visitedStates / NUM_STATES * 100.0;
+   double progressPercent = SafeDivide((double)visitedStates, (double)NUM_STATES, 0.0) * 100.0;
    
    // 🔧 CORREÇÃO: Converter double para string corretamente
    string newProgress = StringFormat("   [%s] (%.1f%%)", progressBar, progressPercent);
    ObjectSetString(0, "HUD_Progress", OBJPROP_TEXT, newProgress);
    
-   double blockedPercent = visitedStates > 0 ? (double)blockedStates/visitedStates*100 : 0;
+   double blockedPercent = SafeDivide((double)blockedStates, (double)visitedStates, 0.0) * 100.0;
    string newBlocked = StringFormat("   Bloqueados: %d (%.1f%%)", blockedStates, blockedPercent);
    color blockedColor = (blockedStates > 0) ? HUD_WarningColor : HUD_TextColor;
    ObjectSetInteger(0, "HUD_Blocked", OBJPROP_COLOR, blockedColor);
@@ -2899,6 +2930,27 @@ void UpdateHUDLight()
       cachedTradesToday = g_tradesToday;
    }
    
+   // Atualizar total de trades
+   string totalTradesText = StringFormat("Total de Trades: %d", g_totalTrades);
+   ObjectSetString(0, "HUD_TotalTrades", OBJPROP_TEXT, totalTradesText);
+   
+   // Atualizar win rate com cor dinâmica
+   double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
+   color winRateColor = HUD_TextColor;
+   if(g_totalTrades > 0)
+   {
+      if(winRate >= 50.0) winRateColor = HUD_SuccessColor;
+      else if(winRate >= 35.0) winRateColor = HUD_TextColor;
+      else winRateColor = HUD_WarningColor;
+   }
+   string winRateText = StringFormat("Win Rate: %.1f%%", winRate);
+   ObjectSetInteger(0, "HUD_WinRate", OBJPROP_COLOR, winRateColor);
+   ObjectSetString(0, "HUD_WinRate", OBJPROP_TEXT, winRateText);
+   
+   // Atualizar precisão (vitórias vs derrotas)
+   string accuracyText = StringFormat("   Vitórias: %d | Derrotas: %d", g_totalWins, g_totalLosses);
+   ObjectSetString(0, "HUD_Accuracy", OBJPROP_TEXT, accuracyText);
+   
    ChartRedraw(0);
 }
 
@@ -2960,7 +3012,7 @@ bool CheckRealVolume()
    
    if(g_volumeAverage > 0)
    {
-      g_volumeMultiplier = (double)g_currentVolume / (double)g_volumeAverage;
+      g_volumeMultiplier = SafeDivide((double)g_currentVolume, (double)g_volumeAverage, 1.0);
       g_volumeStrength = g_volumeMultiplier;
       cachedVolume = -1;
    }
@@ -3017,9 +3069,17 @@ void ManageDynamicTrailingStop()
          SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      
+      // Validar point antes de usar - valor zero indica problema de configuração
+      if(point <= 0 || point < 0.0000001)
+      {
+         Print("⚠️ ERRO: Point inválido para símbolo ", _Symbol, ": ", point);
+         continue;
+      }
+      
       double currentProfit = isBuy ? 
-         (currentPrice - entryPrice) / point : 
-         (entryPrice - currentPrice) / point;
+         SafeDivide(currentPrice - entryPrice, point, 0.0) : 
+         SafeDivide(entryPrice - currentPrice, point, 0.0);
       
       int trailIndex = -1;
       for(int j = 0; j < g_trailingCount; j++)
@@ -3246,8 +3306,8 @@ void UpdateQ(int state, int action, double reward)
    {
       double winRate = CalculateWinRate(state);
       
-      // Só bloquear se realmente for muito ruim
-      if(winRate < 0.25 && g_stateVisits[state] >= 8)
+      // Só bloquear se realmente for muito ruim - SEM verificação adicional de visitas
+      if(winRate < 0.25)
       {
          g_stateBlocked[state] = true;
          Print("⛔ Estado ", state, " bloqueado - Win rate muito baixa: ", 
@@ -3282,12 +3342,9 @@ void UpdateQ(int state, int action, double reward)
    g_qUpdatesSinceSave++;
    g_totalQUpdates++;
    
-   // ✅ DECAY PERIÓDICO
-   if(g_totalTrades - g_lastDecayTradeCount >= 500)
-   {
-      ApplyStateDecay();
-      g_lastDecayTradeCount = g_totalTrades;
-   }
+   // ✅ DECAY PERIÓDICO REMOVIDO
+   // Decay é aplicado apenas pela manutenção periódica (hourly)
+   // para evitar aplicação excessiva que limitava visitas
    
    // ✅ SAVE PERIÓDICO
    if(g_qUpdatesSinceSave >= 3)
@@ -3295,13 +3352,7 @@ void UpdateQ(int state, int action, double reward)
       SaveBrain();
    }
    
-   // ✅ CHAMAR CORREÇÕES PERIÓDICAS
-   static int lastFixCall = 0;
-   if(g_totalTrades - lastFixCall >= 100)
-   {
-      FixStuckStatesProblem();
-      lastFixCall = g_totalTrades;
-   }
+   // ✅ Correções periódicas removidas (FixStuckStatesProblem desabilitada)
 }
 
 // ======================================================================
@@ -3395,12 +3446,8 @@ int ChooseAction(int state)
    // Para estados conhecidos, usar taxa de exploração normal
    double eps = g_currentExplorationRate;
    
-   // ⚠️ GARANTIR que não fique preso em exploração
-   if(g_currentExplorationRate > 0.7 && g_totalTrades > 100)
-   {
-      eps = 0.7; // Forçar redução
-      g_currentExplorationRate = 0.7;
-   }
+   // ⚠️ CAP REMOVIDO - Permitir exploração natural sem limite artificial
+   // (Cap de 70% após 100 trades removido para permitir descoberta adequada de estados)
 
    if(((double)MathRand() / 32767.0) < eps) 
    {
@@ -3426,9 +3473,9 @@ int ChooseAction(int state)
    
    double nopQ = g_Q[state * NUM_ACTIONS + 0];
    
-   // ⚠️ CORREÇÃO: Tornar NOP mais atrativo para estados ruins
+   // ⚠️ CORREÇÃO: Tornar NOP mais atrativo para estados ruins - usar MinVisitsForBlockDecision
    double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= 5 && winRate < 0.3)
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.3)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (estado ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
@@ -3761,7 +3808,7 @@ double GetStateQuality(int state)
    
    double quality = bestTradeQ / 10.0;
    
-   if(g_stateVisits[state] >= 5)
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision)
    {
       double winRate = CalculateWinRate(state);
       double lossRate = 1.0 - winRate;
@@ -3771,7 +3818,7 @@ double GetStateQuality(int state)
          quality -= (lossRate - 0.6) * 3.0;
       }
       
-      if(winRate > 0.7 && g_stateVisits[state] >= 10)
+      if(winRate > 0.7 && g_stateVisits[state] >= MinVisitsForBlockDecision)
       {
          quality += (winRate - 0.7) * 2.0;
       }
@@ -3900,17 +3947,17 @@ int GetCurrentState()
    double maDistance = 0;
    double atrValue = atr[0];
    if(atrValue > 0)
-      maDistance = (price - ma[0]) / atrValue;
+      maDistance = SafeDivide(price - ma[0], atrValue, 0.0);
    else
-      maDistance = (price - ma[0]) / (point * 10);
+      maDistance = SafeDivide(price - ma[0], point * 10, 0.0);
    
    // ✅ Cálculo da posição nas Bollinger Bands
    double bbPosition = 0;
    double bbRange = bb_upper[0] - bb_lower[0];
    if(bbRange > 0)
-      bbPosition = (price - bb_lower[0]) / bbRange;
+      bbPosition = SafeDivide(price - bb_lower[0], bbRange, BB_NEUTRAL_POSITION);
    else
-      bbPosition = 0.5;
+      bbPosition = BB_NEUTRAL_POSITION;  // Usar posição neutra se range inválido
    
    // ✅ Calcular buckets otimizados
    int maBucket = GetMADistanceBucket(maDistance);
@@ -4257,11 +4304,11 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
    if(UseFixedSL && slPrice > 0)
    {
       double slDistance = MathAbs(entryPrice - slPrice);
-      double slPoints = slDistance / point;
+      double slPoints = SafeDivide(slDistance, point, 0.0);
       
       long minStopsLevel = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minSL = minStopsLevel * point;
-      double minSLPoints = minSL / point;
+      double minSLPoints = SafeDivide(minSL, point, 0.0);
       
       Print("SL Distance: ", DoubleToString(slDistance, 5), " (", DoubleToString(slPoints, 0), " pontos)");
       Print("Min SL required: ", DoubleToString(minSL, 5), " (", DoubleToString(minSLPoints, 0), " pontos)");
@@ -4295,11 +4342,11 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
    if(UseFixedTP && tpPrice > 0)
    {
       double tpDistance = MathAbs(entryPrice - tpPrice);
-      double tpPoints = tpDistance / point;
+      double tpPoints = SafeDivide(tpDistance, point, 0.0);
       
       long minStopsLevel = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minTP = minStopsLevel * point;
-      double minTPPoints = minTP / point;
+      double minTPPoints = SafeDivide(minTP, point, 0.0);
       
       Print("TP Distance: ", DoubleToString(tpDistance, 5), " (", DoubleToString(tpPoints, 0), " pontos)");
       Print("Min TP required: ", DoubleToString(minTP, 5), " (", DoubleToString(minTPPoints, 0), " pontos)");
@@ -4423,7 +4470,7 @@ bool ValidateWithBollingerBands(bool isBuy)
    
    if(bb_range <= 0) return false;
    
-   double bb_position = (price - bb_lower[0]) / bb_range;
+   double bb_position = SafeDivide(price - bb_lower[0], bb_range, BB_NEUTRAL_POSITION);
    
    if(isBuy)
    {
@@ -4529,7 +4576,7 @@ bool ValidateWithTrend(bool isBuy)
       atr_value = price * 0.005;
    }
    
-   double distance_from_ma = (price - ma[0]) / atr_value;
+   double distance_from_ma = SafeDivide(price - ma[0], atr_value, 0.0);
    
    if(isBuy)
    {
@@ -5085,16 +5132,21 @@ void ForceTextExport()
 // ======================================================================
 void CreateDailySummaryReport()
 {
-   string filename = "Phoenix_Files/Text_Logs/Daily_Summary_" + 
-                     TimeToString(TimeCurrent(), TIME_DATE) + "_CORRIGIDO.txt";
+   // ✅ OTIMIZAÇÃO: Usar arquivo consolidado de logs ao invés de criar múltiplos arquivos diários
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_Daily_Log_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
    
    if(!CreateDirectoryForFile(filename)) return;
    
-   int file_handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(file_handle == INVALID_HANDLE) return;
    
+   // Posicionar no final para append
+   FileSeek(file_handle, 0, SEEK_END);
+   
+   FileWrite(file_handle, "");
    FileWrite(file_handle, "================================================================");
-   FileWrite(file_handle, "RELATÓRIO DIÁRIO - PHOENIX TRADER v307F SUPER CORRIGIDO");
+   FileWrite(file_handle, "RELATÓRIO DIÁRIO - PHOENIX TRADER v307F");
    FileWrite(file_handle, "Data: " + TimeToString(TimeCurrent(), TIME_DATE));
    FileWrite(file_handle, "================================================================");
    FileWrite(file_handle, "");
@@ -5180,7 +5232,7 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
       
       if(currentWinRate < 0.20)
       {
@@ -5200,7 +5252,7 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
       if(blockedRatio > 0.7 && g_activeStatesCount > 50)
       {
          Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
@@ -5217,8 +5269,11 @@ void OnTick()
       // ✅ OTIMIZAÇÃO DINÂMICA
       OptimizeParametersDynamically();
       
-      // ✅ CHAMAR CORREÇÃO ESPECÍFICA
-      FixStuckStatesProblem();
+      // ✅ TESTE PERIÓDICO DE ESTADOS BLOQUEADOS
+      if(EnableUnifiedBlockingSystem)
+      {
+         TestBlockedStatesPeriodically();
+      }
       
       lastMaintenanceCall = TimeCurrent();
    }
@@ -5337,7 +5392,7 @@ void OnTick()
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (ATUALIZADA)
+// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (OTIMIZADA - ARQUIVO ÚNICO)
 // ======================================================================
 bool ExportMemoryToTextFileFunc(bool forceExport = false)
 {
@@ -5350,9 +5405,9 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       if(minutesPassed < TextExportMinInterval) return false;
    }
    
-   string filename = "Phoenix_Files/Text_Logs/Memory_" + _Symbol + "_" + 
-                     EnumToString((ENUM_TIMEFRAMES)_Period) + "_" + 
-                     TimeToString(currentTime, TIME_DATE) + "_SUPER_CORRIGIDO.txt";
+   // ✅ OTIMIZAÇÃO: Usar arquivo único ao invés de criar múltiplos arquivos
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_Memory_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
    
    if(!CreateDirectoryForFile(filename))
    {
@@ -5360,29 +5415,23 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       return false;
    }
    
-   int file_handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   // Abrir em modo APPEND para adicionar ao arquivo existente
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(file_handle == INVALID_HANDLE)
    {
       Print("❌ Erro ao abrir arquivo texto: ", filename, " | Erro: ", GetLastError());
       return false;
    }
    
+   // ✅ Posicionar no final do arquivo para append
+   FileSeek(file_handle, 0, SEEK_END);
+   
+   // ✅ Separador de entrada
+   FileWrite(file_handle, "");
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "PHOENIX TRADER v307F - SISTEMA SUPER CORRIGIDO");
-   FileWrite(file_handle, "Data/Hora: " + TimeToString(currentTime));
+   FileWrite(file_handle, "PHOENIX TRADER v307F - SNAPSHOT " + TimeToString(currentTime));
    FileWrite(file_handle, "Symbol: " + _Symbol + " | Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "");
-   FileWrite(file_handle, "🛡️ SISTEMA SUPER CORRIGIDO - MELHORIAS IMPLEMENTADAS");
-   FileWrite(file_handle, "----------------------------------------");
-   FileWrite(file_handle, "✅ CORREÇÕES CRÍTICAS IMPLEMENTADAS:");
-   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (576 estados)");
-   FileWrite(file_handle, "2. ✅ Reset automático funcionando");
-   FileWrite(file_handle, "3. ✅ Estados não travam mais em 10 visitas");
-   FileWrite(file_handle, "4. ✅ Regras de bloqueio mais agressivas");
-   FileWrite(file_handle, "5. ✅ Debug de estados travados implementado");
-   FileWrite(file_handle, "6. ✅ Reset de emergência disponível");
-   FileWrite(file_handle, "");
    
    string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)";
    FileWrite(file_handle, systemInfo);
@@ -5393,7 +5442,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    string blockedInfo = "Estados bloqueados: " + IntegerToString(CountBlockedStates());
    FileWrite(file_handle, blockedInfo);
    
-   double discoveryRate = (double)g_activeStatesCount / NUM_STATES * 100;
+   double discoveryRate = SafeDivide((double)g_activeStatesCount, (double)NUM_STATES, 0.0) * 100;
    string discoveryInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
    FileWrite(file_handle, discoveryInfo);
    
@@ -5414,8 +5463,8 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       
       if(g_totalTrades > 0)
       {
-         double winRate = (double)g_totalWins/g_totalTrades*100;
-         double lossRate = (double)g_totalLosses/g_totalTrades*100;
+         double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
+         double lossRate = SafeDivide((double)g_totalLosses, (double)g_totalTrades, 0.0) * 100;
          
          string winsInfo = "  Vitórias REAIS: " + IntegerToString(g_totalWins) + 
                           " (" + DoubleToString(winRate, 1) + "%)";
@@ -5492,7 +5541,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       int visits = sortedStates[i][1];
       int losses = g_stateLosses[state];
       int wins = g_stateWins[state];
-      double winRate = visits > 0 ? (double)wins / visits * 100 : 0;
+      double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
       bool isBlocked = g_stateBlocked[state];
       
       string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
@@ -5644,12 +5693,14 @@ int OnInit()
    Print("⚙️ Configurações otimizadas forçadas:");
    Print("   • Exploration Rate: 40%");
    Print("   • MinVisitsToTrade: 2");
-   Print("   • BadStateMinVisits: 3");
+   Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
+   Print("   • MinStatesBeforeReset: 150 (previne resets e decay prematuros)");
    
    if(EnableUnifiedBlockingSystem)
    {
       AutoUnblockGoodStates();
+      TestBlockedStatesPeriodically();
    }
 
    if(EnableMemoryExport) ExportAllMemoryFiles();
@@ -5663,6 +5714,7 @@ int OnInit()
    Print("   3. ✅ Reset parcial em vez de completo");
    Print("   4. ✅ Correção automática de estados travados");
    Print("   5. ✅ Sistema anti-bloqueio-erroneo ativado");
+   Print("   6. ✅ Teste periódico de estados bloqueados (a cada 30 dias)");
    Print("🔥 NOVAS FUNÇÕES ADICIONADAS:");
    Print("   • EmergencyCounterFix() - Correção emergencial de contadores");
    Print("   • OverhaulBlockingSystem() - Revisão completa do bloqueio");
@@ -5670,9 +5722,7 @@ int OnInit()
    Print("   • OptimizeParametersDynamically() - Otimização dinâmica");
    Print("===============================================================");
    
-   // ✅ EXECUTAR CORREÇÃO INICIAL
-   FixStuckStatesProblem();
-   ResetBlockingSystem();
+   // ✅ Funções de correção inicial removidas (não mais necessárias)
    
    if(ShowHUD)
    {
