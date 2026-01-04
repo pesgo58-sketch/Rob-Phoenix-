@@ -270,6 +270,7 @@ datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
 datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio
 bool g_stateWasBlockedBefore[];        // Flag indicando se o estado já foi bloqueado anteriormente
 datetime g_stateBlockTime[];           // Timestamp de quando o estado foi bloqueado pela primeira vez
+int g_stateBlockCount[];               // Contador de quantas vezes o estado foi bloqueado
 double g_stateWinRate[];               // Win rate calculado por estado
 double g_stateAvgProfit[];             // Lucro médio por estado
 
@@ -871,6 +872,9 @@ void BlockState(int state)
         g_stateBlocked[state] = true;
         g_stateLastBlockTime[state] = TimeCurrent();
         
+        // Incrementar contador de bloqueios
+        g_stateBlockCount[state]++;
+        
         // Marcar que este estado já foi bloqueado e registrar timestamp do primeiro bloqueio
         if(!g_stateWasBlockedBefore[state])
         {
@@ -882,7 +886,8 @@ void BlockState(int state)
               " | Visitas REAIS: ", visits, 
               " | Perdas REAIS: ", losses, 
               " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
+              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
+              " | Bloqueios totais: ", g_stateBlockCount[state]);
         
         g_memoryDirty = true;
         InvalidateHUDCache();
@@ -1077,6 +1082,19 @@ void TestBlockedStatesPeriodically()
       // Apenas testar estados com histórico significativo
       if(g_stateVisits[state] < 10) continue;
       
+      // Se estado já foi bloqueado 2+ vezes, PERMANECE BLOQUEADO
+      if(g_stateBlockCount[state] >= 2)
+      {
+         // Log apenas na primeira iteração para não poluir
+         if(testedStates == 0)
+         {
+            Print("🔒 Estado ", state, " PERMANENTEMENTE BLOQUEADO (bloqueado ", 
+                  g_stateBlockCount[state], " vezes - sem mais retestes)");
+         }
+         testedStates++;
+         continue; // Não desbloquear mais
+      }
+      
       datetime timeSinceBlock = currentTime - g_stateLastBlockTime[state];
       
       // Se estado está bloqueado há mais de 30 dias, dar nova chance
@@ -1093,20 +1111,24 @@ void TestBlockedStatesPeriodically()
          
          unblockedForTest++;
          
-         Print("🧪 Estado ", state, " desbloqueado para TESTE (bloqueado há ", 
-               (int)(timeSinceBlock / 86400), " dias)");
+         int tentativasRestantes = 2 - g_stateBlockCount[state];
+         string mensagemTentativa = (tentativasRestantes == 1) ? " (ÚLTIMA CHANCE)" : "";
+         
+         Print("🧪 Estado ", state, " desbloqueado para TESTE #", 
+               (g_stateBlockCount[state] + 1), mensagemTentativa,
+               " (bloqueado há ", (int)(timeSinceBlock / 86400), " dias)");
       }
       
       testedStates++;
       
-      // Limitar a 5 estados por ciclo para não sobrecarregar
-      if(unblockedForTest >= 5) break;
+      // Limitar a 1 estado por vez para teste gradual e controlado
+      if(unblockedForTest >= 1) break;
    }
    
    if(unblockedForTest > 0)
    {
       Print("📊 Teste periódico de estados bloqueados: ", unblockedForTest, 
-            " estados desbloqueados para coleta de novas amostras");
+            " estado desbloqueado para coleta gradual de novas amostras");
       InvalidateHUDCache();
    }
 }
@@ -1179,6 +1201,7 @@ void SaveState()
    FileWriteArray(handle, g_stateBlocked);
    FileWriteArray(handle, g_stateLastBlockTime);
    FileWriteArray(handle, g_stateLastUnblockTime);
+   FileWriteArray(handle, g_stateBlockCount);
    FileWriteInteger(handle, (int)g_activeStatesCount);
    FileWriteArray(handle, g_stateWinRate);
    FileWriteArray(handle, g_stateAvgProfit);
@@ -1222,6 +1245,7 @@ void LoadState()
    FileReadArray(handle, g_stateBlocked);
    FileReadArray(handle, g_stateLastBlockTime);
    FileReadArray(handle, g_stateLastUnblockTime);
+   FileReadArray(handle, g_stateBlockCount);
    
    // 🔧 REGRA 3 — Converter para int se necessário
    int tempActiveStatesCount = FileReadInteger(handle);
@@ -1437,6 +1461,7 @@ bool SaveBrainToFile(string filename)
       FileWriteInteger(h, (int)g_stateBlocked[state]);
       FileWriteLong(h, (long)g_stateLastBlockTime[state]);
       FileWriteLong(h, (long)g_stateLastUnblockTime[state]);
+      FileWriteInteger(h, g_stateBlockCount[state]);
       
       for(int a = 0; a < NUM_ACTIONS; a++)
       {
@@ -1563,6 +1588,7 @@ bool LoadBrainFromFile(string filename)
          g_stateBlocked[state] = (bool)FileReadInteger(h);
          g_stateLastBlockTime[state] = (datetime)FileReadLong(h);
          g_stateLastUnblockTime[state] = (datetime)FileReadLong(h);
+         g_stateBlockCount[state] = FileReadInteger(h);
          
          for(int a = 0; a < NUM_ACTIONS; a++)
          {
@@ -5569,11 +5595,22 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          int wins = g_stateWins[state];
          double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
          
+         string bloqueioInfo = "[BLOQUEADO";
+         if(g_stateBlockCount[state] >= 2)
+         {
+            bloqueioInfo += " PERMANENTEMENTE - " + IntegerToString(g_stateBlockCount[state]) + " vezes";
+         }
+         else if(g_stateBlockCount[state] > 0)
+         {
+            bloqueioInfo += " - " + IntegerToString(g_stateBlockCount[state]) + " vez(es)";
+         }
+         bloqueioInfo += "]";
+         
          string stateLine = "Estado " + IntegerToString(state) + 
                            ": " + IntegerToString(visits) + " visitas REAIS | " + 
                            IntegerToString(wins) + " vitórias REAIS (" + 
                            DoubleToString(winRate, 1) + "%) | " + 
-                           IntegerToString(losses) + " perdas REAIS [BLOQUEADO]";
+                           IntegerToString(losses) + " perdas REAIS " + bloqueioInfo;
          
          FileWrite(file_handle, stateLine);
       }
@@ -5639,10 +5676,18 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
                            DoubleToString(winRate, 1) + "%) | " + 
                            IntegerToString(losses) + " perdas REAIS";
          
-         // ⚠️ IMPORTANTE: Mostrar se este estado teve histórico de bloqueio
+         // ⚠️ IMPORTANTE: Mostrar se este estado teve histórico de bloqueio e quantas vezes
          if(g_stateWasBlockedBefore[state])
          {
-            stateLine += " [RETESTADO - foi bloqueado anteriormente, estado em reavaliação]";
+            if(g_stateBlockCount[state] >= 2)
+            {
+               stateLine += " [RETESTADO E PERMANENTEMENTE BLOQUEADO - bloqueado " + 
+                           IntegerToString(g_stateBlockCount[state]) + " vezes]";
+            }
+            else
+            {
+               stateLine += " [RETESTADO - foi bloqueado anteriormente, estado em reavaliação]";
+            }
          }
          
          FileWrite(file_handle, stateLine);
@@ -5743,6 +5788,9 @@ int OnInit()
    
    ArrayResize(g_stateBlockTime, NUM_STATES);
    ArrayInitialize(g_stateBlockTime, 0);
+   
+   ArrayResize(g_stateBlockCount, NUM_STATES);
+   ArrayInitialize(g_stateBlockCount, 0);
    
    ArrayResize(g_activeStates, MaxMemoryStates);
    g_activeStatesCount = 0;
