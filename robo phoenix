@@ -581,8 +581,8 @@ void ResetBadStatesEnhanced()
             if(g_stateWins[s] < 0) g_stateWins[s] = 0;
             if(g_stateLosses[s] < 0) g_stateLosses[s] = 0;
             
-            // Desbloquear
-            g_stateBlocked[s] = false;
+            // ✅ NÃO desbloquear estados ruins - manter bloqueio se existir
+            // g_stateBlocked[s] permanece inalterado
             
             // Reset parcial do Q
             for(int a = 0; a < NUM_ACTIONS; a++)
@@ -733,7 +733,8 @@ void ResetBadStates()
          g_stateVisits[s] = 0;
          g_stateLosses[s] = 0;
          g_stateWins[s] = 0;
-         g_stateBlocked[s] = false;
+         // ✅ NÃO desbloquear estado ruim - preservar bloqueio
+         // g_stateBlocked[s] permanece inalterado
          g_stateLastBlockTime[s] = 0;
          g_stateLastUnblockTime[s] = 0;
          
@@ -1985,7 +1986,8 @@ void DebugTradeCounting()
                g_stateVisits[s] = 0;
                g_stateWins[s] = 0;
                g_stateLosses[s] = 0;
-               g_stateBlocked[s] = false;
+               // ✅ NÃO desbloquear - preservar bloqueio se existir
+               // g_stateBlocked[s] permanece inalterado
                
                for(int a = 0; a < NUM_ACTIONS; a++)
                {
