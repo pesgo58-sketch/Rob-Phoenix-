@@ -213,9 +213,9 @@ input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
-input double BlockLossRateThreshold   = 0.75;         // Taxa perda para bloquear
+input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-int MinVisitsForBlockDecision         = 20;           // Visitas mín. decisão bloqueio
+int MinVisitsForBlockDecision         = 30;           // Visitas mín. decisão bloqueio
 
 // ──────────────────────────────────────────────────────────────────────
 // 📤 7. EXPORTAÇÃO E LOGS
@@ -1819,40 +1819,24 @@ void MonitorBadStates()
          estadosAnalisados++;
          double winRate = CalculateWinRate(state);
          
-         // ✅ CORREÇÃO: REGRAS MAIS AGRESSIVAS
+         // ✅ APENAS LOG/MONITORAMENTO - Bloqueio real feito pelo sistema unificado
          
-         // 1. BLOQUEAR estados com win rate < 25% e mais de MinVisitsForBlockDecision visitas
-         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.25 && !g_stateBlocked[state])
+         // Log de estados com win rate baixo (apenas informativo)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.25)
          {
-            g_stateBlocked[state] = true;
-            bloqueados++;
-            InvalidateHUDCache();
-            Print("⛔ BLOQUEIO Estado ", state, 
+            Print("⚠️ ALERTA Estado ", state, 
                   " | Win Rate: ", DoubleToString(winRate*100,1), "%",
-                  " | Visitas: ", g_stateVisits[state]);
+                  " | Visitas: ", g_stateVisits[state],
+                  " | Bloqueado: ", (g_stateBlocked[state] ? "Sim" : "Não"));
          }
          
-         // 2. RESETAR estados catastróficos (win rate < 15%)
+         // Log de estados críticos (apenas informativo)
          if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)
          {
-            Print("🔥 RESET Estado ", state, 
-                  " | Win Rate catastrófica: ", DoubleToString(winRate*100,1), "%",
-                  " | Visitas: ", g_stateVisits[state]);
-            
-            g_stateVisits[state] = 0;
-            g_stateWins[state] = 0;
-            g_stateLosses[state] = 0;
-            g_stateBlocked[state] = false;
-            g_stateLastUpdate[state] = 0;
-            
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[state * NUM_ACTIONS + a] = 0.0;
-            }
-            
-            resetados++;
-            g_totalBadStateResets++; // ✅ INCREMENTAR CONTADOR
-            InvalidateHUDCache();
+            Print("🔥 CRÍTICO Estado ", state, 
+                  " | Win Rate crítica: ", DoubleToString(winRate*100,1), "%",
+                  " | Visitas: ", g_stateVisits[state],
+                  " | Bloqueado: ", (g_stateBlocked[state] ? "Sim" : "Não"));
          }
          
          // 3. DESBLOQUEAR estados bons
