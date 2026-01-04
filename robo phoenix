@@ -225,7 +225,7 @@ input bool   EnableMemoryExport       = true;         // Habilitar exportação
 input int    AutoExportMinutes        = 30;           // Intervalo auto-export (min)
 input bool   ExportOnDeinit           = true;         // Exportar ao finalizar
 input bool   CreateBackupFiles        = true;         // Criar backups
-input int    MaxBackupFiles           = 5;            // Máximo de backups
+input int    MaxBackupFiles           = 1;            // Máximo de backups (SIMPLIFICADO: apenas 1 backup)
 input bool   ExportMemoryToTextFile   = true;         // Exportar para texto
 input int    TextExportIntervalMinutes = 60;          // Intervalo export texto (min)
 
@@ -1426,19 +1426,13 @@ void ManageBackupFiles()
       Print("✅ Backup criado: ", backupFile);
    }
    
-   for(int i = MaxBackupFiles - 1; i > 0; i--)
+   // Sistema simplificado: apenas 1 backup
+   // Remove o backup antigo antes de criar novo
+   string singleBackupFile = GetBackupFileName(0);
+   if(FileIsExist(singleBackupFile, FILE_COMMON))
    {
-      string oldFile = GetBackupFileName(i);
-      string newFile = GetBackupFileName(i + 1);
-      
-      if(FileIsExist(oldFile, FILE_COMMON))
-      {
-         if(FileIsExist(newFile, FILE_COMMON))
-         {
-            FileDelete(newFile, FILE_COMMON);
-         }
-         FileMove(oldFile, 0, newFile, 0);
-      }
+      FileDelete(singleBackupFile, FILE_COMMON);
+      Print("🗑️ Backup antigo removido");
    }
 }
 
@@ -1770,26 +1764,23 @@ bool LoadBrain()
    if(!FileIsExist(fn, FILE_COMMON))
    {
       Print("⚠️ Arquivo principal não encontrado: ", fn);
-      Print("🔍 Procurando backups...");
+      Print("🔍 Procurando backup único...");
       
-      for(int i = 0; i <= MaxBackupFiles; i++)
+      string backupFile = GetBackupFileName(0);
+      Print("   Verificando: ", backupFile);
+      if(FileIsExist(backupFile, FILE_COMMON))
       {
-         string backupFile = GetBackupFileName(i);
-         Print("   Verificando: ", backupFile);
-         if(FileIsExist(backupFile, FILE_COMMON))
+         Print("✅ Backup encontrado: ", backupFile);
+         Print("🔄 Carregando backup...");
+         bool result = LoadBrainFromFile(backupFile);
+         if(result)
          {
-            Print("✅ Backup encontrado: ", backupFile);
-            Print("🔄 Carregando backup...");
-            bool result = LoadBrainFromFile(backupFile);
-            if(result)
-            {
-               Print("✅ Backup carregado com sucesso!");
-               // Salva como arquivo principal para próxima vez
-               SaveBrainToFile(fn);
-               Print("✅ Backup copiado para arquivo principal");
-            }
-            return result;
+            Print("✅ Backup carregado com sucesso!");
+            Print("💾 Copiando backup para arquivo principal...");
+            SaveBrainToFile(fn);
+            Print("✅ Backup copiado para arquivo principal: ", fn);
          }
+         return result;
       }
       
       Print("❌ Nenhum backup encontrado, será criada nova memória");
@@ -1805,19 +1796,20 @@ bool LoadBrain()
    else
    {
       Print("❌ ERRO ao carregar arquivo principal!");
-      Print("🔍 Tentando carregar backup como fallback...");
+      Print("🔍 Tentando carregar backup único como fallback...");
       
-      for(int i = 0; i <= MaxBackupFiles; i++)
+      string backupFile = GetBackupFileName(0);
+      if(FileIsExist(backupFile, FILE_COMMON))
       {
-         string backupFile = GetBackupFileName(i);
-         if(FileIsExist(backupFile, FILE_COMMON))
+         Print("🔄 Tentando backup: ", backupFile);
+         result = LoadBrainFromFile(backupFile);
+         if(result)
          {
-            Print("🔄 Tentando backup: ", backupFile);
-            result = LoadBrainFromFile(backupFile);
-            if(result)
-            {
-               Print("✅ Backup carregado com sucesso!");
-               return result;
+            Print("✅ Backup carregado com sucesso!");
+            Print("💾 Copiando backup para arquivo principal...");
+            SaveBrainToFile(fn);
+            Print("✅ Backup copiado para arquivo principal: ", fn);
+            return result;
             }
          }
       }
