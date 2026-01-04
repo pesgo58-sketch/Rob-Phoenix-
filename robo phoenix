@@ -628,6 +628,13 @@ void ApplyStateDecay()
 {
    if(!EnableMemoryDecay) return;
    
+   // ✅ PROTEÇÃO: Não aplicar decay antes de ter 100 estados descobertos
+   // Garante fase completa de aprendizado sem perder estados prematuramente
+   if(g_activeStatesCount < MinStatesBeforeReset)
+   {
+      return; // Decay desabilitado durante fase de descoberta inicial
+   }
+   
    const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário (% a esquecer)
    int statesDecayed = 0;
    double totalMemoryBefore = 0;
