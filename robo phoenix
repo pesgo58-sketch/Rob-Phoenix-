@@ -207,7 +207,7 @@ input double DecayFactor              = 0.05;         // Fator de decay (5%)
 input bool   EnableIntelligentReset   = true;         // Reset inteligente
 input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
 input int    BadStateMinVisits        = 20;           // Visitas mínimas para reset
-input int    MinStatesBeforeReset     = 100;          // Mínimo de estados aprendidos antes de permitir resets
+input int    MinStatesBeforeReset     = 150;          // Mínimo de estados aprendidos antes de permitir resets
 input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
 input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
@@ -306,6 +306,7 @@ int g_totalBadStateResets = 0;
 int g_stateResets = 0;
 int g_stateDecays = 0;
 static int g_lastDecayTradeCount = 0;
+datetime g_lastUnblockTestTime = 0; // Tempo do último teste de desbloqueio
 
 // ──────────────────────────────────────────────────────────────────────
 // 📈 3. INDICADORES TÉCNICOS
@@ -1038,6 +1039,67 @@ void AutoUnblockGoodStates()
         Print("🔄 ", unblocked, " estados desbloqueados automaticamente (win rate > ", 
               DoubleToString(UnblockWinRateThreshold*100, 0), "%)");
     }
+}
+
+// ======================================================================
+// ✅ TESTAR PERIODICAMENTE ESTADOS BLOQUEADOS
+// ======================================================================
+// Testa estados bloqueados periodicamente para ver se melhoraram
+// Desbloqueia temporariamente para coletar novas amostras
+void TestBlockedStatesPeriodically()
+{
+   datetime currentTime = TimeCurrent();
+   
+   // Testar a cada 7 dias (604800 segundos)
+   if(currentTime - g_lastUnblockTestTime < 604800)
+   {
+      return;
+   }
+   
+   g_lastUnblockTestTime = currentTime;
+   
+   int testedStates = 0;
+   int unblockedForTest = 0;
+   
+   for(int state = 0; state < NUM_STATES; state++)
+   {
+      if(!g_stateBlocked[state]) continue;
+      
+      // Apenas testar estados com histórico significativo
+      if(g_stateVisits[state] < 10) continue;
+      
+      datetime timeSinceBlock = currentTime - g_stateLastBlockTime[state];
+      
+      // Se estado está bloqueado há mais de 30 dias, dar nova chance
+      if(timeSinceBlock > 2592000) // 30 dias em segundos
+      {
+         // Resetar estatísticas mas manter Q-values (aprendizado)
+         g_stateVisits[state] = 0;
+         g_stateWins[state] = 0;
+         g_stateLosses[state] = 0;
+         
+         // Desbloquear temporariamente para teste
+         g_stateBlocked[state] = false;
+         g_stateLastUnblockTime[state] = currentTime;
+         
+         unblockedForTest++;
+         
+         Print("🧪 Estado ", state, " desbloqueado para TESTE (bloqueado há ", 
+               (int)(timeSinceBlock / 86400), " dias)");
+      }
+      
+      testedStates++;
+      
+      // Limitar a 5 estados por ciclo para não sobrecarregar
+      if(unblockedForTest >= 5) break;
+   }
+   
+   if(unblockedForTest > 0)
+   {
+      Print("📊 Teste periódico de estados bloqueados: ", unblockedForTest, 
+            " estados desbloqueados para coleta de novas amostras");
+      InvalidateHUDCache();
+   }
 }
 
 // ======================================================================
@@ -2624,6 +2686,51 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Trades", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Trades", OBJPROP_TEXT, "Trades hoje: 0/30");
       hudObjects[hudObjectCount++] = "HUD_Trades";
+      currentY += lineHeight;
+   }
+   
+   if(ObjectCreate(0, "HUD_TotalTrades", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_TotalTrades", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_TotalTrades", OBJPROP_TEXT, "Total de Trades: 0");
+      hudObjects[hudObjectCount++] = "HUD_TotalTrades";
+      currentY += lineHeight;
+   }
+   
+   if(ObjectCreate(0, "HUD_WinRate", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_WinRate", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_WinRate", OBJPROP_TEXT, "Win Rate: 0.0%");
+      hudObjects[hudObjectCount++] = "HUD_WinRate";
+      currentY += lineHeight;
+   }
+   
+   if(ObjectCreate(0, "HUD_Accuracy", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_Accuracy", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_Accuracy", OBJPROP_TEXT, "   Vitórias: 0 | Derrotas: 0");
+      hudObjects[hudObjectCount++] = "HUD_Accuracy";
    }
    
    Print("✅ HUD criado com ", hudObjectCount, " objetos");
@@ -2822,6 +2929,27 @@ void UpdateHUDLight()
       ObjectSetString(0, "HUD_Trades", OBJPROP_TEXT, newTrades);
       cachedTradesToday = g_tradesToday;
    }
+   
+   // Atualizar total de trades
+   string totalTradesText = StringFormat("Total de Trades: %d", g_totalTrades);
+   ObjectSetString(0, "HUD_TotalTrades", OBJPROP_TEXT, totalTradesText);
+   
+   // Atualizar win rate com cor dinâmica
+   double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
+   color winRateColor = HUD_TextColor;
+   if(g_totalTrades > 0)
+   {
+      if(winRate >= 50.0) winRateColor = HUD_SuccessColor;
+      else if(winRate >= 35.0) winRateColor = HUD_TextColor;
+      else winRateColor = HUD_WarningColor;
+   }
+   string winRateText = StringFormat("Win Rate: %.1f%%", winRate);
+   ObjectSetInteger(0, "HUD_WinRate", OBJPROP_COLOR, winRateColor);
+   ObjectSetString(0, "HUD_WinRate", OBJPROP_TEXT, winRateText);
+   
+   // Atualizar precisão (vitórias vs derrotas)
+   string accuracyText = StringFormat("   Vitórias: %d | Derrotas: %d", g_totalWins, g_totalLosses);
+   ObjectSetString(0, "HUD_Accuracy", OBJPROP_TEXT, accuracyText);
    
    ChartRedraw(0);
 }
@@ -5141,6 +5269,12 @@ void OnTick()
       // ✅ OTIMIZAÇÃO DINÂMICA
       OptimizeParametersDynamically();
       
+      // ✅ TESTE PERIÓDICO DE ESTADOS BLOQUEADOS
+      if(EnableUnifiedBlockingSystem)
+      {
+         TestBlockedStatesPeriodically();
+      }
+      
       lastMaintenanceCall = TimeCurrent();
    }
 
@@ -5561,11 +5695,12 @@ int OnInit()
    Print("   • MinVisitsToTrade: 2");
    Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
-   Print("   • MinStatesBeforeReset: 100 (previne resets prematuros)");
+   Print("   • MinStatesBeforeReset: 150 (previne resets e decay prematuros)");
    
    if(EnableUnifiedBlockingSystem)
    {
       AutoUnblockGoodStates();
+      TestBlockedStatesPeriodically();
    }
 
    if(EnableMemoryExport) ExportAllMemoryFiles();
@@ -5579,6 +5714,7 @@ int OnInit()
    Print("   3. ✅ Reset parcial em vez de completo");
    Print("   4. ✅ Correção automática de estados travados");
    Print("   5. ✅ Sistema anti-bloqueio-erroneo ativado");
+   Print("   6. ✅ Teste periódico de estados bloqueados (a cada 30 dias)");
    Print("🔥 NOVAS FUNÇÕES ADICIONADAS:");
    Print("   • EmergencyCounterFix() - Correção emergencial de contadores");
    Print("   • OverhaulBlockingSystem() - Revisão completa do bloqueio");
