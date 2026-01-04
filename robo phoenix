@@ -1810,7 +1810,6 @@ bool LoadBrain()
             SaveBrainToFile(fn);
             Print("✅ Backup copiado para arquivo principal: ", fn);
             return result;
-            }
          }
       }
       Print("❌ Falha ao carregar qualquer arquivo");
