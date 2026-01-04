@@ -805,8 +805,8 @@ void PerformMemoryMaintenance()
       ApplyStateDecay();
    }
    
-   // 2. Resetar estados ruins
-   if(EnableIntelligentReset)
+   // 2. Resetar estados ruins (apenas após atingir limite mínimo)
+   if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
    {
       ResetBadStates();
    }
@@ -2488,7 +2488,8 @@ void IntelligentPartialReset()
             g_stateVisits[state] = 0;
             g_stateWins[state] = 0;
             g_stateLosses[state] = 0;
-            g_stateBlocked[state] = false;
+            // ✅ NÃO desbloquear estado ruim - preservar bloqueio
+            // g_stateBlocked[state] permanece inalterado
             
             for(int a = 0; a < NUM_ACTIONS; a++)
             {
@@ -5345,12 +5346,15 @@ void OnTick()
          }
       }
       
-      // Verificar bloqueios excessivos
-      double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
-      if(blockedRatio > 0.7 && g_activeStatesCount > 50)
+      // Verificar bloqueios excessivos (apenas após atingir limite mínimo)
+      if(g_activeStatesCount >= MinStatesBeforeReset)
       {
-         Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
-         IntelligentPartialReset();
+         double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
+         if(blockedRatio > 0.7 && g_activeStatesCount > 50)
+         {
+            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
+            IntelligentPartialReset();
+         }
       }
    }
 
@@ -5390,7 +5394,8 @@ void OnTick()
          DebugStuckStatesEnhanced();
       }
       
-      if(debugCounter % 100 == 0)
+      // ✅ Reset apenas após atingir limite mínimo de estados
+      if(g_activeStatesCount >= MinStatesBeforeReset && debugCounter % 100 == 0)
       {
          ResetBadStatesEnhanced();
       }
@@ -5411,8 +5416,11 @@ void OnTick()
          g_lastResetDate=TimeCurrent();
          cachedTradesToday = -1;
          
-         // ✅ RESET PARCIAL DO SISTEMA DE BLOQUEIO A CADA DIA
-         ResetBadStatesEnhanced();
+         // ✅ RESET PARCIAL apenas após atingir limite mínimo de estados
+         if(g_activeStatesCount >= MinStatesBeforeReset)
+         {
+            ResetBadStatesEnhanced();
+         }
          
          if(EnableTextExport)
          {
