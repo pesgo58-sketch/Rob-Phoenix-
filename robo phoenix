@@ -503,19 +503,24 @@ void DebugStuckStatesEnhanced()
    {
       Print("🔥🔥🔥 APLICANDO CORREÇÃO AUTOMÁTICA...");
       
-      for(int state = 0; state < NUM_STATES; state++)
-      {
-         if(g_stateBlocked[state])
-         {
-            double winRate = CalculateWinRate(state);
-            
-            if(winRate >= 0.30 && g_stateVisits[state] >= 5)
-            {
-               g_stateBlocked[state] = false;
-               Print("✅ Estado ", state, " desbloqueado automaticamente");
-            }
-         }
-      }
+      // ❌ REMOVIDO - Desbloqueio deve ser feito APENAS por:
+      // 1. AutoUnblockGoodStates() com critérios rigorosos (55% win rate, 30 visitas)
+      // 2. TestBlockedStatesPeriodically() após 30 dias com reteste gradual
+      // Desbloquear aqui com 30% e 5 visitas é MUITO permissivo e causa desbloqueios prematuros
+      
+      // for(int state = 0; state < NUM_STATES; state++)
+      // {
+      //    if(g_stateBlocked[state])
+      //    {
+      //       double winRate = CalculateWinRate(state);
+      //       
+      //       if(winRate >= 0.30 && g_stateVisits[state] >= 5)
+      //       {
+      //          g_stateBlocked[state] = false;
+      //          Print("✅ Estado ", state, " desbloqueado automaticamente");
+      //       }
+      //    }
+      // }
       
       Print("✅✅✅ ", wronglyBlocked, " estados desbloqueados automaticamente");
    }
