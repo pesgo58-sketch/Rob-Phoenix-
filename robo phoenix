@@ -268,6 +268,8 @@ int g_stateLastUpdate[];               // Último update de cada estado
 bool g_stateBlocked[];                 // Estados bloqueados por má performance
 datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
 datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio
+bool g_stateWasBlockedBefore[];        // Flag indicando se o estado já foi bloqueado anteriormente
+datetime g_stateBlockTime[];           // Timestamp de quando o estado foi bloqueado pela primeira vez
 double g_stateWinRate[];               // Win rate calculado por estado
 double g_stateAvgProfit[];             // Lucro médio por estado
 
@@ -868,6 +870,13 @@ void BlockState(int state)
     {
         g_stateBlocked[state] = true;
         g_stateLastBlockTime[state] = TimeCurrent();
+        
+        // Marcar que este estado já foi bloqueado e registrar timestamp do primeiro bloqueio
+        if(!g_stateWasBlockedBefore[state])
+        {
+            g_stateWasBlockedBefore[state] = true;
+            g_stateBlockTime[state] = TimeCurrent();
+        }
         
         Print("⛔ ESTADO BLOQUEADO CORRETAMENTE: ", state, 
               " | Visitas REAIS: ", visits, 
@@ -5392,7 +5401,7 @@ void OnTick()
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (OTIMIZADA - ARQUIVO ÚNICO)
+// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (OTIMIZADA - ARQUIVO ÚNICO LIMPO)
 // ======================================================================
 bool ExportMemoryToTextFileFunc(bool forceExport = false)
 {
@@ -5415,147 +5424,229 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       return false;
    }
    
-   // Abrir em modo APPEND para adicionar ao arquivo existente
-   int file_handle = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   // ✅ Abrir em modo WRITE para sobrescrever e manter arquivo limpo
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(file_handle == INVALID_HANDLE)
    {
       Print("❌ Erro ao abrir arquivo texto: ", filename, " | Erro: ", GetLastError());
       return false;
    }
    
-   // ✅ Posicionar no final do arquivo para append
-   FileSeek(file_handle, 0, SEEK_END);
-   
-   // ✅ Separador de entrada
-   FileWrite(file_handle, "");
+   // ========== CABEÇALHO ==========
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "PHOENIX TRADER v307F - SNAPSHOT " + TimeToString(currentTime));
+   FileWrite(file_handle, "PHOENIX TRADER v307F - MEMÓRIA DE ESTADOS");
+   FileWrite(file_handle, "Última Atualização: " + TimeToString(currentTime));
    FileWrite(file_handle, "Symbol: " + _Symbol + " | Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
    FileWrite(file_handle, "=================================================================");
-   
-   string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)";
-   FileWrite(file_handle, systemInfo);
-   
-   string activeInfo = "Estados ativos na memória: " + IntegerToString(g_activeStatesCount);
-   FileWrite(file_handle, activeInfo);
-   
-   string blockedInfo = "Estados bloqueados: " + IntegerToString(CountBlockedStates());
-   FileWrite(file_handle, blockedInfo);
-   
-   double discoveryRate = SafeDivide((double)g_activeStatesCount, (double)NUM_STATES, 0.0) * 100;
-   string discoveryInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
-   FileWrite(file_handle, discoveryInfo);
-   
-   string decayInfo = "Ciclos de decay: " + IntegerToString(g_totalDecayCycles);
-   FileWrite(file_handle, decayInfo);
-   
-   string resetInfo = "Estados resetados: " + IntegerToString(g_totalBadStateResets);
-   FileWrite(file_handle, resetInfo);
-   
-   if(IncludeStatistics)
-   {
-      FileWrite(file_handle, "");
-      FileWrite(file_handle, "📊 ESTATÍSTICAS GERAIS (SISTEMA SUPER CORRIGIDO)");
-      FileWrite(file_handle, "----------------------------------------");
-      
-      string totalTrades = "Total de Trades REAIS: " + IntegerToString(g_totalTrades);
-      FileWrite(file_handle, totalTrades);
-      
-      if(g_totalTrades > 0)
-      {
-         double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
-         double lossRate = SafeDivide((double)g_totalLosses, (double)g_totalTrades, 0.0) * 100;
-         
-         string winsInfo = "  Vitórias REAIS: " + IntegerToString(g_totalWins) + 
-                          " (" + DoubleToString(winRate, 1) + "%)";
-         FileWrite(file_handle, winsInfo);
-         
-         string lossesInfo = "  Derrotas REAIS: " + IntegerToString(g_totalLosses) + 
-                           " (" + DoubleToString(lossRate, 1) + "%)";
-         FileWrite(file_handle, lossesInfo);
-         
-         // Verificação de integridade
-         int soma = g_totalWins + g_totalLosses;
-         int diferenca = g_totalTrades - soma;
-         FileWrite(file_handle, "  Soma Wins+Losses: " + IntegerToString(soma));
-         FileWrite(file_handle, "  Diferença (NOPs): " + IntegerToString(diferenca));
-      }
-      else
-      {
-         FileWrite(file_handle, "  Vitórias: 0 (0.0%)");
-         FileWrite(file_handle, "  Derrotas: 0 (0.0%)");
-      }
-      
-      string totalProfit = "Lucro Total: " + DoubleToString(g_sumProfit, 2);
-      FileWrite(file_handle, totalProfit);
-      
-      string tradesToday = "Trades Hoje: " + IntegerToString(g_tradesToday) + "/" + IntegerToString(MaxTradesPerDay);
-      FileWrite(file_handle, tradesToday);
-      
-      string consecutiveLosses = "Perdas Consecutivas: " + IntegerToString(g_consecutiveLosses) + 
-                               "/" + IntegerToString(ConsecutiveLossLimit);
-      FileWrite(file_handle, consecutiveLosses);
-      
-      // ⚠️ GARANTIR QUE EXPLORAÇÃO NÃO PASSE DE 100%
-      double exploration = MathMin(g_currentExplorationRate * 100, 100.0);
-      string explorationStr = "Taxa Exploração: " + DoubleToString(exploration, 1) + "%";
-      FileWrite(file_handle, explorationStr);
-   }
-   
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "📈 TOP 20 ESTADOS MAIS VISITADOS (SISTEMA SUPER CORRIGIDO)");
+   
+   // ========== ESTATÍSTICAS GERAIS (FIXO NO TOPO) ==========
+   FileWrite(file_handle, "📊 ESTATÍSTICAS GERAIS");
    FileWrite(file_handle, "----------------------------------------");
    
-   int sortedStates[][2];
-   ArrayResize(sortedStates, g_activeStatesCount);
+   string totalTrades = "Total de Trades REAIS: " + IntegerToString(g_totalTrades);
+   FileWrite(file_handle, totalTrades);
+   
+   if(g_totalTrades > 0)
+   {
+      double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
+      double lossRate = SafeDivide((double)g_totalLosses, (double)g_totalTrades, 0.0) * 100;
+      
+      string winsInfo = "  Vitórias REAIS: " + IntegerToString(g_totalWins) + 
+                       " (" + DoubleToString(winRate, 1) + "%)";
+      FileWrite(file_handle, winsInfo);
+      
+      string lossesInfo = "  Derrotas REAIS: " + IntegerToString(g_totalLosses) + 
+                        " (" + DoubleToString(lossRate, 1) + "%)";
+      FileWrite(file_handle, lossesInfo);
+      
+      int soma = g_totalWins + g_totalLosses;
+      int diferenca = g_totalTrades - soma;
+      FileWrite(file_handle, "  Soma Wins+Losses: " + IntegerToString(soma));
+      FileWrite(file_handle, "  Diferença (NOPs): " + IntegerToString(diferenca));
+   }
+   
+   string totalProfit = "Lucro Total: " + DoubleToString(g_sumProfit, 2);
+   FileWrite(file_handle, totalProfit);
+   
+   string tradesToday = "Trades Hoje: " + IntegerToString(g_tradesToday) + "/" + IntegerToString(MaxTradesPerDay);
+   FileWrite(file_handle, tradesToday);
+   
+   string consecutiveLosses = "Perdas Consecutivas: " + IntegerToString(g_consecutiveLosses) + 
+                            "/" + IntegerToString(ConsecutiveLossLimit);
+   FileWrite(file_handle, consecutiveLosses);
+   
+   double exploration = MathMin(g_currentExplorationRate * 100, 100.0);
+   string explorationStr = "Taxa Exploração: " + DoubleToString(exploration, 1) + "%";
+   FileWrite(file_handle, explorationStr);
+   
+   FileWrite(file_handle, "");
+   
+   // ========== ESTADOS BLOQUEADOS PRIMEIRO (MAIS RECENTES → MAIS ANTIGOS) ==========
+   FileWrite(file_handle, "🚫 ESTADOS BLOQUEADOS (ordenados por data de bloqueio - mais recentes primeiro)");
+   FileWrite(file_handle, "========================================");
+   
+   // Coletar estados bloqueados com timestamp
+   int blockedStates[];
+   int blockedTimes[];
+   int blockedCount = 0;
    
    for(int i = 0; i < g_activeStatesCount; i++)
    {
       int state = g_activeStates[i];
-      sortedStates[i][0] = state;
-      sortedStates[i][1] = g_stateVisits[state];
+      if(g_stateBlocked[state])
+      {
+         ArrayResize(blockedStates, blockedCount + 1);
+         ArrayResize(blockedTimes, blockedCount + 1);
+         blockedStates[blockedCount] = state;
+         blockedTimes[blockedCount] = (int)g_stateBlockTime[state];
+         blockedCount++;
+      }
    }
    
-   for(int i = 0; i < g_activeStatesCount - 1; i++)
+   // Ordenar por timestamp (mais recentes primeiro)
+   for(int i = 0; i < blockedCount - 1; i++)
    {
-      for(int j = i + 1; j < g_activeStatesCount; j++)
+      for(int j = i + 1; j < blockedCount; j++)
       {
-         if(sortedStates[j][1] > sortedStates[i][1])
+         if(blockedTimes[j] > blockedTimes[i])
          {
-            int tempState = sortedStates[i][0];
-            int tempVisits = sortedStates[i][1];
+            int tempState = blockedStates[i];
+            int tempTime = blockedTimes[i];
             
-            sortedStates[i][0] = sortedStates[j][0];
-            sortedStates[i][1] = sortedStates[j][1];
+            blockedStates[i] = blockedStates[j];
+            blockedTimes[i] = blockedTimes[j];
             
-            sortedStates[j][0] = tempState;
-            sortedStates[j][1] = tempVisits;
+            blockedStates[j] = tempState;
+            blockedTimes[j] = tempTime;
          }
       }
    }
    
-   int limit = MathMin(20, g_activeStatesCount);
-   for(int i = 0; i < limit; i++)
+   // Listar estados bloqueados
+   if(blockedCount > 0)
    {
-      int state = sortedStates[i][0];
-      int visits = sortedStates[i][1];
-      int losses = g_stateLosses[state];
-      int wins = g_stateWins[state];
-      double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
-      bool isBlocked = g_stateBlocked[state];
-      
-      string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
-                        ": " + IntegerToString(visits) + " visitas REAIS | " + 
-                        IntegerToString(wins) + " vitórias REAIS (" + 
-                        DoubleToString(winRate, 1) + "%) | " + 
-                        IntegerToString(losses) + " perdas REAIS" + 
-                        (isBlocked ? " [BLOQUEADO]" : "");
-      FileWrite(file_handle, stateLine);
+      for(int i = 0; i < blockedCount; i++)
+      {
+         int state = blockedStates[i];
+         int visits = g_stateVisits[state];
+         int losses = g_stateLosses[state];
+         int wins = g_stateWins[state];
+         double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
+         
+         string stateLine = "Estado " + IntegerToString(state) + 
+                           ": " + IntegerToString(visits) + " visitas REAIS | " + 
+                           IntegerToString(wins) + " vitórias REAIS (" + 
+                           DoubleToString(winRate, 1) + "%) | " + 
+                           IntegerToString(losses) + " perdas REAIS [BLOQUEADO]";
+         
+         // Verificar se foi retestado (tinha sido bloqueado antes e foi desbloqueado temporariamente)
+         if(g_stateWasBlockedBefore[state])
+         {
+            stateLine += " ⚠️ OBS: Este estado já foi bloqueado anteriormente e foi retestado";
+         }
+         
+         FileWrite(file_handle, stateLine);
+      }
+   }
+   else
+   {
+      FileWrite(file_handle, "Nenhum estado bloqueado no momento.");
    }
    
    FileWrite(file_handle, "");
+   FileWrite(file_handle, "----------------------------------------");
+   FileWrite(file_handle, "");
+   
+   // ========== ESTADOS ATIVOS (NÃO BLOQUEADOS - MAIS VISITADOS PRIMEIRO) ==========
+   FileWrite(file_handle, "✅ ESTADOS ATIVOS (não bloqueados - ordenados por visitas)");
+   FileWrite(file_handle, "========================================");
+   
+   // Coletar e ordenar estados ativos (não bloqueados) por visitas
+   int activeStates[][2]; // [0]=state, [1]=visits
+   int activeCount = 0;
+   
+   for(int i = 0; i < g_activeStatesCount; i++)
+   {
+      int state = g_activeStates[i];
+      if(!g_stateBlocked[state])
+      {
+         ArrayResize(activeStates, activeCount + 1);
+         activeStates[activeCount][0] = state;
+         activeStates[activeCount][1] = g_stateVisits[state];
+         activeCount++;
+      }
+   }
+   
+   // Ordenar por visitas (mais visitados primeiro)
+   for(int i = 0; i < activeCount - 1; i++)
+   {
+      for(int j = i + 1; j < activeCount; j++)
+      {
+         if(activeStates[j][1] > activeStates[i][1])
+         {
+            int tempState = activeStates[i][0];
+            int tempVisits = activeStates[i][1];
+            
+            activeStates[i][0] = activeStates[j][0];
+            activeStates[i][1] = activeStates[j][1];
+            
+            activeStates[j][0] = tempState;
+            activeStates[j][1] = tempVisits;
+         }
+      }
+   }
+   
+   // Listar estados ativos
+   if(activeCount > 0)
+   {
+      for(int i = 0; i < activeCount; i++)
+      {
+         int state = activeStates[i][0];
+         int visits = activeStates[i][1];
+         int losses = g_stateLosses[state];
+         int wins = g_stateWins[state];
+         double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
+         
+         string stateLine = "Estado " + IntegerToString(state) + 
+                           ": " + IntegerToString(visits) + " visitas REAIS | " + 
+                           IntegerToString(wins) + " vitórias REAIS (" + 
+                           DoubleToString(winRate, 1) + "%) | " + 
+                           IntegerToString(losses) + " perdas REAIS";
+         
+         // Verificar se foi retestado após bloqueio anterior
+         if(g_stateWasBlockedBefore[state])
+         {
+            stateLine += " ⚠️ OBS: Estado retestado (foi bloqueado anteriormente)";
+         }
+         
+         FileWrite(file_handle, stateLine);
+      }
+   }
+   else
+   {
+      FileWrite(file_handle, "Nenhum estado ativo no momento.");
+   }
+   
+   FileWrite(file_handle, "");
+   FileWrite(file_handle, "========================================");
+   FileWrite(file_handle, "");
+   
+   // ========== INFORMAÇÕES DO SISTEMA ==========
+   FileWrite(file_handle, "ℹ️ INFORMAÇÕES DO SISTEMA");
+   FileWrite(file_handle, "----------------------------------------");
+   FileWrite(file_handle, "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)");
+   FileWrite(file_handle, "Estados ativos na memória: " + IntegerToString(g_activeStatesCount));
+   FileWrite(file_handle, "Estados bloqueados: " + IntegerToString(blockedCount));
+   
+   double discoveryRate = SafeDivide((double)g_activeStatesCount, (double)NUM_STATES, 0.0) * 100;
+   FileWrite(file_handle, "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%");
+   FileWrite(file_handle, "Ciclos de decay: " + IntegerToString(g_totalDecayCycles));
+   FileWrite(file_handle, "Estados resetados: " + IntegerToString(g_totalBadStateResets));
+   
+   FileWrite(file_handle, "");
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "FIM DA EXPORTAÇÃO - SISTEMA SUPER CORRIGIDO v307F");
+   FileWrite(file_handle, "FIM DA MEMÓRIA - Arquivo sobrescrito a cada atualização (sem acumulação)");
    FileWrite(file_handle, "=================================================================");
    
    FileClose(file_handle);
@@ -5565,10 +5656,9 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    
    Print("📄 Memória exportada para texto: ", filename, 
          " | Estados: ", g_activeStatesCount,
-         " | Bloqueados: ", CountBlockedStates(),
-         " | Trades reais: ", g_totalTrades,
-         " | Ciclos decay: ", g_totalDecayCycles,
-         " | Resets: ", g_totalBadStateResets);
+         " | Bloqueados: ", blockedCount,
+         " | Ativos: ", activeCount,
+         " | Trades reais: ", g_totalTrades);
    
    return true;
 }
@@ -5622,6 +5712,12 @@ int OnInit()
    
    ArrayResize(g_stateLastUnblockTime, NUM_STATES);
    ArrayInitialize(g_stateLastUnblockTime, 0);
+   
+   ArrayResize(g_stateWasBlockedBefore, NUM_STATES);
+   ArrayInitialize(g_stateWasBlockedBefore, false);
+   
+   ArrayResize(g_stateBlockTime, NUM_STATES);
+   ArrayInitialize(g_stateBlockTime, 0);
    
    ArrayResize(g_activeStates, MaxMemoryStates);
    g_activeStatesCount = 0;
