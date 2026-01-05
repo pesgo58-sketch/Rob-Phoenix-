@@ -5357,7 +5357,8 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos (apenas após atingir limite mínimo)
-      if(g_activeStatesCount >= MinStatesBeforeReset)
+      // ✅ Verifica EnableIntelligentReset antes de resetar
+      if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
       {
          double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
          if(blockedRatio > 0.7 && g_activeStatesCount > 50)
@@ -5405,7 +5406,7 @@ void OnTick()
       }
       
       // ✅ Reset apenas após atingir limite mínimo de estados
-      if(g_activeStatesCount >= MinStatesBeforeReset && debugCounter % 100 == 0)
+      if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset && debugCounter % 100 == 0)
       {
          ResetBadStatesEnhanced();
       }
@@ -5427,7 +5428,7 @@ void OnTick()
          cachedTradesToday = -1;
          
          // ✅ RESET PARCIAL apenas após atingir limite mínimo de estados
-         if(g_activeStatesCount >= MinStatesBeforeReset)
+         if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
          {
             ResetBadStatesEnhanced();
          }
