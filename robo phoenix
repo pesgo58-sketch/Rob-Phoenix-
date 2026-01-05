@@ -1511,6 +1511,13 @@ bool SaveBrainToFile(string filename)
    FileWriteInteger(h, (int)g_lastDecayTradeCount);
    FileWriteInteger(h, (int)g_totalDecayCycles);
    FileWriteInteger(h, (int)g_totalBadStateResets);
+   
+   // 🔧 CORREÇÃO CRÍTICA: Salvar TODOS os estados bloqueados (não apenas ativos)
+   // Isso garante que estados bloqueados sejam preservados mesmo se não estiverem em g_activeStates[]
+   FileWriteArray(h, g_stateBlocked);
+   FileWriteArray(h, g_stateBlockCount);
+   FileWriteArray(h, g_stateLastBlockTime);
+   FileWriteArray(h, g_stateLastUnblockTime);
 
    FileClose(h);
    return true;
@@ -1647,6 +1654,13 @@ bool LoadBrainFromFile(string filename)
    g_lastDecayTradeCount = FileReadInteger(h);
    g_totalDecayCycles = FileReadInteger(h);
    g_totalBadStateResets = FileReadInteger(h);
+   
+   // 🔧 CORREÇÃO CRÍTICA: Carregar TODOS os estados bloqueados (não apenas ativos)
+   // Isso garante que estados bloqueados sejam preservados mesmo se não estiverem em g_activeStates[]
+   FileReadArray(h, g_stateBlocked, 0, NUM_STATES);
+   FileReadArray(h, g_stateBlockCount, 0, NUM_STATES);
+   FileReadArray(h, g_stateLastBlockTime, 0, NUM_STATES);
+   FileReadArray(h, g_stateLastUnblockTime, 0, NUM_STATES);
    
    FileClose(h);
    
