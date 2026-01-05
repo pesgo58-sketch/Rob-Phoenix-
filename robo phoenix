@@ -5934,52 +5934,56 @@ int OnInit()
 }
 
 // ======================================================================
-// ✅✅✅ OnDeinit (COM SISTEMA SUPER CORRIGIDO)
+// ✅✅✅ OnDeinit (COM SISTEMA SUPER CORRIGIDO - NUNCA RESETA MEMÓRIA)
 // ======================================================================
 void OnDeinit(const int reason)
 {
    Print("💾 Salvando memória antes de fechar... (Razão: ", reason, ")");
    
-   // Força salvamento do arquivo principal independente do estado de memória
-   string mainFile = GetBrainFileName();
-   if(!CreateDirectoryForFile(mainFile))
+   // ✅ FORÇA g_memoryDirty = true para garantir que SaveBrain() não seja pulado
+   g_memoryDirty = true;
+   g_memorySaveCounter = 999; // Força save mesmo com UseIncrementalSave
+   
+   // ✅ USA SaveBrain() que já gerencia tudo corretamente:
+   //    - Salva arquivo principal
+   //    - Chama ManageBackupFiles() para criar backup com nome correto
+   //    - Salva estado
+   //    - Export texto se habilitado
+   if(!SaveBrain())
    {
-      Print("❌ ERRO: Não foi possível criar diretório para arquivo principal");
+      Print("❌ ERRO CRÍTICO: Falha ao salvar memória!");
+      
+      // Tenta salvar diretamente como última tentativa
+      string mainFile = GetBrainFileName();
+      if(CreateDirectoryForFile(mainFile))
+      {
+         if(SaveBrainToFile(mainFile))
+         {
+            Print("✅ Arquivo principal salvo em tentativa de emergência");
+            
+            // Tenta criar backup de emergência
+            if(CreateBackupFiles)
+            {
+               string backupFile = GetBackupFileName(0);
+               if(FileIsExist(backupFile, FILE_COMMON))
+               {
+                  FileDelete(backupFile, FILE_COMMON);
+               }
+               if(SaveBrainToFile(backupFile))
+               {
+                  Print("✅ Backup de emergência criado");
+               }
+            }
+         }
+         else
+         {
+            Print("❌ FALHA CRÍTICA: Não foi possível salvar memória!");
+         }
+      }
    }
    else
    {
-      if(SaveBrainToFile(mainFile))
-      {
-         Print("✅ Arquivo principal salvo com sucesso: ", mainFile);
-      }
-      else
-      {
-         Print("❌ ERRO: Falha ao salvar arquivo principal");
-      }
-   }
-   
-   // Salva estado adicional
-   SaveState();
-   
-   // Salva backup final se habilitado
-   if(CreateBackupFiles)
-   {
-      string finalBackup = "Phoenix_Files/Backups/final_backup_" + 
-                          TimeToString(TimeCurrent(), TIME_DATE) + ".bin";
-      if(SaveBrainToFile(finalBackup))
-      {
-         Print("✅ Backup final salvo: ", finalBackup);
-      }
-      else
-      {
-         Print("⚠️ Falha ao salvar backup final");
-      }
-   }
-   
-   // Export texto se habilitado
-   if(EnableTextExport)
-   {
-      ExportMemoryToTextFileFunc(true);
+      Print("✅ Memória salva com sucesso via SaveBrain()");
    }
    
    Print("💾 Processo de salvamento concluído");
