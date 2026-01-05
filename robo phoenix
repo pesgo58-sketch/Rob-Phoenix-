@@ -1421,18 +1421,23 @@ void ManageBackupFiles()
    if(!CreateBackupFiles || !g_memoryInitialized) return;
    
    string backupFile = GetBackupFileName(0);
+   
+   // Sistema simplificado: apenas 1 backup
+   // Remove o backup antigo ANTES de criar novo
+   if(FileIsExist(backupFile, FILE_COMMON))
+   {
+      FileDelete(backupFile, FILE_COMMON);
+      Print("🗑️ Backup antigo removido: ", backupFile);
+   }
+   
+   // Agora cria o novo backup
    if(SaveBrainToFile(backupFile))
    {
       Print("✅ Backup criado: ", backupFile);
    }
-   
-   // Sistema simplificado: apenas 1 backup
-   // Remove o backup antigo antes de criar novo
-   string singleBackupFile = GetBackupFileName(0);
-   if(FileIsExist(singleBackupFile, FILE_COMMON))
+   else
    {
-      FileDelete(singleBackupFile, FILE_COMMON);
-      Print("🗑️ Backup antigo removido");
+      Print("❌ Falha ao criar backup: ", backupFile);
    }
 }
 
