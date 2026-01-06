@@ -1693,8 +1693,9 @@ string GetBrainFileName()
 {
    if(g_memoryFileName == "")
    {
-      g_memoryFileName = "Phoenix_Files/Cerebro_" + _Symbol + "_" + 
-                         EnumToString((ENUM_TIMEFRAMES)_Period) + "_FIXED_CORRIGIDO.bin";
+      // Nome único universal - mesmo arquivo para todos os símbolos e timeframes
+      // Permite trocar .set sem perder memória aprendida
+      g_memoryFileName = "Phoenix_Files/Cerebro_Universal.bin";
    }
    return g_memoryFileName;
 }
