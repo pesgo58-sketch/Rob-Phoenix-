@@ -1411,8 +1411,8 @@ void CleanMemory()
 
 string GetBackupFileName(int backupNum)
 {
-   return "Phoenix_Files/Backups/Cerebro_" + _Symbol + "_" + 
-          EnumToString((ENUM_TIMEFRAMES)_Period) + "_backup_" + 
+   // Usa nome universal fixo - mesmo backup para todos os símbolos/timeframes
+   return "Phoenix_Files/Backups/Cerebro_Universal_backup_" + 
           IntegerToString(backupNum) + ".bin";
 }
 
