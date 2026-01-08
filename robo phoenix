@@ -1695,7 +1695,8 @@ string GetBrainFileName()
    {
       // Nome único universal - mesmo arquivo para todos os símbolos e timeframes
       // Permite trocar .set sem perder memória aprendida
-      g_memoryFileName = "Phoenix_Files/Cerebro_Universal.bin";
+      // ✅ CORRIGIDO: Agora salva na pasta Backups/ junto com o backup
+      g_memoryFileName = "Phoenix_Files/Backups/Cerebro_Universal.bin";
    }
    return g_memoryFileName;
 }
