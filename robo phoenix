@@ -5792,47 +5792,42 @@ int OnInit()
       return INIT_FAILED;
    }
 
+   // ✅ CORREÇÃO CRÍTICA: Apenas redimensiona arrays, NÃO inicializa
+   // Preserva valores existentes para LoadBrain() preencher
+   // Só inicializa se LoadBrain() falhar (nova memória)
    int sz = NUM_STATES * NUM_ACTIONS;
    ArrayResize(g_Q, sz);
-   ArrayInitialize(g_Q, 0.0);
-   
    ArrayResize(g_stateVisits, NUM_STATES);
-   ArrayInitialize(g_stateVisits, 0);
-   
    ArrayResize(g_stateLosses, NUM_STATES);
-   ArrayInitialize(g_stateLosses, 0);
-   
    ArrayResize(g_stateWins, NUM_STATES);
-   ArrayInitialize(g_stateWins, 0);
-   
    ArrayResize(g_stateLastUpdate, NUM_STATES);
-   ArrayInitialize(g_stateLastUpdate, 0);
-   
    ArrayResize(g_stateBlocked, NUM_STATES);
-   ArrayInitialize(g_stateBlocked, false);
-   
    ArrayResize(g_stateLastBlockTime, NUM_STATES);
-   ArrayInitialize(g_stateLastBlockTime, 0);
-   
    ArrayResize(g_stateLastUnblockTime, NUM_STATES);
-   ArrayInitialize(g_stateLastUnblockTime, 0);
-   
    ArrayResize(g_stateWasBlockedBefore, NUM_STATES);
-   ArrayInitialize(g_stateWasBlockedBefore, false);
-   
    ArrayResize(g_stateBlockTime, NUM_STATES);
-   ArrayInitialize(g_stateBlockTime, 0);
-   
    ArrayResize(g_stateBlockCount, NUM_STATES);
-   ArrayInitialize(g_stateBlockCount, 0);
-   
    ArrayResize(g_activeStates, MaxMemoryStates);
-   g_activeStatesCount = 0;
 
    LoadState();
 
    if(!LoadBrain())
    {
+      // ✅ Arquivo não encontrado - inicializa nova memória
+      Print("📋 Inicializando nova memória...");
+      ArrayInitialize(g_Q, 0.0);
+      ArrayInitialize(g_stateVisits, 0);
+      ArrayInitialize(g_stateLosses, 0);
+      ArrayInitialize(g_stateWins, 0);
+      ArrayInitialize(g_stateLastUpdate, 0);
+      ArrayInitialize(g_stateBlocked, false);
+      ArrayInitialize(g_stateLastBlockTime, 0);
+      ArrayInitialize(g_stateLastUnblockTime, 0);
+      ArrayInitialize(g_stateWasBlockedBefore, false);
+      ArrayInitialize(g_stateBlockTime, 0);
+      ArrayInitialize(g_stateBlockCount, 0);
+      g_activeStatesCount = 0;
+      
       g_currentExplorationRate = MathMax(InitialExplorationRate, 0.40);
       g_memoryInitialized = true;
       SaveBrain();
@@ -5840,8 +5835,10 @@ int OnInit()
    }
    else
    {
+      // ✅ Arquivo carregado - memória preservada!
       g_memoryInitialized = true;
       Print("✅ Cérebro existente carregado (Sistema Super Corrigido v307F)");
+      Print("📊 Estados ativos preservados: ", g_activeStatesCount);
    }
    
    ArrayResize(g_recentProfits, 100);
