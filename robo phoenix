@@ -1599,7 +1599,11 @@ bool LoadBrainFromFile(string filename)
          g_stateBlocked[state] = (bool)FileReadInteger(h);
          g_stateLastBlockTime[state] = (datetime)FileReadLong(h);
          g_stateLastUnblockTime[state] = (datetime)FileReadLong(h);
-         g_stateBlockCount[state] = FileReadInteger(h);
+         
+         // Lê contador de bloqueios com validação para evitar overflow/corrupção
+         int blockCount = FileReadInteger(h);
+         // Limita contador a valor máximo razoável (0-10)
+         g_stateBlockCount[state] = (blockCount < 0 || blockCount > 10) ? 0 : blockCount;
          
          for(int a = 0; a < NUM_ACTIONS; a++)
          {
