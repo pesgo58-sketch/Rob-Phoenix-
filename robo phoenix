@@ -1465,7 +1465,17 @@ bool SaveBrainToFile(string filename)
       FileWriteInteger(h, (int)g_stateBlocked[state]);
       FileWriteLong(h, (long)g_stateLastBlockTime[state]);
       FileWriteLong(h, (long)g_stateLastUnblockTime[state]);
-      FileWriteInteger(h, g_stateBlockCount[state]);
+      
+      // Validação ao salvar: garante que contador está entre 0-10
+      int blockCountToSave = g_stateBlockCount[state];
+      if(blockCountToSave < 0 || blockCountToSave > 10)
+      {
+         Print("⚠️ ALERTA: Contador de bloqueios corrompido detectado para estado ", state, 
+               " (valor: ", blockCountToSave, "). Corrigindo para 0.");
+         blockCountToSave = 0;
+         g_stateBlockCount[state] = 0;  // Corrige na memória também
+      }
+      FileWriteInteger(h, blockCountToSave);
       
       for(int a = 0; a < NUM_ACTIONS; a++)
       {
@@ -5630,13 +5640,20 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          double winRate = SafeDivide((double)wins, (double)visits, 0.0) * 100;
          
          string bloqueioInfo = "[BLOQUEADO";
-         if(g_stateBlockCount[state] >= 2)
+         // Validação: garante que exibimos valor válido
+         int displayCount = g_stateBlockCount[state];
+         if(displayCount < 0 || displayCount > 10)
          {
-            bloqueioInfo += " PERMANENTEMENTE - " + IntegerToString(g_stateBlockCount[state]) + " vezes";
+            displayCount = 0;  // Mostra 0 se valor corrompido
          }
-         else if(g_stateBlockCount[state] > 0)
+         
+         if(displayCount >= 2)
          {
-            bloqueioInfo += " - " + IntegerToString(g_stateBlockCount[state]) + " vez(es)";
+            bloqueioInfo += " PERMANENTEMENTE - " + IntegerToString(displayCount) + " vezes";
+         }
+         else if(displayCount > 0)
+         {
+            bloqueioInfo += " - " + IntegerToString(displayCount) + " vez(es)";
          }
          bloqueioInfo += "]";
          
@@ -5713,10 +5730,17 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          // ⚠️ IMPORTANTE: Mostrar se este estado teve histórico de bloqueio e quantas vezes
          if(g_stateWasBlockedBefore[state])
          {
-            if(g_stateBlockCount[state] >= 2)
+            // Validação: garante que exibimos valor válido
+            int displayCount = g_stateBlockCount[state];
+            if(displayCount < 0 || displayCount > 10)
+            {
+               displayCount = 0;  // Mostra 0 se valor corrompido
+            }
+            
+            if(displayCount >= 2)
             {
                stateLine += " [RETESTADO E PERMANENTEMENTE BLOQUEADO - bloqueado " + 
-                           IntegerToString(g_stateBlockCount[state]) + " vezes]";
+                           IntegerToString(displayCount) + " vezes]";
             }
             else
             {
