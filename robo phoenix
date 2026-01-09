@@ -2617,11 +2617,8 @@ void OptimizeParametersDynamically()
    }
    
    // ✅ AJUSTAR LIMITES DE BLOQUEIO
-   if(g_activeStatesCount > 100)
-   {
-      MinVisitsForBlockDecision = 8; // Exigir mais visitas
-      Print("🛡️ Mínimo visitas para bloqueio ajustado para 8");
-   }
+   // Mantém sempre MinVisitsForBlockDecision = 30 (não ajusta mais para 8)
+   // Garantia: Estados NUNCA bloqueados com menos de 30 visitas
    
    g_memoryDirty = true;
 }
