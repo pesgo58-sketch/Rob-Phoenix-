@@ -704,7 +704,7 @@ void ApplyStateDecay()
    g_totalDecayCycles++;
    
    double memoryReduction = totalMemoryBefore > 0 ? 
-                          (1.0 - (totalMemoryAfter / totalMemoryBefore)) * 100 : 0;
+                          (1.0 - SafeDivide(totalMemoryAfter, totalMemoryBefore, 1.0)) * 100 : 0;
    
    Print("🔄 DECAY APLICADO: ", 
          "Estados ajustados: ", statesDecayed,
@@ -2890,7 +2890,7 @@ string CreateProgressBarFast(int current, int total)
    };
    
    if(total <= 0) total = 1;
-   int index = (int)MathRound((double)current / total * 20);
+   int index = (int)MathRound(SafeDivide((double)current, (double)total, 0.0) * 20);
    if(index < 0) index = 0;
    if(index > 20) index = 20;
    
@@ -3135,7 +3135,7 @@ bool CheckRealVolume()
       sumVol += volumeArray[i];
    }
    
-   g_volumeAverage = (long)(sumVol / (barsToCopy - 1));
+   g_volumeAverage = (barsToCopy > 1) ? (long)(sumVol / (barsToCopy - 1)) : sumVol;
    
    if(g_volumeAverage > 0)
    {
@@ -3271,7 +3271,7 @@ void ManageDynamicTrailingStop()
             double atr[];
             if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1)
             {
-               trailingDistancePoints = (atr[0] / point) * ATRTrailingMultiplier;
+               trailingDistancePoints = SafeDivide(atr[0], point, 50.0) * ATRTrailingMultiplier;
                Print("📏 Trailing usando ATR: ", atr[0], " -> ", trailingDistancePoints, " pontos");
             }
          }
@@ -3338,8 +3338,8 @@ void ManageDynamicTrailingStop()
                g_trailingCurrentTP[trailIndex] = newTP;
                g_trailingLastTrailTimes[trailIndex] = currentTime;
                
-               double slPoints = MathAbs(newSL - entryPrice) / point;
-               double tpPoints = MathAbs(newTP - entryPrice) / point;
+               double slPoints = SafeDivide(MathAbs(newSL - entryPrice), point, 0.0);
+               double tpPoints = SafeDivide(MathAbs(newTP - entryPrice), point, 0.0);
                
                string trailingType = UseATRTrailing ? "ATR" : "Fixo";
                Print("📈 TRAILING STOP (", trailingType, ") ajustado para posição #", ticket,
@@ -3850,8 +3850,8 @@ void ExecuteAction(int action, int state)
    AddPositionToTrailingSystem((ulong)res.order);
    
    double slPoints = 0, tpPoints = 0;
-   if(sl_price > 0) slPoints = MathAbs(price - sl_price) / point;
-   if(tp_price > 0) tpPoints = MathAbs(tp_price - price) / point;
+   if(sl_price > 0) slPoints = SafeDivide(MathAbs(price - sl_price), point, 0.0);
+   if(tp_price > 0) tpPoints = SafeDivide(MathAbs(tp_price - price), point, 0.0);
    
    string lotTypeMsg = "";
    if(sameDirCount == 0 && EnableSmartLot)
@@ -3898,7 +3898,7 @@ double ComputeRewardFromTrade(double profit)
    }
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double profit_points = profit / (LotSize * point * 100);
+   double profit_points = SafeDivide(profit, (LotSize * point * 100), 0.0);
    
    if(profit > 0)
    {
@@ -3996,7 +3996,7 @@ int GetBBBucket(double bbPosition)
 // ✅ Função para calcular bucket volatilidade
 int GetVolatilityBucket(double atrCurrent, double atrPrevious)
 {
-   double ratio = (atrPrevious > 0) ? atrCurrent / atrPrevious : 1.0;
+   double ratio = SafeDivide(atrCurrent, atrPrevious, 1.0);
    
    if(ratio < 0.8) return 0;             // Volatilidade diminuindo
    else return 1;                        // Volatilidade estável/aumentando
@@ -5176,7 +5176,7 @@ void UpdateLearningStats()
    
    if(qCount > 0)
    {
-      g_averageQValue = sumQ / qCount;
+      g_averageQValue = SafeDivide(sumQ, (double)qCount, 0.0);
    }
    else
    {
