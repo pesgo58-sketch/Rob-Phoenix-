@@ -4367,11 +4367,25 @@ bool ContextIsTradable(int &side)
    double price = iClose(_Symbol, _Period, 0);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
+   // Safety check: price must be valid
+   if(price <= 0)
+   {
+      Print("🚫 CONTEXT: Invalid price (", DoubleToString(price, 5), ") - Non-tradable");
+      return false;
+   }
+   
    // 1. Determine trend based on MA
    double atrValue = atr[0];
    // Fallback ATR calculation: 0.5% of price if ATR is too small
    const double ATR_FALLBACK_PERCENT = 0.005;
    if(atrValue < point * 10) atrValue = price * ATR_FALLBACK_PERCENT;
+   
+   // Safety check: atrValue must be positive to avoid division by zero
+   if(atrValue <= 0)
+   {
+      Print("🚫 CONTEXT: Invalid ATR value (", DoubleToString(atrValue, 5), ") - Non-tradable");
+      return false;
+   }
    
    double distanceFromMA = (price - ma[0]) / atrValue;
    double absDistance = MathAbs(distanceFromMA);
