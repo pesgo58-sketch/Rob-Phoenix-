@@ -182,6 +182,12 @@ input bool   CloseOppositeOnNewSignal = false;
 input bool   WaitForAllCloseBeforeNew = true;
 
 // ======================================================================
+// ✅ SWIFTALGO CONTEXT FILTER
+// ======================================================================
+input group "=== SWIFTALGO CONTEXT FILTER ===";
+input bool   EnableContextFilter = true;  // Enable market context filtering
+
+// ======================================================================
 // ✅ CONTROLE DE ENTRADAS
 // ======================================================================
 input group "=== CONTROLE DE ENTRADAS ===";
@@ -5617,32 +5623,53 @@ void OnTick()
             int a = ChooseAction(s);
             
             // ✅ SWIFTALGO-STYLE MARKET CONTEXT FILTERING
-            int contextSide = 0;
-            bool tradable = ContextIsTradable(contextSide);
-            
-            if(!tradable || contextSide == 0)
+            // Apply context filter only if enabled and indicators are ready
+            if(EnableContextFilter)
             {
-               // Context is non-tradable, force NOP
-               if(a != 0)
-               {
-                  Print("🚫 CONTEXT: Forcing NOP - Market context is non-tradable");
-                  g_statusMessage = "🚫 Context non-tradable";
-               }
-               a = 0;
-            }
-            else
-            {
-               // Context is tradable, filter action by context side
-               int originalAction = a;
-               a = FilterActionByContext(a, contextSide);
+               int contextSide = 0;
+               bool tradable = true;
                
-               if(a != originalAction)
+               // Safety: Only call context filter if we have valid data
+               // This prevents any potential issues during EA initialization
+               if(g_maHandle != INVALID_HANDLE && g_rsiHandle != INVALID_HANDLE && 
+                  g_adxHandle != INVALID_HANDLE && g_bbHandle != INVALID_HANDLE && 
+                  g_atrHandle != INVALID_HANDLE)
                {
-                  string contextStr = (contextSide > 0) ? "BULLISH" : "BEARISH";
-                  Print("🎯 CONTEXT: Action filtered from ", originalAction, " to ", a, " (", contextStr, " context)");
-                  g_statusMessage = StringFormat("🎯 Filtered by %s context", contextStr);
+                  tradable = ContextIsTradable(contextSide);
+               }
+               else
+               {
+                  Print("⚠️ CONTEXT: Indicators not ready, skipping context filter");
+                  tradable = true; // Allow trading if indicators aren't ready yet
+                  contextSide = 0;
+               }
+               
+               if(!tradable || contextSide == 0)
+               {
+                  // Context is non-tradable, force NOP
+                  if(a != 0)
+                  {
+                     Print("🚫 CONTEXT: Forcing NOP - Market context is non-tradable");
+                     g_statusMessage = "🚫 Context non-tradable";
+                  }
+                  a = 0;
+               }
+               else
+               {
+                  // Context is tradable, filter action by context side
+                  int originalAction = a;
+                  a = FilterActionByContext(a, contextSide);
+                  
+                  if(a != originalAction)
+                  {
+                     string contextStr = (contextSide > 0) ? "BULLISH" : "BEARISH";
+                     Print("🎯 CONTEXT: Action filtered from ", originalAction, " to ", a, " (", contextStr, " context)");
+                     g_statusMessage = StringFormat("🎯 Filtered by %s context", contextStr);
+                  }
                }
             }
+            // If context filter is disabled, action passes through unchanged
+            
             
             if(a == 0)
             {
