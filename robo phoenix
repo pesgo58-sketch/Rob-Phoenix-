@@ -4363,12 +4363,15 @@ bool ContextIsTradable(int &side)
    if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) return false;
    if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1) return false;
    
-   double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
+   // Use the most recent close price for consistent context evaluation
+   double price = iClose(_Symbol, _Period, 0);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    // 1. Determine trend based on MA
    double atrValue = atr[0];
-   if(atrValue < point * 10) atrValue = price * 0.005;
+   // Fallback ATR calculation: 0.5% of price if ATR is too small
+   const double ATR_FALLBACK_PERCENT = 0.005;
+   if(atrValue < point * 10) atrValue = price * ATR_FALLBACK_PERCENT;
    
    double distanceFromMA = (price - ma[0]) / atrValue;
    double absDistance = MathAbs(distanceFromMA);
@@ -5571,7 +5574,9 @@ void OnTick()
             
             if(a == 0)
             {
-               if(g_statusMessage == "Analisando (Sistema Corrigido v2)")
+               // Update status message if not already set by context filter
+               if(StringFind(g_statusMessage, "Context") < 0 && 
+                  StringFind(g_statusMessage, "Filtered") < 0)
                {
                   g_statusMessage = "NOP (Análise)";
                }
