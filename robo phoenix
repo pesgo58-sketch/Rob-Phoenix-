@@ -5909,10 +5909,9 @@ int OnInit()
    Print("🔥🔥🔥 MEMÓRIA MÁXIMA: ", MaxMemoryStates, " estados ativos");
    Print("🔥🔥🔥 SISTEMA SUPER CORRIGIDO: ATIVADO");
    
-   // ✅ CONFIGURAÇÕES OTIMIZADAS FORÇADAS:
-   g_currentExplorationRate = 0.40; // Forçar 40% em vez de 70%
-   Print("⚙️ Configurações otimizadas forçadas:");
-   Print("   • Exploration Rate: 40%");
+   // ✅ CONFIGURAÇÕES APLICADAS:
+   Print("⚙️ Configurações aplicadas:");
+   Print("   • Exploration Rate: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
    Print("   • MinVisitsToTrade: 2");
    Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
