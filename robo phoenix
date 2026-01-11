@@ -3693,8 +3693,12 @@ void ExecuteAction(int action, int state)
    AddPositionToTrailingSystem((ulong)res.order);
    
    double slPoints = 0, tpPoints = 0;
-   if(sl_price > 0) slPoints = MathAbs(price - sl_price) / point;
-   if(tp_price > 0) tpPoints = MathAbs(tp_price - price) / point;
+   // Safety check to prevent division by zero
+   if(point > 0)
+   {
+      if(sl_price > 0) slPoints = MathAbs(price - sl_price) / point;
+      if(tp_price > 0) tpPoints = MathAbs(tp_price - price) / point;
+   }
    
    string lotTypeMsg = "";
    if(sameDirCount == 0 && EnableSmartLot)
@@ -3741,6 +3745,14 @@ double ComputeRewardFromTrade(double profit)
    }
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   // Safety check to prevent division by zero
+   if(point <= 0 || LotSize <= 0)
+   {
+      Print("⚠️ WARNING: Invalid point (", point, ") or LotSize (", LotSize, ") in ComputeRewardFromTrade");
+      return (profit > 0) ? RewardWin : RewardLoss;
+   }
+   
    double profit_points = profit / (LotSize * point * 100);
    
    if(profit > 0)
@@ -4264,6 +4276,13 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
 bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice)
 {
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   // Safety check to prevent division by zero
+   if(point <= 0)
+   {
+      Print("❌ ERRO: Valor de point inválido (", point, ") em AreStopsValid");
+      return false;
+   }
    
    Print("=== VERIFICAÇÃO DE STOPS ===");
    Print("Direção: ", isBuy ? "BUY" : "SELL");
@@ -5501,7 +5520,10 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      // Safety check to prevent division by zero
+      if(g_totalTrades > 0)
+      {
+         double currentWinRate = (double)g_totalWins / g_totalTrades;
       
       if(currentWinRate < 0.20)
       {
@@ -5518,14 +5540,17 @@ void OnTick()
             OverhaulBlockingSystem();
             badPerformanceCounter = 0;
          }
-      }
       
-      // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
-      if(blockedRatio > 0.7 && g_activeStatesCount > 50)
+      // Safety check to prevent division by zero
+      if(g_activeStatesCount > 0)
       {
-         Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
-         IntelligentPartialReset();
+         // Verificar bloqueios excessivos
+         double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+         if(blockedRatio > 0.7 && g_activeStatesCount > 50)
+         {
+            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
+            IntelligentPartialReset();
+         }
       }
    }
 
