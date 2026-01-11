@@ -4347,6 +4347,15 @@ bool ContextIsTradable(int &side)
 {
    side = 0; // Default to non-tradable
    
+   // Validate indicator handles before using them
+   if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE || 
+      g_adxHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE || 
+      g_atrHandle == INVALID_HANDLE)
+   {
+      Print("🚫 CONTEXT: One or more indicator handles are invalid - Non-tradable");
+      return false;
+   }
+   
    // Get indicator values
    double ma[], rsi[], adx[], bb_upper[], bb_lower[], atr[];
    ArraySetAsSeries(ma, true);
@@ -4356,12 +4365,43 @@ bool ContextIsTradable(int &side)
    ArraySetAsSeries(bb_lower, true);
    ArraySetAsSeries(atr, true);
    
-   if(CopyBuffer(g_maHandle, 0, 0, 1, ma) < 1) return false;
-   if(CopyBuffer(g_rsiHandle, 0, 0, 1, rsi) < 1) return false;
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) return false;
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) return false;
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) return false;
-   if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1) return false;
+   if(CopyBuffer(g_maHandle, 0, 0, 1, ma) < 1) 
+   {
+      Print("🚫 CONTEXT: Failed to copy MA buffer - Non-tradable");
+      return false;
+   }
+   if(CopyBuffer(g_rsiHandle, 0, 0, 1, rsi) < 1) 
+   {
+      Print("🚫 CONTEXT: Failed to copy RSI buffer - Non-tradable");
+      return false;
+   }
+   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) 
+   {
+      Print("🚫 CONTEXT: Failed to copy ADX buffer - Non-tradable");
+      return false;
+   }
+   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) 
+   {
+      Print("🚫 CONTEXT: Failed to copy BB upper buffer - Non-tradable");
+      return false;
+   }
+   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) 
+   {
+      Print("🚫 CONTEXT: Failed to copy BB lower buffer - Non-tradable");
+      return false;
+   }
+   if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1) 
+   {
+      Print("🚫 CONTEXT: Failed to copy ATR buffer - Non-tradable");
+      return false;
+   }
+   
+   // Validate that indicator values are reasonable (not NaN or infinity)
+   if(ma[0] <= 0 || ma[0] != ma[0]) // Check for <= 0 or NaN
+   {
+      Print("🚫 CONTEXT: Invalid MA value (", DoubleToString(ma[0], 5), ") - Non-tradable");
+      return false;
+   }
    
    // Use the most recent close price for consistent context evaluation
    double price = iClose(_Symbol, _Period, 0);
