@@ -4365,12 +4365,30 @@ bool ContextIsTradable(int &side)
    
    // Use the most recent close price for consistent context evaluation
    double price = iClose(_Symbol, _Period, 0);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   // Safety check: price must be valid
+   // If iClose fails, try to get current price from symbol info
    if(price <= 0)
    {
-      Print("🚫 CONTEXT: Invalid price (", DoubleToString(price, 5), ") - Non-tradable");
+      price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(price <= 0)
+      {
+         price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      }
+   }
+   
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   // Safety check: point must be valid
+   if(point <= 0)
+   {
+      Print("🚫 CONTEXT: Invalid point value (", DoubleToString(point, 10), ") - Non-tradable");
+      return false;
+   }
+   
+   // Safety check: price must be valid after all attempts
+   if(price <= 0)
+   {
+      Print("🚫 CONTEXT: Invalid price after all attempts (", DoubleToString(price, 5), ") - Non-tradable");
       return false;
    }
    
