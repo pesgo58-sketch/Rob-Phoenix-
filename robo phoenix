@@ -5525,21 +5525,23 @@ void OnTick()
       {
          double currentWinRate = (double)g_totalWins / g_totalTrades;
       
-      if(currentWinRate < 0.20)
-      {
-         Print("⚠️⚠️⚠️ ALERTA: Win rate crítica (", DoubleToString(currentWinRate*100,1), "%)");
-         
-         // Se performance muito ruim por muito tempo
-         static int badPerformanceCounter = 0;
-         badPerformanceCounter++;
-         
-         if(badPerformanceCounter >= 5)
+         if(currentWinRate < 0.20)
          {
-            Print("🔥 ATIVAÇÃO DE CORREÇÃO DE EMERGÊNCIA");
-            EmergencyCounterFix();
-            OverhaulBlockingSystem();
-            badPerformanceCounter = 0;
+            Print("⚠️⚠️⚠️ ALERTA: Win rate crítica (", DoubleToString(currentWinRate*100,1), "%)");
+            
+            // Se performance muito ruim por muito tempo
+            static int badPerformanceCounter = 0;
+            badPerformanceCounter++;
+            
+            if(badPerformanceCounter >= 5)
+            {
+               Print("🔥 ATIVAÇÃO DE CORREÇÃO DE EMERGÊNCIA");
+               EmergencyCounterFix();
+               OverhaulBlockingSystem();
+               badPerformanceCounter = 0;
+            }
          }
+      }
       
       // Safety check to prevent division by zero
       if(g_activeStatesCount > 0)
