@@ -829,6 +829,9 @@ void ResetBadStates()
    {
       if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
       
+      // Safety check to prevent division by zero
+      if(g_stateVisits[s] == 0) continue;
+      
       double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
       
       // ⚠️ MODIFICAÇÃO CRÍTICA: Condição mais agressiva
@@ -2076,7 +2079,7 @@ void DebugTradeCounting()
          }
          
          // Verificar estados que deveriam estar bloqueados
-         if(g_stateVisits[s] >= MinVisitsForBlockDecision)
+         if(g_stateVisits[s] >= MinVisitsForBlockDecision && g_stateVisits[s] > 0)
          {
             double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
             if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
@@ -3023,6 +3026,14 @@ void ManageDynamicTrailingStop()
          SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      
+      // Safety check to prevent division by zero
+      if(point <= 0)
+      {
+         Print("⚠️ WARNING: Invalid point value (", point, ") in ManageDynamicTrailingStop");
+         continue;
+      }
+      
       double currentProfit = isBuy ? 
          (currentPrice - entryPrice) / point : 
          (entryPrice - currentPrice) / point;
@@ -3088,7 +3099,7 @@ void ManageDynamicTrailingStop()
          if(UseATRTrailing)
          {
             double atr[];
-            if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1)
+            if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1 && point > 0)
             {
                trailingDistancePoints = (atr[0] / point) * ATRTrailingMultiplier;
                Print("📏 Trailing usando ATR: ", atr[0], " -> ", trailingDistancePoints, " pontos");
