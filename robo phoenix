@@ -1580,31 +1580,32 @@ bool LoadBrainFromFile(string filename)
       return false;
    }
    
-   ArrayResize(g_stateVisits, NUM_STATES);
-   ArrayInitialize(g_stateVisits, 0);
+   // ✅ CORREÇÃO CRÍTICA: NÃO zera arrays antes de carregar!
+   // Arrays já foram redimensionados em OnInit()
+   // Apenas redimensiona se necessário, mas NÃO inicializa
+   // Isso preserva dados de estados que não estão na lista ativa
+   if(ArraySize(g_stateVisits) != NUM_STATES)
+      ArrayResize(g_stateVisits, NUM_STATES);
    
-   ArrayResize(g_stateLosses, NUM_STATES);
-   ArrayInitialize(g_stateLosses, 0);
+   if(ArraySize(g_stateLosses) != NUM_STATES)
+      ArrayResize(g_stateLosses, NUM_STATES);
    
-   ArrayResize(g_stateWins, NUM_STATES);
-   ArrayInitialize(g_stateWins, 0);
+   if(ArraySize(g_stateWins) != NUM_STATES)
+      ArrayResize(g_stateWins, NUM_STATES);
    
-   ArrayResize(g_stateLastUpdate, NUM_STATES);
-   ArrayInitialize(g_stateLastUpdate, 0);
+   if(ArraySize(g_stateLastUpdate) != NUM_STATES)
+      ArrayResize(g_stateLastUpdate, NUM_STATES);
    
-   ArrayResize(g_stateBlocked, NUM_STATES);
-   ArrayInitialize(g_stateBlocked, false);
+   if(ArraySize(g_stateBlocked) != NUM_STATES)
+      ArrayResize(g_stateBlocked, NUM_STATES);
    
-   ArrayResize(g_stateLastBlockTime, NUM_STATES);
-   ArrayInitialize(g_stateLastBlockTime, 0);
+   if(ArraySize(g_stateLastBlockTime) != NUM_STATES)
+      ArrayResize(g_stateLastBlockTime, NUM_STATES);
    
-   ArrayResize(g_stateLastUnblockTime, NUM_STATES);
-   ArrayInitialize(g_stateLastUnblockTime, 0);
+   if(ArraySize(g_stateLastUnblockTime) != NUM_STATES)
+      ArrayResize(g_stateLastUnblockTime, NUM_STATES);
    
-   for(int i = 0; i < NUM_STATES * NUM_ACTIONS; i++)
-   {
-      g_Q[i] = 0.0;
-   }
+   // ✅ NÃO zera g_Q[] - preserva valores existentes
    
    // 🔧 REGRA 3 — Converter para int se necessário
    int tempActiveStatesCount = FileReadInteger(h);
@@ -5892,7 +5893,8 @@ int OnInit()
       ArrayInitialize(g_stateBlockCount, 0);
       g_activeStatesCount = 0;
       
-      g_currentExplorationRate = MathMax(InitialExplorationRate, 0.40);
+      // ✅ SEMPRE usa taxa configurada - SEM forçar mínimo
+      g_currentExplorationRate = InitialExplorationRate;
       g_memoryInitialized = true;
       SaveBrain();
       Print("✅ Novo cérebro criado (Sistema Super Corrigido v307F)");
