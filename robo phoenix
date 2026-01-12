@@ -213,6 +213,7 @@ input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
+input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
 input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
 int MinVisitsForBlockDecision         = 30;           // Visitas mín. decisão bloqueio
@@ -562,10 +563,10 @@ void ResetBadStatesEnhanced()
             shouldReset = true;
             reason = "Loss rate > 75%";
          }
-         else if(winRate < 0.20 && g_stateVisits[s] >= MinVisitsForBlockDecision)
+         else if(winRate < StateBlockThreshold && g_stateVisits[s] >= MinVisitsForBlockDecision)
          {
             shouldReset = true;
-            reason = "Win rate < 20%";
+            reason = StringFormat("Win rate < %.0f%%", StateBlockThreshold * 100);
          }
          else if(g_stateVisits[s] >= MinVisitsForBlockDecision && winRate == 0.0)
          {
@@ -2449,12 +2450,12 @@ void OverhaulBlockingSystem()
          bool shouldBeBlocked = false;
          
          // 1. Muito ruim com histórico suficiente
-         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.20)
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < StateBlockThreshold)
          {
             shouldBeBlocked = true;
          }
          // 2. Catastrófico mesmo com histórico mínimo
-         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)
+         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < (StateBlockThreshold / 2.0))
          {
             shouldBeBlocked = true;
          }
