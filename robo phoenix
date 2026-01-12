@@ -1306,11 +1306,27 @@ void AddActiveState(int state)
 {
    if(state < 0 || state >= NUM_STATES) return;
    
+   // ✅ Verificar se estado já existe na lista ativa
    for(int i = 0; i < g_activeStatesCount; i++)
    {
-      if(g_activeStates[i] == state) return;
+      if(g_activeStates[i] == state)
+      {
+         // Estado já existe - apenas atualiza timestamp
+         g_stateLastUpdate[state] = g_totalTrades;
+         return;
+      }
    }
    
+   // ✅ NOVO: Se exploração = 0%, NÃO adicionar novos estados
+   // Com 0% exploração, usar APENAS estados já conhecidos
+   if(g_currentExplorationRate <= 0.0)
+   {
+      // Estado novo mas exploração = 0% → NÃO adicionar
+      // Sistema deve usar SOMENTE estados já na lista ativa
+      return;
+   }
+   
+   // ✅ Adicionar novo estado (exploração > 0%)
    if(g_activeStatesCount < MaxMemoryStates)
    {
       g_activeStates[g_activeStatesCount] = state;
