@@ -5501,6 +5501,27 @@ void OnTick()
          }
          else
          {
+            // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
+            if(g_currentExplorationRate <= 0.0)
+            {
+               bool stateInActiveList = false;
+               for(int i = 0; i < g_activeStatesCount; i++)
+               {
+                  if(g_activeStates[i] == s)
+                  {
+                     stateInActiveList = true;
+                     break;
+                  }
+               }
+               
+               if(!stateInActiveList)
+               {
+                  // Estado novo mas exploração = 0% → NÃO usar este estado
+                  g_statusMessage = StringFormat("⏸️ Estado %d desconhecido (exploração 0%%)", s);
+                  return;  // ✅ BLOQUEIA uso de estados novos
+               }
+            }
+            
             // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
             if(IsStateBlocked(s))
             {
