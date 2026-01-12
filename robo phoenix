@@ -133,8 +133,7 @@ input bool   UseDynamicTrailingStop   = false;        // Usar trailing stop din�
 input int    TrailingStopPoints       = 20000;        // Trailing stop em pontos
 input int    TrailingStepPoints       = 5000;         // Passo do trailing em pontos
 input int    TrailingStartPoints      = 10000;        // Início do trailing em pontos
-input bool   UseATRTrailing           = false;        // Usar ATR para trailing
-input double ATRTrailingMultiplier    = 2.5;          // Multiplicador ATR trailing
+// ❌ ATR trailing REMOVIDO - sistema usa APENAS pontos fixos
 input bool   UseBreakevenStop         = false;        // Usar breakeven
 input int    BreakevenTriggerPoints   = 15000;        // Trigger do breakeven em pontos
 input bool   TrailBothSLandTP         = false;        // Trailing em SL e TP
@@ -3285,17 +3284,11 @@ void ManageDynamicTrailingStop()
       
       if(MathAbs(currentProfit) >= TrailingStartPoints)
       {
+         // ✅ SEMPRE usa trailing fixo em pontos configurados
          double trailingDistancePoints = TrailingStopPoints;
          
-         if(UseATRTrailing)
-         {
-            double atr[];
-            if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1)
-            {
-               trailingDistancePoints = SafeDivide(atr[0], point, 50.0) * ATRTrailingMultiplier;
-               Print("📏 Trailing usando ATR: ", atr[0], " -> ", trailingDistancePoints, " pontos");
-            }
-         }
+         // ❌ ATR trailing REMOVIDO - usa apenas pontos fixos
+         // Usuário quer controle total sobre stops fixos
          
          double trailingDistance = trailingDistancePoints * point;
          double stepDistance = TrailingStepPoints * point;
@@ -3362,8 +3355,8 @@ void ManageDynamicTrailingStop()
                double slPoints = SafeDivide(MathAbs(newSL - entryPrice), point, 0.0);
                double tpPoints = SafeDivide(MathAbs(newTP - entryPrice), point, 0.0);
                
-               string trailingType = UseATRTrailing ? "ATR" : "Fixo";
-               Print("📈 TRAILING STOP (", trailingType, ") ajustado para posição #", ticket,
+               // ✅ Trailing sempre usa pontos fixos
+               Print("📈 TRAILING STOP (Fixo) ajustado para posição #", ticket,
                      " | Novo SL: ", newSL, " (", slPoints, " pontos)",
                      " | Novo TP: ", newTP, " (", tpPoints, " pontos)",
                      " | Lucro atual: ", currentProfit, " pontos");
