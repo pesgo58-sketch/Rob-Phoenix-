@@ -5870,8 +5870,14 @@ int OnInit()
    {
       // ✅ Arquivo carregado - memória preservada!
       g_memoryInitialized = true;
+      
+      // ✅ SEMPRE usa taxa de exploração configurada em InitialExplorationRate
+      // Permite testar aprendizado com diferentes taxas de exploração
+      g_currentExplorationRate = InitialExplorationRate;
+      
       Print("✅ Cérebro existente carregado (Sistema Super Corrigido v307F)");
       Print("📊 Estados ativos preservados: ", g_activeStatesCount);
+      Print("⚙️ Taxa de exploração configurada: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
    }
    
    ArrayResize(g_recentProfits, 100);
