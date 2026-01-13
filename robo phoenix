@@ -5857,24 +5857,58 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   // ✅ CORREÇÃO CRÍTICA: Apenas redimensiona arrays, NÃO inicializa
-   // Preserva valores existentes para LoadBrain() preencher
-   // Só inicializa se LoadBrain() falhar (nova memória)
+   // ✅ CORREÇÃO CRÍTICA V2: Força reload completo SEMPRE
+   // Evita perda de memória ao mudar data/período no testador
+   // MT5 pode zerar arrays globais durante reinicialização completa
+   Print("🔄 OnInit() chamado - Preparando arrays...");
+   
    int sz = NUM_STATES * NUM_ACTIONS;
-   ArrayResize(g_Q, sz);
-   ArrayResize(g_stateVisits, NUM_STATES);
-   ArrayResize(g_stateLosses, NUM_STATES);
-   ArrayResize(g_stateWins, NUM_STATES);
-   ArrayResize(g_stateLastUpdate, NUM_STATES);
-   ArrayResize(g_stateBlocked, NUM_STATES);
-   ArrayResize(g_stateLastBlockTime, NUM_STATES);
-   ArrayResize(g_stateLastUnblockTime, NUM_STATES);
-   ArrayResize(g_stateWasBlockedBefore, NUM_STATES);
-   ArrayResize(g_stateBlockTime, NUM_STATES);
-   ArrayResize(g_stateBlockCount, NUM_STATES);
-   ArrayResize(g_activeStates, MaxMemoryStates);
+   
+   // Redimensiona arrays SOMENTE se tamanho diferente
+   // Evita realocação desnecessária que poderia zerar dados
+   if(ArraySize(g_Q) != sz)
+   {
+      Print("📏 Redimensionando g_Q de ", ArraySize(g_Q), " para ", sz);
+      ArrayResize(g_Q, sz);
+   }
+   if(ArraySize(g_stateVisits) != NUM_STATES)
+   {
+      Print("📏 Redimensionando g_stateVisits de ", ArraySize(g_stateVisits), " para ", NUM_STATES);
+      ArrayResize(g_stateVisits, NUM_STATES);
+   }
+   if(ArraySize(g_stateLosses) != NUM_STATES)
+      ArrayResize(g_stateLosses, NUM_STATES);
+   if(ArraySize(g_stateWins) != NUM_STATES)
+      ArrayResize(g_stateWins, NUM_STATES);
+   if(ArraySize(g_stateLastUpdate) != NUM_STATES)
+      ArrayResize(g_stateLastUpdate, NUM_STATES);
+   if(ArraySize(g_stateBlocked) != NUM_STATES)
+      ArrayResize(g_stateBlocked, NUM_STATES);
+   if(ArraySize(g_stateLastBlockTime) != NUM_STATES)
+      ArrayResize(g_stateLastBlockTime, NUM_STATES);
+   if(ArraySize(g_stateLastUnblockTime) != NUM_STATES)
+      ArrayResize(g_stateLastUnblockTime, NUM_STATES);
+   if(ArraySize(g_stateWasBlockedBefore) != NUM_STATES)
+      ArrayResize(g_stateWasBlockedBefore, NUM_STATES);
+   if(ArraySize(g_stateBlockTime) != NUM_STATES)
+      ArrayResize(g_stateBlockTime, NUM_STATES);
+   if(ArraySize(g_stateBlockCount) != NUM_STATES)
+      ArrayResize(g_stateBlockCount, NUM_STATES);
+   if(ArraySize(g_activeStates) != MaxMemoryStates)
+      ArrayResize(g_activeStates, MaxMemoryStates);
 
    LoadState();
+   
+   // ✅ NOVA LÓGICA: Verifica se arrays foram zerados por reinicialização do MT5
+   // Se g_activeStatesCount > 0 mas arrays parecem vazios, força reload
+   bool arraysSeemEmpty = (g_activeStatesCount > 0 && g_stateVisits[g_activeStates[0]] == 0);
+   
+   if(arraysSeemEmpty)
+   {
+      Print("⚠️ Arrays detectados como vazios apesar de g_activeStatesCount=", g_activeStatesCount);
+      Print("🔄 Forçando reload completo da memória...");
+      g_activeStatesCount = 0; // Força LoadBrain() a recarregar tudo
+   }
 
    if(!LoadBrain())
    {
@@ -5897,7 +5931,7 @@ int OnInit()
       g_currentExplorationRate = InitialExplorationRate;
       g_memoryInitialized = true;
       SaveBrain();
-      Print("✅ Novo cérebro criado (Sistema Super Corrigido v307F)");
+      Print("✅ Novo cérebro criado (Sistema Super Corrigido v308)");
    }
    else
    {
@@ -5908,9 +5942,25 @@ int OnInit()
       // Permite testar aprendizado com diferentes taxas de exploração
       g_currentExplorationRate = InitialExplorationRate;
       
-      Print("✅ Cérebro existente carregado (Sistema Super Corrigido v307F)");
+      Print("✅ Cérebro existente carregado (Sistema Super Corrigido v308)");
       Print("📊 Estados ativos preservados: ", g_activeStatesCount);
       Print("⚙️ Taxa de exploração configurada: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+      
+      // ✅ Verificação final: Confirma que dados foram carregados corretamente
+      if(g_activeStatesCount > 0)
+      {
+         int firstState = g_activeStates[0];
+         Print("🔍 Verificação: Estado[", firstState, "] Visitas=", g_stateVisits[firstState], 
+               " Wins=", g_stateWins[firstState], " Losses=", g_stateLosses[firstState]);
+         
+         if(g_stateVisits[firstState] == 0)
+         {
+            Print("❌ ERRO CRÍTICO: Dados não carregados corretamente!");
+            Print("❌ Tentando reload de emergência...");
+            // Tenta carregar novamente
+            LoadBrain();
+         }
+      }
    }
    
    ArrayResize(g_recentProfits, 100);
