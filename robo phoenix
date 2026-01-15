@@ -5897,11 +5897,18 @@ int OnInit()
    if(ArraySize(g_activeStates) != MaxMemoryStates)
       ArrayResize(g_activeStates, MaxMemoryStates);
 
-   LoadState();
+   // ❌ REMOVIDO: LoadState() causava conflito com LoadBrain()
+   // LoadState() carregava dados antigos que interferiam na detecção de arrays vazios
+   // Sistema agora usa APENAS LoadBrain() que carrega de Cerebro_Universal.bin
+   // LoadState();
    
    // ✅ NOVA LÓGICA: Verifica se arrays foram zerados por reinicialização do MT5
    // Se g_activeStatesCount > 0 mas arrays parecem vazios, força reload
-   bool arraysSeemEmpty = (g_activeStatesCount > 0 && g_stateVisits[g_activeStates[0]] == 0);
+   // NOTA: g_activeStatesCount será 0 aqui se não carregou LoadState(), então esta verificação
+   // não será triggered incorretamente
+   bool arraysSeemEmpty = (g_activeStatesCount > 0 && g_activeStatesCount <= MaxMemoryStates && 
+                           g_activeStates[0] >= 0 && g_activeStates[0] < NUM_STATES &&
+                           g_stateVisits[g_activeStates[0]] == 0);
    
    if(arraysSeemEmpty)
    {
