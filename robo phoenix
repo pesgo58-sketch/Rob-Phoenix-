@@ -5907,7 +5907,28 @@ int OnInit()
 
    if(!LoadBrain())
    {
-      // ✅ Arquivo não encontrado - inicializa nova memória
+      // ✅ PROTEÇÃO CRÍTICA: Verificar se arquivo realmente não existe
+      // Se arquivo existe mas falhou ao carregar (erro temporário), NÃO sobrescrever!
+      string mainFile = GetBrainFileName();
+      string backupFile = GetBackupFileName(0);
+      bool fileExists = FileIsExist(mainFile, FILE_COMMON) || FileIsExist(backupFile, FILE_COMMON);
+      
+      if(fileExists)
+      {
+         // ❌ CRÍTICO: Arquivo existe mas falhou ao carregar!
+         // NÃO inicializar memória vazia - pode ser erro temporário
+         Print("❌ ERRO CRÍTICO: Arquivo existe mas falhou ao carregar!");
+         Print("❌ NÃO inicializando memória vazia para proteger dados existentes!");
+         Print("❌ Arquivo principal: ", mainFile, " existe=", FileIsExist(mainFile, FILE_COMMON));
+         Print("❌ Arquivo backup: ", backupFile, " existe=", FileIsExist(backupFile, FILE_COMMON));
+         Print("❌ Tente recarregar o EA ou verifique permissões de arquivo");
+         
+         // Mantém estado não inicializado para evitar sobrescrever
+         g_memoryInitialized = false;
+         return INIT_FAILED; // Falha na inicialização para evitar perda de dados
+      }
+      
+      // ✅ Arquivo realmente não existe - pode inicializar nova memória
       Print("📋 Inicializando nova memória...");
       ArrayInitialize(g_Q, 0.0);
       ArrayInitialize(g_stateVisits, 0);
@@ -5926,7 +5947,7 @@ int OnInit()
       g_currentExplorationRate = InitialExplorationRate;
       g_memoryInitialized = true;
       SaveBrain();
-      Print("✅ Novo cérebro criado (Sistema Super Corrigido v308)");
+      Print("✅ Novo cérebro criado (Sistema Super Corrigido v309)");
    }
    else
    {
@@ -5937,7 +5958,7 @@ int OnInit()
       // Permite testar aprendizado com diferentes taxas de exploração
       g_currentExplorationRate = InitialExplorationRate;
       
-      Print("✅ Cérebro existente carregado (Sistema Super Corrigido v308)");
+      Print("✅ Cérebro existente carregado (Sistema Super Corrigido v309)");
       Print("📊 Estados ativos preservados: ", g_activeStatesCount);
       Print("⚙️ Taxa de exploração configurada: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
       
@@ -5969,7 +5990,7 @@ int OnInit()
    
    UpdateLearningStats();
    
-   g_statusMessage = "Inicializando Sistema Super Corrigido v307F...";
+   g_statusMessage = "Inicializando Sistema Super Corrigido v309...";
    
    g_lastSaveTime  = TimeCurrent();
    g_lastEntryTime = 0;
@@ -6047,7 +6068,7 @@ int OnInit()
       Print("🖥️ HUD inicializado com ", hudObjectCount, " objetos");
    }
    
-   g_statusMessage = "Pronto para operar (Sistema Super Corrigido v307F)";
+   g_statusMessage = "Pronto para operar (Sistema Super Corrigido v309)";
    
    return INIT_SUCCEEDED;
 }
