@@ -3476,8 +3476,8 @@ void UpdateQ(int state, int action, double reward)
       }
       else if(reward < -1.0)
       {
-         // Aumentar exploração após perda grande
-         g_currentExplorationRate = MathMin(g_currentExplorationRate * 1.1, 0.7);
+         // ✅ CORRIGIDO: Aumentar exploração após perda grande, mas respeitar InitialExplorationRate como máximo
+         g_currentExplorationRate = MathMin(g_currentExplorationRate * 1.1, InitialExplorationRate);
       }
    }
    
@@ -3557,8 +3557,9 @@ int ChooseAction(int state)
       // ✅ Reset apenas se adaptativo estiver habilitado
       if(EnableAdaptiveExploration)
       {
-         g_currentExplorationRate = MathMax(InitialExplorationRate * 1.3, 0.2);
-         Print("♻️ Reset de exploração após ", g_consecutiveLosses, " perdas consecutivas");
+         // ✅ CORRIGIDO: Reseta para InitialExplorationRate SEM multiplicar ou forçar mínimo
+         g_currentExplorationRate = InitialExplorationRate;
+         Print("♻️ Reset de exploração após ", g_consecutiveLosses, " perdas consecutivas para ", DoubleToString(g_currentExplorationRate*100,1), "%");
       }
    }
    
