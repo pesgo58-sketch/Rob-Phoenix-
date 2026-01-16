@@ -3551,19 +3551,6 @@ int ChooseAction(int state)
       return 0;
    }
    
-   static int noTradeCounter = 0;
-   noTradeCounter++;
-   
-   // ❌ REMOVIDO: Anti-travamento que ignorava bloqueio de estados
-   // O mecanismo forçava trades mesmo em estados bloqueados
-   // if (noTradeCounter > 10)
-   // {
-   //    noTradeCounter = 0;
-   //    int forcedAction = 1 + (MathRand() % 2);
-   //    Print("🎯 ANTI-TRAVAMENTO: Forçando ação aleatória ", forcedAction, " após muitas decisões NOP");
-   //    g_statusMessage = "🎯 Anti-travamento: ação forçada";
-   //    return forcedAction;
-   // }
    
    if(g_consecutiveLosses >= 12)
    {
@@ -3585,7 +3572,6 @@ int ChooseAction(int state)
          int randomAction = 1 + (MathRand() % 2);
          Print("🔍 EXPLORAÇÃO (estado novo): Ação aleatória ", randomAction, " | Estado: ", state);
          g_statusMessage = "🔍 Exploração (estado novo)";
-         noTradeCounter = 0;
          return randomAction;
       }
       else
@@ -3606,7 +3592,6 @@ int ChooseAction(int state)
       int randomAction = 1 + (MathRand() % 2);
       Print("🔍 EXPLORAÇÃO: Ação aleatória ", randomAction, " | Estado: ", state);
       g_statusMessage = "🔍 Exploração (ação aleatória)";
-      noTradeCounter = 0;
       return randomAction;
    }
 
