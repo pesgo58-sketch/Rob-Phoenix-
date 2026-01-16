@@ -3554,14 +3554,16 @@ int ChooseAction(int state)
    static int noTradeCounter = 0;
    noTradeCounter++;
    
-   if (noTradeCounter > 10)
-   {
-      noTradeCounter = 0;
-      int forcedAction = 1 + (MathRand() % 2);
-      Print("🎯 ANTI-TRAVAMENTO: Forçando ação aleatória ", forcedAction, " após muitas decisões NOP");
-      g_statusMessage = "🎯 Anti-travamento: ação forçada";
-      return forcedAction;
-   }
+   // ❌ REMOVIDO: Anti-travamento que ignorava bloqueio de estados
+   // O mecanismo forçava trades mesmo em estados bloqueados
+   // if (noTradeCounter > 10)
+   // {
+   //    noTradeCounter = 0;
+   //    int forcedAction = 1 + (MathRand() % 2);
+   //    Print("🎯 ANTI-TRAVAMENTO: Forçando ação aleatória ", forcedAction, " após muitas decisões NOP");
+   //    g_statusMessage = "🎯 Anti-travamento: ação forçada";
+   //    return forcedAction;
+   // }
    
    if(g_consecutiveLosses >= 12)
    {
