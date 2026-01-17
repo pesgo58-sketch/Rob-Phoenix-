@@ -1157,6 +1157,10 @@ double GetStateWinRate(const int state)
 {
     if(state < 0 || state >= NUM_STATES)
         return 0.0;
+    
+    // Validar se os arrays estão inicializados
+    if(ArraySize(g_stateWins) <= state || ArraySize(g_stateLosses) <= state)
+        return 0.0;
 
     int wins   = g_stateWins[state];
     int losses = g_stateLosses[state];
