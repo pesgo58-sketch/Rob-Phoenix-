@@ -530,97 +530,49 @@ void DebugStuckStatesEnhanced()
 }
 
 // ======================================================================
-// ✅✅✅ 5. FUNÇÃO: RESET SUAVE DE ESTADOS RUINS (VERSÃO MELHORADA)
+// ✅✅✅ 5. FUNÇÃO: DESBLOQUEAR ESTADOS BONS (REMOVIDO RESET DE ESTADOS)
 // ======================================================================
-void ResetBadStatesEnhanced()
+void UnblockGoodStates()
 {
    if(!EnableIntelligentReset) return;
    
-   // ✅ PROTEÇÃO: Não resetar até ter base sólida de estados aprendidos
+   // ✅ PROTEÇÃO: Só desbloquear após ter base sólida de estados aprendidos
    if(g_activeStatesCount < MinStatesBeforeReset)
    {
-      return; // Não resetar até ter aprendido estados suficientes
+      return;
    }
    
-   int statesReset = 0;
    int statesUnblocked = 0;
    
-   Print("♻️ RESET INTELIGENTE DE ESTADOS RUINS (VERSÃO MELHORADA)");
+   Print("🔓 DESBLOQUEIO INTELIGENTE DE ESTADOS BONS");
    
    for(int s = 0; s < NUM_STATES; s++)
    {
-      if(g_stateVisits[s] >= MinVisitsForBlockDecision) // Usar MinVisitsForBlockDecision
+      if(g_stateVisits[s] >= MinVisitsForBlockDecision)
       {
          double winRate = CalculateWinRate(s);
-         double lossRate = 1.0 - winRate;
          
-         // ✅ CRITÉRIOS PARA RESET
-         bool shouldReset = false;
-         string reason = "";
-         
-         if(lossRate > 0.75 && g_stateVisits[s] >= MinVisitsForBlockDecision)
-         {
-            shouldReset = true;
-            reason = "Loss rate > 75%";
-         }
-         else if(winRate < StateBlockThreshold && g_stateVisits[s] >= MinVisitsForBlockDecision)
-         {
-            shouldReset = true;
-            reason = StringFormat("Win rate < %.0f%%", StateBlockThreshold * 100);
-         }
-         else if(g_stateVisits[s] >= MinVisitsForBlockDecision && winRate == 0.0)
-         {
-            shouldReset = true;
-            reason = "Visitas suficientes, 0 vitórias";
-         }
-         
-         if(shouldReset)
-         {
-            Print("🔥 RESET Estado ", s, 
-                  " | Motivo: ", reason,
-                  " | Visitas: ", g_stateVisits[s],
-                  " | Win Rate: ", DoubleToString(winRate*100,1), "%");
-            
-            // Reset parcial (mantém alguma memória)
-            g_stateVisits[s] = (int)(g_stateVisits[s] * 0.3);
-            g_stateWins[s] = (int)(g_stateWins[s] * 0.3);
-            g_stateLosses[s] = (int)(g_stateLosses[s] * 0.3);
-            
-            // Garantir mínimo
-            if(g_stateVisits[s] < 1) g_stateVisits[s] = 1;
-            if(g_stateWins[s] < 0) g_stateWins[s] = 0;
-            if(g_stateLosses[s] < 0) g_stateLosses[s] = 0;
-            
-            // ✅ NÃO desbloquear estados ruins - manter bloqueio se existir
-            // g_stateBlocked[s] permanece inalterado
-            
-            // Reset parcial do Q
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[s * NUM_ACTIONS + a] *= 0.5;
-            }
-            
-            statesReset++;
-            g_totalBadStateResets++;
-         }
-         
-         // ✅ DESBLOQUEAR ESTADOS BONS
-         if(g_stateBlocked[s] && winRate >= 0.35 && g_stateVisits[s] >= MinVisitsForBlockDecision)
+         // ✅ DESBLOQUEAR ESTADOS BONS (APENAS TESTAR, SEM RESETAR)
+         if(g_stateBlocked[s] && winRate >= 0.35)
          {
             g_stateBlocked[s] = false;
+            g_stateLastUnblockTime[s] = TimeCurrent();
             statesUnblocked++;
             Print("✅ DESBLOQUEIO Estado ", s,
-                  " | Win Rate boa: ", DoubleToString(winRate*100,1), "%");
+                  " | Win Rate boa: ", DoubleToString(winRate*100,1), "%",
+                  " | Visitas: ", g_stateVisits[s]);
+            
+            g_memoryDirty = true;
+            InvalidateHUDCache();
          }
       }
    }
    
-   if(statesReset > 0 || statesUnblocked > 0)
+   if(statesUnblocked > 0)
    {
-      Print("📊 RESUMO DO RESET:");
-      Print("   Estados resetados: ", statesReset);
+      Print("📊 RESUMO DO DESBLOQUEIO:");
       Print("   Estados desbloqueados: ", statesUnblocked);
-      Print("   Total resets acumulados: ", g_totalBadStateResets);
+      Print("   Total estados bloqueados restantes: ", CountBlockedStates());
       
       g_memoryDirty = true;
       SaveState();
@@ -717,79 +669,49 @@ void ApplyStateDecay()
 }
 
 // ======================================================================
-// ✅✅✅ 2. RESET INTELIGENTE DE ESTADOS RUINS (CORRIGIDA)
+// ✅✅✅ 2. DESBLOQUEAR ESTADOS BONS (REMOVIDO RESET INTELIGENTE)
 // ======================================================================
-void ResetBadStates()
+void UnblockGoodStatesAutomatic()
 {
    if(!EnableIntelligentReset) return;
    
-   // Verificar se temos estados suficientes antes de permitir resets
+   // Verificar se temos estados suficientes antes de permitir desbloqueios
    if(g_activeStatesCount < MinStatesBeforeReset)
    {
-      return; // Não resetar até ter aprendido estados suficientes
+      return; // Não desbloquear até ter aprendido estados suficientes
    }
    
-   int statesReset = 0;
+   int statesUnblocked = 0;
    
    for(int s = 0; s < NUM_STATES; s++)
    {
-      if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
+      if(g_stateVisits[s] < BadStateMinVisits) continue;
       
-      double lossRate = SafeDivide((double)g_stateLosses[s], (double)g_stateVisits[s], 0.0);
+      if(!g_stateBlocked[s]) continue; // Apenas estados bloqueados
       
-      // ⚠️ MODIFICAÇÃO CRÍTICA: Condição mais agressiva
-      if((lossRate > BadStateLossThreshold || (g_stateVisits[s] > 10 && g_stateWins[s] == 0)) 
-         && g_stateVisits[s] > BadStateMinVisits)
+      double winRate = CalculateWinRate(s);
+      
+      // ✅ DESBLOQUEAR ESTADOS BONS - Win rate >= 35%
+      if(winRate >= 0.35)
       {
-         // Salvar estatísticas antes do reset
-         int oldVisits = g_stateVisits[s];
-         int oldLosses = g_stateLosses[s];
-         int oldWins = g_stateWins[s];
+         g_stateBlocked[s] = false;
+         g_stateLastUnblockTime[s] = TimeCurrent();
          
-         // Resetar contadores
-         g_stateVisits[s] = 0;
-         g_stateLosses[s] = 0;
-         g_stateWins[s] = 0;
-         // ✅ NÃO desbloquear estado ruim - preservar bloqueio
-         // g_stateBlocked[s] permanece inalterado
-         g_stateLastBlockTime[s] = 0;
-         g_stateLastUnblockTime[s] = 0;
+         statesUnblocked++;
          
-         // Resetar Q-table do estado
-         for(int a = 0; a < NUM_ACTIONS; a++)
-         {
-            g_Q[s * NUM_ACTIONS + a] = 0.0;
-         }
-         
-         statesReset++;
-         g_totalBadStateResets++;
-         
-         Print("♻️ RESET DE ESTADO RUIM -> Estado: ", s,
-               " | Visitas antigas: ", oldVisits,
-               " | Perdas: ", oldLosses, " (", DoubleToString(lossRate*100, 1), "%)",
-               " | Vitórias: ", oldWins);
+         Print("✅ DESBLOQUEIO AUTOMÁTICO -> Estado: ", s,
+               " | Visitas: ", g_stateVisits[s],
+               " | Vitórias: ", g_stateWins[s],
+               " | Win Rate: ", DoubleToString(winRate*100, 1), "%");
          
          g_memoryDirty = true;
+         InvalidateHUDCache();
       }
    }
    
-   if(statesReset > 0)
+   if(statesUnblocked > 0)
    {
-      // Recalcular estados ativos após reset
-      g_activeStatesCount = 0;
-      for(int state = 0; state < NUM_STATES; state++)
-      {
-         if(g_stateVisits[state] > 0)
-         {
-            if(g_activeStatesCount < MaxMemoryStates)
-            {
-               g_activeStates[g_activeStatesCount] = state;
-               g_activeStatesCount++;
-            }
-         }
-      }
-      
-      Print("✅ ", statesReset, " estados ruins resetados | Total resets: ", g_totalBadStateResets);
+      Print("✅ ", statesUnblocked, " estados bons desbloqueados | Total bloqueados: ", CountBlockedStates());
    }
 }
 
@@ -811,10 +733,10 @@ void PerformMemoryMaintenance()
       ApplyStateDecay();
    }
    
-   // 2. Resetar estados ruins (apenas após atingir limite mínimo)
+   // 2. Desbloquear estados bons (apenas após atingir limite mínimo)
    if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
    {
-      ResetBadStates();
+      UnblockGoodStatesAutomatic();
    }
    
    // 3. Limpar memória se necessário
@@ -837,7 +759,6 @@ void PerformMemoryMaintenance()
    
    Print("✅ MANUTENÇÃO COMPLETA REALIZADA");
    Print("   • Decay aplicado: ", g_totalDecayCycles, " ciclos");
-   Print("   • Estados resetados: ", g_totalBadStateResets);
    Print("   • Estados ativos: ", g_activeStatesCount);
    Print("   • Estados bloqueados: ", CountBlockedStates());
 }
@@ -2949,7 +2870,11 @@ void UpdateHUDLight()
    }
    
    datetime currentTime = TimeCurrent();
-   if(currentTime - hudLastUpdate < HUD_UpdateMS/1000 && !HUD_Minimal) return;
+   
+   // ✅ ATUALIZAÇÃO EM TEMPO REAL: Se cache foi invalidado, atualizar imediatamente
+   bool cacheInvalidated = (cachedVisitedStates < 0 || cachedBlockedStates < 0);
+   
+   if(!cacheInvalidated && currentTime - hudLastUpdate < HUD_UpdateMS/1000 && !HUD_Minimal) return;
    hudLastUpdate = currentTime;
    
    int visitedStates = cachedVisitedStates;
@@ -2999,10 +2924,9 @@ void UpdateHUDLight()
    ObjectSetInteger(0, "HUD_Blocked", OBJPROP_COLOR, blockedColor);
    ObjectSetString(0, "HUD_Blocked", OBJPROP_TEXT, newBlocked);
    
-   string decayInfo = StringFormat("   Decay: %s | Ciclos: %d | Resets: %d", 
+   string decayInfo = StringFormat("   Decay: %s | Ciclos: %d", 
                                    EnableMemoryDecay ? "Ativo" : "Inativo",
-                                   g_totalDecayCycles,
-                                   g_totalBadStateResets);
+                                   g_totalDecayCycles);
    ObjectSetString(0, "HUD_DecayInfo", OBJPROP_TEXT, decayInfo);
    
    string directionIcon = GetDirectionIconFast(currentDir);
@@ -5438,10 +5362,10 @@ void OnTick()
          DebugStuckStatesEnhanced();
       }
       
-      // ✅ Reset apenas após atingir limite mínimo de estados
+      // ✅ Desbloquear estados bons apenas após atingir limite mínimo de estados
       if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset && debugCounter % 100 == 0)
       {
-         ResetBadStatesEnhanced();
+         UnblockGoodStates();
       }
 
       MqlDateTime today,last;
@@ -5460,10 +5384,10 @@ void OnTick()
          g_lastResetDate=TimeCurrent();
          cachedTradesToday = -1;
          
-         // ✅ RESET PARCIAL apenas após atingir limite mínimo de estados
+         // ✅ DESBLOQUEIO PARCIAL apenas após atingir limite mínimo de estados
          if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
          {
-            ResetBadStatesEnhanced();
+            UnblockGoodStates();
          }
          
          if(EnableTextExport)
