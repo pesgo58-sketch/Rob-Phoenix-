@@ -218,6 +218,12 @@ input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquea
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
 int MinVisitsForBlockDecision         = 30;           // Visitas mín. decisão bloqueio
 
+input group "──── 📊 SHARPE RATIO AVANÇADO ────";
+input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
+input double MinSharpeToUnblock       = 0.8;          // Sharpe mínimo para desbloquear
+input double MaxSharpeToBlock         = 0.3;          // Sharpe máximo para bloquear
+input int    MinTradesForSharpe       = 30;           // Trades mínimos para calcular Sharpe
+
 // ──────────────────────────────────────────────────────────────────────
 // 📤 7. EXPORTAÇÃO E LOGS
 // ──────────────────────────────────────────────────────────────────────
@@ -265,6 +271,8 @@ double g_Q[];                          // Q-table principal para aprendizado
 int g_stateVisits[];                   // Contador de visitas por estado
 int g_stateWins[];                     // Contadores de vitórias por estado
 int g_stateLosses[];                   // Contadores de perdas por estado
+double g_stateProfitSum[];             // Soma de lucros por estado (para Sharpe Ratio)
+double g_stateProfitSqSum[];           // Soma de lucros ao quadrado por estado (para Sharpe Ratio)
 int g_stateLastUpdate[];               // Último update de cada estado
 bool g_stateBlocked[];                 // Estados bloqueados por má performance
 datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
@@ -865,7 +873,23 @@ bool ShouldBlockState(int state)
     
     double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     
-    return (lossRate >= BlockLossRateThreshold);
+    // Critério 1: Taxa de perda muito alta
+    bool highLossRate = (lossRate >= BlockLossRateThreshold);
+    
+    // Critério 2: Sharpe Ratio muito baixo (se habilitado)
+    bool lowSharpe = false;
+    if(EnableSharpeFilter)
+    {
+        int trades = g_stateWins[state] + g_stateLosses[state];
+        if(trades >= MinTradesForSharpe)
+        {
+            double sharpe = CalculateSharpeRatio(state);
+            lowSharpe = (sharpe < MaxSharpeToBlock);
+        }
+    }
+    
+    // Bloquear se OU taxa de perda alta OU Sharpe muito baixo
+    return (highLossRate || lowSharpe);
 }
 
 // ✅✅✅ 4️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER DESBLOQUEADO (CORRIGIDA)
@@ -881,7 +905,28 @@ bool ShouldUnblockState(int state)
     
     double winRate = CalculateWinRate(state);
     
-    return (winRate >= UnblockWinRateThreshold);
+    // Critério 1: Win rate suficientemente alto
+    bool goodWinRate = (winRate >= UnblockWinRateThreshold);
+    
+    // Critério 2: Sharpe Ratio suficientemente alto (se habilitado)
+    bool goodSharpe = true;
+    if(EnableSharpeFilter)
+    {
+        int trades = g_stateWins[state] + g_stateLosses[state];
+        if(trades >= MinTradesForSharpe)
+        {
+            double sharpe = CalculateSharpeRatio(state);
+            goodSharpe = (sharpe >= MinSharpeToUnblock);
+        }
+        else
+        {
+            // Se não tem dados suficientes para Sharpe, não desbloquear ainda
+            goodSharpe = false;
+        }
+    }
+    
+    // Desbloquear apenas se AMBOS win rate E Sharpe forem bons
+    return (goodWinRate && goodSharpe);
 }
 
 // ✅✅✅ 5️⃣ FUNÇÃO PRINCIPAL DE VERIFICAÇÃO DE BLOQUEIO (SOMENTE LEITURA)
@@ -1096,6 +1141,54 @@ double CalculateWinRate(int state)
     return SafeDivide((double)g_stateWins[state], (double)g_stateVisits[state], 0.0);
 }
 
+//+------------------------------------------------------------------+
+//| Calcula o Sharpe Ratio de um estado                              |
+//| Retorna > 1.0 para excelente, 0.5-1.0 bom, < 0.3 ruim           |
+//+------------------------------------------------------------------+
+double CalculateSharpeRatio(int state)
+{
+    if(state < 0 || state >= NUM_STATES) return 0.0;
+    
+    int trades = g_stateWins[state] + g_stateLosses[state];
+    
+    // Precisa de dados suficientes
+    if(trades < MinTradesForSharpe) return 0.0;
+    
+    // Calcular retorno médio
+    double avgReturn = SafeDivide(g_stateProfitSum[state], (double)trades, 0.0);
+    
+    // Calcular variância
+    double avgSquared = SafeDivide(g_stateProfitSqSum[state], (double)trades, 0.0);
+    double variance = avgSquared - (avgReturn * avgReturn);
+    
+    if(variance <= 0.0) return 0.0;
+    
+    // Calcular desvio padrão
+    double stdDev = MathSqrt(variance);
+    
+    if(stdDev == 0.0) return 0.0;
+    
+    // Sharpe Ratio = Retorno Médio / Desvio Padrão
+    // (sem risk-free rate para simplificar)
+    double sharpe = SafeDivide(avgReturn, stdDev, 0.0);
+    
+    return sharpe;
+}
+
+//+------------------------------------------------------------------+
+//| Registra resultado de trade para cálculo de Sharpe Ratio        |
+//+------------------------------------------------------------------+
+void UpdateStateSharpeData(int state, double profit)
+{
+    if(state < 0 || state >= NUM_STATES) return;
+    
+    // Atualizar soma de lucros
+    g_stateProfitSum[state] += profit;
+    
+    // Atualizar soma de lucros ao quadrado (para variância)
+    g_stateProfitSqSum[state] += (profit * profit);
+}
+
 int CountBlockedStates()
 {
    int count = 0;
@@ -1123,6 +1216,8 @@ void SaveState()
    FileWriteArray(handle, g_stateVisits);
    FileWriteArray(handle, g_stateLosses);
    FileWriteArray(handle, g_stateWins);
+   FileWriteArray(handle, g_stateProfitSum);
+   FileWriteArray(handle, g_stateProfitSqSum);
    FileWriteArray(handle, g_stateLastUpdate);
    FileWriteArray(handle, g_activeStates);
    FileWriteArray(handle, g_stateBlocked);
@@ -1167,6 +1262,8 @@ void LoadState()
    FileReadArray(handle, g_stateVisits);
    FileReadArray(handle, g_stateLosses);
    FileReadArray(handle, g_stateWins);
+   FileReadArray(handle, g_stateProfitSum);
+   FileReadArray(handle, g_stateProfitSqSum);
    FileReadArray(handle, g_stateLastUpdate);
    FileReadArray(handle, g_activeStates);
    FileReadArray(handle, g_stateBlocked);
@@ -1811,6 +1908,12 @@ void ResetQTable()
    
    ArrayResize(g_stateWins, NUM_STATES);
    ArrayInitialize(g_stateWins, 0);
+   
+   ArrayResize(g_stateProfitSum, NUM_STATES);
+   ArrayInitialize(g_stateProfitSum, 0.0);
+   
+   ArrayResize(g_stateProfitSqSum, NUM_STATES);
+   ArrayInitialize(g_stateProfitSqSum, 0.0);
    
    ArrayResize(g_stateLastUpdate, NUM_STATES);
    ArrayInitialize(g_stateLastUpdate, 0);
@@ -4984,6 +5087,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
          g_stateVisits[g_lastTradeState]++;
          g_stateLastUpdate[g_lastTradeState] = g_totalTrades;
          
+         // Atualizar dados para Sharpe Ratio
+         UpdateStateSharpeData(g_lastTradeState, net_profit);
+         
          if(net_profit > 0) 
          {
             g_totalWins++;
@@ -5744,6 +5850,10 @@ int OnInit()
       ArrayResize(g_stateLosses, NUM_STATES);
    if(ArraySize(g_stateWins) != NUM_STATES)
       ArrayResize(g_stateWins, NUM_STATES);
+   if(ArraySize(g_stateProfitSum) != NUM_STATES)
+      ArrayResize(g_stateProfitSum, NUM_STATES);
+   if(ArraySize(g_stateProfitSqSum) != NUM_STATES)
+      ArrayResize(g_stateProfitSqSum, NUM_STATES);
    if(ArraySize(g_stateLastUpdate) != NUM_STATES)
       ArrayResize(g_stateLastUpdate, NUM_STATES);
    if(ArraySize(g_stateBlocked) != NUM_STATES)
