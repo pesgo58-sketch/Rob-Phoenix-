@@ -1142,9 +1142,15 @@ void AutoUnblockGoodStates()
 double CalculateWinRate(int state)
 {
     if(state < 0 || state >= NUM_STATES) return 0.0;
-    if(g_stateVisits[state] == 0) return 0.0;
     
-    return (double)g_stateWins[state] / (double)g_stateVisits[state];
+    // Validar se os arrays estão inicializados
+    if(ArraySize(g_stateVisits) <= state || ArraySize(g_stateWins) <= state)
+        return 0.0;
+    
+    int visits = g_stateVisits[state];
+    if(visits <= 0) return 0.0;
+    
+    return (double)g_stateWins[state] / (double)visits;
 }
 
 // ======================================================================
