@@ -1147,6 +1147,56 @@ double CalculateWinRate(int state)
     return (double)g_stateWins[state] / (double)g_stateVisits[state];
 }
 
+// ======================================================================
+// ✅ FUNÇÃO AUXILIAR: Calcular winrate por estado (baseado apenas em wins/losses)
+// ======================================================================
+// Retorna o winrate histórico de um estado, considerando apenas vitórias e derrotas
+// (sem contar NOPs ou outras ações que não geram resultado).
+// Usado para ajustar dinamicamente as recompensas do Q-learning.
+double GetStateWinRate(const int state)
+{
+    if(state < 0 || state >= NUM_STATES)
+        return 0.0;
+
+    int wins   = g_stateWins[state];
+    int losses = g_stateLosses[state];
+    int total  = wins + losses;
+
+    if(total <= 0)
+        return 0.0;
+
+    return (double)wins / (double)total;
+}
+
+// ======================================================================
+// ✅ RECOMPENSA DINÂMICA: Ajustar reward com base no histórico do estado
+// ======================================================================
+// Calcula uma recompensa dinâmica que depende do estado e do resultado do trade.
+// Estados com bom histórico (alto winrate) recebem bônus em vitórias.
+// Estados com mau histórico (baixo winrate) sofrem penalidade extra em perdas.
+// Isso acelera o aprendizado, reforçando estados "premium" e evitando estados ruins.
+double GetDynamicReward(const bool win, const int state)
+{
+    double baseWin  = (double)RewardWin;   // input existente
+    double baseLoss = (double)RewardLoss;  // input existente
+
+    double wr = GetStateWinRate(state);
+
+    if(win)
+    {
+        // Estados com bom histórico recebem bônus progressivo
+        if(wr > 0.55) baseWin *= 1.5;
+        if(wr > 0.65) baseWin *= 2.0;
+        return baseWin;
+    }
+    else
+    {
+        // Estados ruins são penalizados mais forte em caso de perda
+        if(wr < 0.30) baseLoss *= 1.5;
+        return baseLoss;
+    }
+}
+
 int CountBlockedStates()
 {
    int count = 0;
@@ -3226,20 +3276,9 @@ void UpdateQ(int state, int action, double reward)
    
    g_stateLastUpdate[state] = g_totalTrades;
    
-   // ✅ ATUALIZAR CONTADORES DE VISITAS APENAS PARA TRADES REAIS
-   if(action == 1 || action == 2) // BUY ou SELL
-   {
-      g_stateVisits[state]++;
-      
-      if(reward > 0)
-      {
-         g_stateWins[state]++;
-      }
-      else
-      {
-         g_stateLosses[state]++;
-      }
-   }
+   // ✅ NOTA: As estatísticas (g_stateVisits, g_stateWins, g_stateLosses) 
+   // já são atualizadas em OnTradeTransaction antes de chamar UpdateQ.
+   // Não atualizamos aqui para evitar duplicação.
    
    // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
    if(EnableUnifiedBlockingSystem && g_stateVisits[state] >= MinVisitsForBlockDecision)
@@ -4850,7 +4889,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    double swap = HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
    double net_profit = profit + commission + swap;
 
-   double reward = ComputeRewardFromTrade(net_profit);
+   // ⚠️ NOTA: reward será calculado após atualizar as estatísticas,
+   // para usar o sistema de recompensa dinâmica baseada no histórico do estado
+   double reward = 0.0;
    
    g_totalTrades++;
    g_sumProfit += net_profit;
@@ -4893,6 +4934,13 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             }
          }
          
+         // ✅ CALCULAR RECOMPENSA DINÂMICA baseada no histórico do estado
+         // Após atualizar wins/losses, calculamos a reward que considera o winrate histórico
+         bool isWin = (net_profit > 0);
+         reward = GetDynamicReward(isWin, g_lastTradeState);
+         Print("💰 Recompensa dinâmica calculada: ", DoubleToString(reward, 2), 
+               " (WinRate do estado: ", DoubleToString(GetStateWinRate(g_lastTradeState)*100, 1), "%)");
+         
          Print("PÓS-ATUALIZAÇÃO Estado ", g_lastTradeState, ":");
          Print("  Visitas: ", g_stateVisits[g_lastTradeState]);
          Print("  Vitórias: ", g_stateWins[g_lastTradeState]);
@@ -4901,11 +4949,15 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       else
       {
          Print("⚠️ NOP detectado - NÃO contando visita/perda");
+         // Para NOP, usar o sistema de recompensa tradicional
+         reward = ComputeRewardFromTrade(net_profit);
       }
    }
    else
    {
       Print("⚠️ Estado inválido ou não definido");
+      // Para estado inválido, usar o sistema de recompensa tradicional
+      reward = ComputeRewardFromTrade(net_profit);
    }
    
    g_lastTradeProfit = net_profit;
