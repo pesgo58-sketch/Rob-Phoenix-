@@ -880,6 +880,7 @@ void ResetBadStates()
       }
       
       Print("✅ ", statesReset, " estados ruins resetados | Total resets: ", g_totalBadStateResets);
+      cachedBlockedStates = -1; // Invalidar cache do HUD
    }
 }
 
@@ -982,6 +983,7 @@ void BlockState(int state)
               " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas");
         
         g_memoryDirty = true;
+        cachedBlockedStates = -1; // Invalidar cache do HUD
     }
     else
     {
@@ -1013,6 +1015,7 @@ void UnblockState(int state)
               " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
         
         g_memoryDirty = true;
+        cachedBlockedStates = -1; // Invalidar cache do HUD
     }
 }
 
