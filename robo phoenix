@@ -823,6 +823,9 @@ void ResetBadStates()
    {
       if(g_stateVisits[s] < BadStateMinVisits) continue; // Usar parâmetro ajustável
       
+      // Proteção contra divisão por zero
+      if(g_stateVisits[s] <= 0) continue;
+      
       double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
       
       // ⚠️ MODIFICAÇÃO CRÍTICA: Condição mais agressiva
@@ -958,6 +961,13 @@ void BlockState(int state)
         return;
     }
     
+    // Proteção adicional contra divisão por zero
+    if(visits <= 0)
+    {
+        Print("⚠️ Estado ", state, " tem visitas inválidas (", visits, ")");
+        return;
+    }
+    
     double lossRate = (double)losses / (double)visits;
     
     if(lossRate >= BlockLossRateThreshold)
@@ -1015,6 +1025,9 @@ bool ShouldBlockState(int state)
     int losses = g_stateLosses[state];
     
     if(visits < MinVisitsForBlockDecision) return false;
+    
+    // Proteção adicional contra divisão por zero
+    if(visits <= 0) return false;
     
     double lossRate = (double)losses / (double)visits;
     
@@ -2130,7 +2143,7 @@ void DebugTradeCounting()
          }
          
          // Verificar estados que deveriam estar bloqueados
-         if(g_stateVisits[s] >= MinVisitsForBlockDecision)
+         if(g_stateVisits[s] >= MinVisitsForBlockDecision && g_stateVisits[s] > 0)
          {
             double lossRate = (double)g_stateLosses[s] / g_stateVisits[s];
             if(lossRate >= BlockLossRateThreshold && !g_stateBlocked[s])
@@ -2536,9 +2549,10 @@ void OptimizeParametersDynamically()
    Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
    
    // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = (double)g_totalWins / g_totalTrades;
+   // Proteção contra divisão por zero
+   double currentWinRate = g_totalTrades > 0 ? (double)g_totalWins / g_totalTrades : 0.0;
    
-   if(currentWinRate < 0.25)
+   if(currentWinRate < 0.25 && g_totalTrades > 10)
    {
       // Performance ruim, aumentar exploração
       g_currentExplorationRate = MathMin(g_currentExplorationRate * 1.2, 0.8);
@@ -3016,6 +3030,14 @@ bool CheckRealVolume()
       sumVol += volumeArray[i];
    }
    
+   // Proteção contra divisão por zero
+   if(barsToCopy <= 1)
+   {
+      g_volumeAverage = (long)g_currentVolume;
+      g_volumeStrength = 1.0;
+      return true;
+   }
+   
    g_volumeAverage = (long)(sumVol / (barsToCopy - 1));
    
    if(g_volumeAverage > 0)
@@ -3077,6 +3099,14 @@ void ManageDynamicTrailingStop()
          SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      
+      // Proteção contra divisão por zero
+      if(point <= 0)
+      {
+         Print("⚠️ ERRO: Point inválido para trailing stop");
+         continue;
+      }
+      
       double currentProfit = isBuy ? 
          (currentPrice - entryPrice) / point : 
          (entryPrice - currentPrice) / point;
@@ -3725,8 +3755,12 @@ void ExecuteAction(int action, int state)
    AddPositionToTrailingSystem((ulong)res.order);
    
    double slPoints = 0, tpPoints = 0;
-   if(sl_price > 0) slPoints = MathAbs(price - sl_price) / point;
-   if(tp_price > 0) tpPoints = MathAbs(tp_price - price) / point;
+   // Proteção contra divisão por zero
+   if(point > 0)
+   {
+      if(sl_price > 0) slPoints = MathAbs(price - sl_price) / point;
+      if(tp_price > 0) tpPoints = MathAbs(tp_price - price) / point;
+   }
    
    string lotTypeMsg = "";
    if(sameDirCount == 0 && EnableSmartLot)
@@ -3773,7 +3807,16 @@ double ComputeRewardFromTrade(double profit)
    }
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double profit_points = profit / (LotSize * point * 100);
+   
+   // Proteção contra divisão por zero
+   double denominator = LotSize * point * 100;
+   if(denominator <= 0)
+   {
+      if(profit > 0) return RewardWin;
+      else return RewardLoss;
+   }
+   
+   double profit_points = profit / denominator;
    
    if(profit > 0)
    {
@@ -3950,8 +3993,10 @@ int GetCurrentState()
    double atrValue = atr[0];
    if(atrValue > 0)
       maDistance = (price - ma[0]) / atrValue;
-   else
+   else if(point > 0)
       maDistance = (price - ma[0]) / (point * 10);
+   else
+      maDistance = 0; // Proteção contra divisão por zero
    
    // ✅ Cálculo da posição nas Bollinger Bands
    double bbPosition = 0;
@@ -5242,9 +5287,10 @@ void OnTick()
    
    if(tickCounter % 100 == 0)
    {
-      double currentWinRate = (double)g_totalWins / g_totalTrades;
+      // Proteção contra divisão por zero
+      double currentWinRate = g_totalTrades > 0 ? (double)g_totalWins / g_totalTrades : 0.0;
       
-      if(currentWinRate < 0.20)
+      if(currentWinRate < 0.20 && g_totalTrades > 10)
       {
          Print("⚠️⚠️⚠️ ALERTA: Win rate crítica (", DoubleToString(currentWinRate*100,1), "%)");
          
@@ -5262,7 +5308,8 @@ void OnTick()
       }
       
       // Verificar bloqueios excessivos
-      double blockedRatio = (double)CountBlockedStates() / g_activeStatesCount;
+      // Proteção contra divisão por zero
+      double blockedRatio = g_activeStatesCount > 0 ? (double)CountBlockedStates() / g_activeStatesCount : 0.0;
       if(blockedRatio > 0.7 && g_activeStatesCount > 50)
       {
          Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
