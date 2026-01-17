@@ -5483,7 +5483,7 @@ void OnTick()
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (OTIMIZADA - ARQUIVO ÚNICO LIMPO)
+// ✅✅✅ FUNÇÃO ExportMemoryToTextFileFunc (ARQUIVO ÚNICO COM HISTÓRICO COMPLETO)
 // ======================================================================
 bool ExportMemoryToTextFileFunc(bool forceExport = false)
 {
@@ -5496,10 +5496,9 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       if(minutesPassed < TextExportMinInterval) return false;
    }
    
-   // ✅ ORIGINAL: Criar arquivo separado com data/hora para cada exportação
-   string filename = "Phoenix_Files/Text_Logs/Memory_" + _Symbol + "_" + 
-                     EnumToString((ENUM_TIMEFRAMES)_Period) + "_" + 
-                     TimeToString(currentTime, TIME_DATE) + "_SUPER_CORRIGIDO.txt";
+   // ✅ NOVO: Arquivo ÚNICO que é sobrescrito a cada exportação
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_Memory_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
    
    if(!CreateDirectoryForFile(filename))
    {
@@ -5602,9 +5601,10 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    }
    
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "📈 TOP 20 ESTADOS MAIS VISITADOS (SISTEMA SUPER CORRIGIDO)");
+   FileWrite(file_handle, "📈 HISTÓRICO COMPLETO DE TODOS OS ESTADOS");
    FileWrite(file_handle, "----------------------------------------");
    
+   // Ordenar estados por visitas (do mais visitado ao menos visitado)
    int sortedStates[][2];
    ArrayResize(sortedStates, g_activeStatesCount);
    
@@ -5615,6 +5615,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       sortedStates[i][1] = g_stateVisits[state];
    }
    
+   // Bubble sort (ordenação por visitas decrescente)
    for(int i = 0; i < g_activeStatesCount - 1; i++)
    {
       for(int j = i + 1; j < g_activeStatesCount; j++)
@@ -5633,8 +5634,8 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       }
    }
    
-   int limit = MathMin(20, g_activeStatesCount);
-   for(int i = 0; i < limit; i++)
+   // ✅ EXPORTAR TODOS OS ESTADOS (não apenas top 20)
+   for(int i = 0; i < g_activeStatesCount; i++)
    {
       int state = sortedStates[i][0];
       int visits = sortedStates[i][1];
@@ -5643,12 +5644,35 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       double winRate = visits > 0 ? (double)wins / visits * 100 : 0;
       bool isBlocked = g_stateBlocked[state];
       
+      // ✅ Determinar status do estado
+      string statusInfo = "";
+      if(isBlocked)
+      {
+         // Estado bloqueado - verificar se está em fase de reativação
+         if(winRate >= 35.0 && visits >= MinVisitsForBlockDecision)
+         {
+            statusInfo = " [🔄 EM REATIVAÇÃO - WinRate melhorou]";
+         }
+         else
+         {
+            statusInfo = " [🚫 BLOQUEADO PERMANENTEMENTE]";
+         }
+      }
+      else
+      {
+         // Estado não bloqueado
+         if(winRate < StateBlockThreshold * 100 && visits >= MinVisitsForBlockDecision)
+         {
+            statusInfo = " [⚠️ EM AVALIAÇÃO - WinRate baixo]";
+         }
+      }
+      
       string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
-                        ": " + IntegerToString(visits) + " visitas REAIS | " + 
-                        IntegerToString(wins) + " vitórias REAIS (" + 
+                        ": " + IntegerToString(visits) + " visitas | " + 
+                        IntegerToString(wins) + " wins (" + 
                         DoubleToString(winRate, 1) + "%) | " + 
-                        IntegerToString(losses) + " perdas REAIS" + 
-                        (isBlocked ? " [BLOQUEADO]" : "");
+                        IntegerToString(losses) + " losses" + 
+                        statusInfo;
       FileWrite(file_handle, stateLine);
    }
    
