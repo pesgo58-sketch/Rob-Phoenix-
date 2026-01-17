@@ -5557,7 +5557,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       FileWrite(file_handle, "📊 ESTATÍSTICAS GERAIS (SISTEMA SUPER CORRIGIDO)");
       FileWrite(file_handle, "----------------------------------------");
       
-      string totalTrades = "Total de Trades REAIS: " + IntegerToString(g_totalTrades));
+      string totalTrades = "Total de Trades REAIS: " + IntegerToString(g_totalTrades);
       FileWrite(file_handle, totalTrades);
       
       if(g_totalTrades > 0)
