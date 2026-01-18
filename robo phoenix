@@ -5169,6 +5169,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                " | WR: ", DoubleToString(wr * 100, 1), "%",
                " | Reward: ", DoubleToString(reward, 2),
                " (base: ", (net_profit > 0 ? RewardWin : RewardLoss), ")");
+      }
+   }
    
    g_totalTrades++;
    g_sumProfit += net_profit;
