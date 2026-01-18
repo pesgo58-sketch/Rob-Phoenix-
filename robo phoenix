@@ -174,6 +174,7 @@ input group "──── 🧠 APRENDIZADO BÁSICO ────";
 input bool   UseSimpleRewardSystem    = true;         // Sistema de recompensa simples
 input double RewardWin                = 5.0;          // Recompensa por vitória
 input double RewardLoss               = -2.0;         // Penalidade por perda
+input bool   EnableDynamicReward      = false;        // Reward dinâmica por estado
 double LearningRate                   = 0.03;         // Taxa de aprendizado (fixo)
 
 input group "──── 🎲 EXPLORAÇÃO ────";
@@ -1187,6 +1188,98 @@ void UpdateStateSharpeData(int state, double profit)
     
     // Atualizar soma de lucros ao quadrado (para variância)
     g_stateProfitSqSum[state] += (profit * profit);
+}
+
+//+------------------------------------------------------------------+
+//| Retorna winrate histórico de um estado (0.0 a 1.0)              |
+//| Usado para reward dinâmica                                       |
+//+------------------------------------------------------------------+
+double GetStateWinRate(const int state)
+{
+   if(state < 0 || state >= NUM_STATES)
+      return 0.0;
+
+   int wins   = g_stateWins[state];
+   int losses = g_stateLosses[state];
+   int total  = wins + losses;
+
+   if(total <= 0)
+      return 0.0;
+
+   return SafeDivide((double)wins, (double)total, 0.0);
+}
+
+//+------------------------------------------------------------------+
+//| Calcula a recompensa dinâmica com base no estado e resultado    |
+//| win: true = trade vencedor, false = perdedor                     |
+//| state: índice do estado atual                                    |
+//+------------------------------------------------------------------+
+double GetDynamicReward(const bool win, const int state)
+{
+   // Usa os inputs base
+   double baseWin  = RewardWin;
+   double baseLoss = RewardLoss;
+   
+   // Se dynamic reward desabilitado, retorna reward base
+   if(!EnableDynamicReward)
+      return win ? baseWin : baseLoss;
+   
+   // Se estado inválido, retorna reward base
+   if(state < 0 || state >= NUM_STATES)
+      return win ? baseWin : baseLoss;
+   
+   // Precisa de histórico mínimo (30 trades) para calcular reward dinâmica
+   int wins   = g_stateWins[state];
+   int losses = g_stateLosses[state];
+   int total  = wins + losses;
+   
+   // Com menos de 30 trades, usa reward base (proteção contra auto-sabotagem)
+   if(total < 30)
+      return win ? baseWin : baseLoss;
+   
+   // Calcular win rate do estado
+   double winRate = SafeDivide((double)wins, (double)total, 0.0);
+   
+   // Definir multiplicador baseado no win rate do estado
+   double multiplier = 1.0; // neutro por padrão
+   
+   if(winRate >= 0.65)
+   {
+      // Estados EXCELENTES (65%+): recompensa extra quando acertam
+      multiplier = win ? 1.5 : 1.0;
+   }
+   else if(winRate >= 0.55)
+   {
+      // Estados MUITO BONS (55-65%): bônus moderado quando acertam
+      multiplier = win ? 1.3 : 1.0;
+   }
+   else if(winRate >= 0.45)
+   {
+      // Estados RAZOÁVEIS (45-55%): reward padrão
+      multiplier = 1.0;
+   }
+   else if(winRate >= 0.30)
+   {
+      // Estados FRACOS (30-45%): penalidade maior quando erram
+      multiplier = win ? 1.0 : 1.3;
+   }
+   else
+   {
+      // Estados PÉSSIMOS (<30%): penalidade MUITO maior quando erram
+      multiplier = win ? 1.0 : 1.5;
+   }
+   
+   // Aplicar multiplicador
+   double reward = win ? (baseWin * multiplier) : (baseLoss * multiplier);
+   
+   // Limites de segurança (evita valores extremos)
+   double maxReward = 20.0;
+   double minReward = -20.0;
+   
+   if(reward > maxReward) reward = maxReward;
+   if(reward < minReward) reward = minReward;
+   
+   return reward;
 }
 
 int CountBlockedStates()
@@ -5062,7 +5155,20 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    double swap = HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
    double net_profit = profit + commission + swap;
 
-   double reward = ComputeRewardFromTrade(net_profit);
+   // ✅ REWARD DINÂMICA: Ajusta baseado no histórico do estado
+   double reward = GetDynamicReward(net_profit > 0, g_lastTradeState);
+   
+   // Log da reward dinâmica (se habilitado)
+   if(EnableDynamicReward && g_lastTradeState >= 0 && g_lastTradeState < NUM_STATES)
+   {
+      int total_trades = g_stateWins[g_lastTradeState] + g_stateLosses[g_lastTradeState];
+      if(total_trades >= 30)
+      {
+         double wr = SafeDivide((double)g_stateWins[g_lastTradeState], (double)total_trades, 0.0);
+         Print("📊 REWARD DINÂMICA Estado ", g_lastTradeState, 
+               " | WR: ", DoubleToString(wr * 100, 1), "%",
+               " | Reward: ", DoubleToString(reward, 2),
+               " (base: ", (net_profit > 0 ? RewardWin : RewardLoss), ")");
    
    g_totalTrades++;
    g_sumProfit += net_profit;
