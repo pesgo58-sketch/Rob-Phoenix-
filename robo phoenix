@@ -3547,7 +3547,7 @@ void UpdateQ_NOP(int state)
    {
       int idx = state * NUM_ACTIONS;
       double oldQ = g_Q[idx];
-      double newQ = oldQ - 0.001;
+      double newQ = oldQ - 0.1;  // ✅ PENALIDADE AUMENTADA: -0.1 ao invés de -0.001
       g_Q[idx] = CompressQValue(newQ);
       
       g_memoryDirty = true;
@@ -3638,21 +3638,21 @@ int ChooseAction(int state)
    
    double nopQ = g_Q[state * NUM_ACTIONS + 0];
    
-   // ⚠️ CORREÇÃO: Tornar NOP mais atrativo para estados ruins - usar MinVisitsForBlockDecision
+   // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
    double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.3)
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)  // ✅ REDUZIDO: 15% ao invés de 30%
    {
       bestA = 0;
-      Print("🤔 NOP escolhido (estado ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
-      g_statusMessage = "NOP (estado ruim)";
+      Print("🤔 NOP escolhido (estado muito ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
+      g_statusMessage = "NOP (estado muito ruim)";
    }
-   else if(nopQ > best * 1.5 && bestA > 0)
+   else if(nopQ > best * 5.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 5x melhor ao invés de 1.5x
    {
       bestA = 0;
       Print("🤔 NOP escolhido (superioridade: ", nopQ, " vs ", best, ")");
       g_statusMessage = "NOP (melhor opção)";
    }
-   else if(best <= -20.0)
+   else if(best <= -50.0)  // ✅ REDUZIDO: -50 ao invés de -20 (ações precisam estar MUITO ruins)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (ações de trade muito ruins: ", best, ")");
