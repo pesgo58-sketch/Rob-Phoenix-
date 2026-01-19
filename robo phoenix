@@ -344,6 +344,16 @@ double g_lastTPPrice = 0.0;
 bool g_lastTradeExecuted = false;
 int g_lastTradeStateExecuted = -1;
 
+// ✅ MAE/MFE TRACKING - Rastreamento de eficiência de trades
+double g_positionMAE[];      // Maximum Adverse Excursion por posição
+double g_positionMFE[];      // Maximum Favorable Excursion por posição
+ulong g_positionTickets[];   // Tickets das posições rastreadas
+double g_positionEntry[];    // Preço de entrada de cada posição
+double g_positionSL[];       // Stop Loss de cada posição
+double g_positionTP[];       // Take Profit de cada posição
+int g_positionDirection[];   // Direção (+1=Buy, -1=Sell)
+int g_trackedPositionsCount = 0; // Contador de posições rastreadas
+
 // Controle de direção e posições
 int g_currentDirection = 0;
 int g_positionsCount = 0;
@@ -1281,6 +1291,218 @@ double GetDynamicReward(const bool win, const int state)
    
    return reward;
 }
+
+//+------------------------------------------------------------------+
+//| Calcula fator de eficiência baseado em MAE/MFE do trade          |
+//| direction: +1 = Buy, -1 = Sell                                   |
+//| entryPrice: preço de entrada                                     |
+//| slPrice, tpPrice: SL e TP usados no trade                        |
+//| maxAgainst: pior preço contra (MAE)                              |
+//| maxFavour: melhor preço a favor (MFE)                            |
+//| profit: lucro líquido do trade (net_profit)                      |
+//+------------------------------------------------------------------+
+double GetEfficiencyFactor(int direction,
+                           double entryPrice,
+                           double slPrice,
+                           double tpPrice,
+                           double maxAgainst,
+                           double maxFavour,
+                           double profit)
+{
+   // Validações básicas
+   if(direction == 0) return 1.0;
+   if(entryPrice <= 0 || slPrice <= 0 || tpPrice <= 0) return 1.0;
+   
+   // Calcular distâncias SL e TP
+   double slDistance = MathAbs(entryPrice - slPrice);
+   double tpDistance = MathAbs(tpPrice - entryPrice);
+   
+   // Proteção contra SL/TP inválidos
+   if(slDistance <= 0 || tpDistance <= 0) return 1.0;
+   
+   // Calcular MAE e MFE percentuais
+   double maePct = SafeDivide(maxAgainst, slDistance, 0.0);
+   double mfePct = SafeDivide(maxFavour, tpDistance, 0.0);
+   
+   // Limitar a 0-1 range (proteção)
+   if(maePct < 0) maePct = 0;
+   if(mfePct < 0) mfePct = 0;
+   if(maePct > 1.5) maePct = 1.5; // Pode exceder 100% se foi além do SL
+   if(mfePct > 1.5) mfePct = 1.5; // Pode exceder 100% se foi além do TP
+   
+   double factor = 1.0;
+   
+   // ✅ VITÓRIAS (profit > 0)
+   if(profit > 0)
+   {
+      // Vitória LIMPA: pouco MAE e alto MFE
+      if(maePct <= 0.25 && mfePct >= 0.75)
+      {
+         factor = 1.4;  // +40% bonus
+      }
+      // Vitória com MUITO CALOR: quase bateu SL
+      else if(maePct > 0.75)
+      {
+         factor = 0.6;  // -40% penalidade
+      }
+      // Vitória NORMAL
+      else
+      {
+         factor = 1.0;
+      }
+   }
+   // ❌ DERROTAS (profit < 0)
+   else
+   {
+      // Derrota TEIMOSA: quase atingiu TP mas voltou pro SL
+      if(mfePct >= 0.75)
+      {
+         factor = 2.0;  // +100% penalidade (dobra a perda)
+      }
+      // Derrota RÁPIDA: nunca chegou perto do TP
+      else if(mfePct <= 0.25)
+      {
+         factor = 1.0;  // Penalidade normal
+      }
+      // Derrota MÉDIA: chegou razoavelmente perto
+      else
+      {
+         factor = 1.5;  // +50% penalidade
+      }
+   }
+   
+   // Limites de segurança
+   if(factor < 0.3) factor = 0.3;
+   if(factor > 2.5) factor = 2.5;
+   
+   return factor;
+}
+
+//+------------------------------------------------------------------+
+//| Atualiza MAE/MFE das posições abertas                            |
+//+------------------------------------------------------------------+
+void UpdatePositionMetrics()
+{
+   if(g_trackedPositionsCount <= 0) return;
+   
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   
+   for(int i = 0; i < g_trackedPositionsCount; i++)
+   {
+      ulong ticket = g_positionTickets[i];
+      
+      // Verificar se posição ainda existe
+      if(!PositionSelectByTicket(ticket)) continue;
+      
+      int dir = g_positionDirection[i];
+      double entry = g_positionEntry[i];
+      
+      double currentPrice = (dir > 0) ? currentBid : currentAsk;
+      
+      // Calcular movimento contra e a favor
+      double movementAgainst = 0;
+      double movementFavour = 0;
+      
+      if(dir > 0) // BUY
+      {
+         // Contra: quando preço desce
+         if(currentPrice < entry)
+            movementAgainst = entry - currentPrice;
+         // A favor: quando preço sobe
+         if(currentPrice > entry)
+            movementFavour = currentPrice - entry;
+      }
+      else // SELL
+      {
+         // Contra: quando preço sobe
+         if(currentPrice > entry)
+            movementAgainst = currentPrice - entry;
+         // A favor: quando preço desce
+         if(currentPrice < entry)
+            movementFavour = entry - currentPrice;
+      }
+      
+      // Atualizar MAE (máximo contra)
+      if(movementAgainst > g_positionMAE[i])
+         g_positionMAE[i] = movementAgainst;
+      
+      // Atualizar MFE (máximo a favor)
+      if(movementFavour > g_positionMFE[i])
+         g_positionMFE[i] = movementFavour;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Adiciona nova posição ao tracking MAE/MFE                        |
+//+------------------------------------------------------------------+
+void AddPositionTracking(ulong ticket, double entry, double sl, double tp, int direction)
+{
+   // Expande arrays se necessário
+   int newSize = g_trackedPositionsCount + 1;
+   ArrayResize(g_positionTickets, newSize);
+   ArrayResize(g_positionMAE, newSize);
+   ArrayResize(g_positionMFE, newSize);
+   ArrayResize(g_positionEntry, newSize);
+   ArrayResize(g_positionSL, newSize);
+   ArrayResize(g_positionTP, newSize);
+   ArrayResize(g_positionDirection, newSize);
+   
+   // Adiciona nova posição
+   int idx = g_trackedPositionsCount;
+   g_positionTickets[idx] = ticket;
+   g_positionMAE[idx] = 0.0;
+   g_positionMFE[idx] = 0.0;
+   g_positionEntry[idx] = entry;
+   g_positionSL[idx] = sl;
+   g_positionTP[idx] = tp;
+   g_positionDirection[idx] = direction;
+   
+   g_trackedPositionsCount++;
+}
+
+//+------------------------------------------------------------------+
+//| Obtém MAE/MFE de uma posição e remove do tracking               |
+//+------------------------------------------------------------------+
+bool GetPositionMAEMFE(ulong ticket, double &mae, double &mfe)
+{
+   for(int i = 0; i < g_trackedPositionsCount; i++)
+   {
+      if(g_positionTickets[i] == ticket)
+      {
+         mae = g_positionMAE[i];
+         mfe = g_positionMFE[i];
+         
+         // Remove posição do tracking (shift array)
+         for(int j = i; j < g_trackedPositionsCount - 1; j++)
+         {
+            g_positionTickets[j] = g_positionTickets[j + 1];
+            g_positionMAE[j] = g_positionMAE[j + 1];
+            g_positionMFE[j] = g_positionMFE[j + 1];
+            g_positionEntry[j] = g_positionEntry[j + 1];
+            g_positionSL[j] = g_positionSL[j + 1];
+            g_positionTP[j] = g_positionTP[j + 1];
+            g_positionDirection[j] = g_positionDirection[j + 1];
+         }
+         
+         g_trackedPositionsCount--;
+         ArrayResize(g_positionTickets, g_trackedPositionsCount);
+         ArrayResize(g_positionMAE, g_trackedPositionsCount);
+         ArrayResize(g_positionMFE, g_trackedPositionsCount);
+         ArrayResize(g_positionEntry, g_trackedPositionsCount);
+         ArrayResize(g_positionSL, g_trackedPositionsCount);
+         ArrayResize(g_positionTP, g_trackedPositionsCount);
+         ArrayResize(g_positionDirection, g_trackedPositionsCount);
+         
+         return true;
+      }
+   }
+   
+   mae = 0.0;
+   mfe = 0.0;
+   return false;
+}
+
 
 int CountBlockedStates()
 {
@@ -3980,6 +4202,10 @@ void ExecuteAction(int action, int state)
    
    AddPositionToTrailingSystem((ulong)res.order);
    
+   // ✅ MAE/MFE TRACKING: Adiciona posição ao rastreamento de eficiência
+   int direction = isBuy ? 1 : -1;
+   AddPositionTracking((ulong)res.order, price, sl_price, tp_price, direction);
+   
    double slPoints = 0, tpPoints = 0;
    if(sl_price > 0) slPoints = SafeDivide(MathAbs(price - sl_price), point, 0.0);
    if(tp_price > 0) tpPoints = SafeDivide(MathAbs(tp_price - price), point, 0.0);
@@ -5158,6 +5384,41 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    // ✅ REWARD DINÂMICA: Ajusta baseado no histórico do estado
    double reward = GetDynamicReward(net_profit > 0, g_lastTradeState);
    
+   // ✅ MAE/MFE EFFICIENCY: Ajusta reward baseado na qualidade da execução
+   ulong position_id = HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+   double mae = 0.0, mfe = 0.0;
+   
+   if(GetPositionMAEMFE(position_id, mae, mfe))
+   {
+      // Obter entry price do histórico
+      double entry_price = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
+      
+      // Calcula fator de eficiência baseado em MAE/MFE
+      int direction = (g_lastTradeAction == 1) ? 1 : -1; // 1=BUY, -1=SELL
+      double efficiencyFactor = GetEfficiencyFactor(direction, 
+                                                     entry_price,
+                                                     g_lastSLPrice,
+                                                     g_lastTPPrice,
+                                                     mae, 
+                                                     mfe, 
+                                                     net_profit);
+      
+      // Aplica fator de eficiência à reward
+      reward *= efficiencyFactor;
+      
+      // Log do fator de eficiência
+      double slDist = MathAbs(entry_price - g_lastSLPrice);
+      double tpDist = MathAbs(g_lastTPPrice - entry_price);
+      double maePct = SafeDivide(mae, slDist, 0.0);
+      double mfePct = SafeDivide(mfe, tpDist, 0.0);
+      
+      Print("📈 MAE/MFE EFFICIENCY: Estado ", g_lastTradeState,
+            " | MAE: ", DoubleToString(maePct * 100, 1), "%",
+            " | MFE: ", DoubleToString(mfePct * 100, 1), "%",
+            " | Fator: ", DoubleToString(efficiencyFactor, 2),
+            " | Reward Final: ", DoubleToString(reward, 2));
+   }
+   
    // Log da reward dinâmica (se habilitado)
    if(EnableDynamicReward && g_lastTradeState >= 0 && g_lastTradeState < NUM_STATES)
    {
@@ -5501,6 +5762,9 @@ void OnTick()
 {
    static datetime last_bar_time = 0;
    datetime current_bar_time = iTime(_Symbol,_Period,0);
+
+   // ✅ ATUALIZAÇÃO MAE/MFE: Rastrear eficiência dos trades em tempo real
+   UpdatePositionMetrics();
 
    // ✅ MONITORAMENTO DE PERFORMANCE A CADA 100 TICKS
    static int tickCounter = 0;
