@@ -3640,7 +3640,7 @@ void UpdateQ_NOP(int state)
    {
       int idx = state * NUM_ACTIONS;
       double oldQ = g_Q[idx];
-      double newQ = oldQ - 0.1;  // ✅ PENALIDADE AUMENTADA: -0.1 ao invés de -0.001
+      double newQ = oldQ - 0.02;  // ✅ PENALIDADE MODERADA: -0.02 (BTC M5 precisa de NOP mais tolerante)
       g_Q[idx] = CompressQValue(newQ);
       
       g_memoryDirty = true;
