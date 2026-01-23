@@ -217,7 +217,7 @@ input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqu
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
 input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-int MinVisitsForBlockDecision         = 30;           // Visitas mín. decisão bloqueio
+input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
