@@ -4123,6 +4123,38 @@ void ExecuteAction(int action, int state)
    if(UseFixedSL) sl_price = CalculateSLByPoints(isBuy, price);
    if(UseFixedTP) tp_price = CalculateTPByPoints(isBuy, price);
 
+   // MINI-LOG PARA VALIDAR SL/TP EM PONTOS
+   if(point > 0.0)
+   {
+      double slPointsCheck = 0.0;
+      double tpPointsCheck = 0.0;
+
+      if(sl_price > 0.0)
+      {
+         if(isBuy)
+            slPointsCheck = (price - sl_price) / point;
+         else
+            slPointsCheck = (sl_price - price) / point;
+      }
+
+      if(tp_price > 0.0)
+      {
+         if(isBuy)
+            tpPointsCheck = (tp_price - price) / point;
+         else
+            tpPointsCheck = (price - tp_price) / point;
+      }
+
+      Print("🎯 MINI-LOG SLTP: dir=", (isBuy ? "BUY" : "SELL"),
+            " | entry=", DoubleToString(price, 5),
+            " | SL=", DoubleToString(sl_price, 5),
+            " | TP=", DoubleToString(tp_price, 5),
+            " | SL_pts~=", DoubleToString(slPointsCheck, 0),
+            " | TP_pts~=", DoubleToString(tpPointsCheck, 0),
+            " | FixedSL_Points=", FixedSL_Points,
+            " | FixedTP_Points=", FixedTP_Points);
+   }
+
    if(!AreStopsValid(isBuy, price, sl_price, tp_price))
    {
       g_statusMessage = "⛔ Stops inválidos";
