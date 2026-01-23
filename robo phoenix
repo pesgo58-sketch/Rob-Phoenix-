@@ -4059,6 +4059,25 @@ void ExecuteAction(int action, int state)
    {
       double quality = GetStateQuality(state);
       
+      // 🔍 DEBUG SMART LOT: Log detalhado para diagnóstico
+      int visits = (state >= 0 && state < ArraySize(g_stateVisits)) ? g_stateVisits[state] : 0;
+      double buyQ = 0.0, sellQ = 0.0;
+      if(state >= 0 && ArraySize(g_Q) > state * NUM_ACTIONS + 2)
+      {
+         buyQ = g_Q[state * NUM_ACTIONS + 1];
+         sellQ = g_Q[state * NUM_ACTIONS + 2];
+      }
+      double bestQ = MathMax(buyQ, sellQ);
+      
+      Print("🔍 SMART LOT DEBUG: State=", state, 
+            " | Visits=", visits,
+            " | BuyQ=", DoubleToString(buyQ, 3),
+            " | SellQ=", DoubleToString(sellQ, 3),
+            " | BestQ=", DoubleToString(bestQ, 3),
+            " | Quality=", DoubleToString(quality, 3),
+            " | HighTH=", DoubleToString(HighQualityThreshold, 2),
+            " | UltraTH=", DoubleToString(UltraQualityThreshold, 2));
+      
       if(quality >= UltraQualityThreshold)
       {
          desiredLot = LotSize * UltraLotMultiplier;
