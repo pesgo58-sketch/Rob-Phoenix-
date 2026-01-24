@@ -6204,32 +6204,78 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    FileWrite(file_handle, "📈 HISTÓRICO COMPLETO DE TODOS OS ESTADOS");
    FileWrite(file_handle, "----------------------------------------");
    
-   // Ordenar estados por visitas (do mais visitado ao menos visitado)
-   int sortedStates[][2];
+   // ✅ NOVA ORDENAÇÃO: 1) Bloqueados  2) Melhores (lucro/WR)  3) Restantes
+   // Array: [state, visits, wins, losses, isBlocked(0/1), profit_x1000]
+   int sortedStates[][6];
    ArrayResize(sortedStates, g_activeStatesCount);
    
    for(int i = 0; i < g_activeStatesCount; i++)
    {
       int state = g_activeStates[i];
+      int visits = g_stateVisits[state];
+      int wins = g_stateWins[state];
+      int losses = g_stateLosses[state];
+      bool isBlocked = g_stateBlocked[state];
+      double profit = g_stateProfitSum[state];
+      
       sortedStates[i][0] = state;
-      sortedStates[i][1] = g_stateVisits[state];
+      sortedStates[i][1] = visits;
+      sortedStates[i][2] = wins;
+      sortedStates[i][3] = losses;
+      sortedStates[i][4] = isBlocked ? 1 : 0;
+      sortedStates[i][5] = (int)(profit * 1000); // Multiplicar por 1000 para evitar decimais
    }
    
-   // Bubble sort (ordenação por visitas decrescente)
+   // Bubble sort com critério customizado
    for(int i = 0; i < g_activeStatesCount - 1; i++)
    {
       for(int j = i + 1; j < g_activeStatesCount; j++)
       {
-         if(sortedStates[j][1] > sortedStates[i][1])
+         bool shouldSwap = false;
+         
+         // Critério 1: Estados bloqueados VÊM PRIMEIRO
+         if(sortedStates[i][4] == 0 && sortedStates[j][4] == 1)
          {
-            int tempState = sortedStates[i][0];
-            int tempVisits = sortedStates[i][1];
-            
-            sortedStates[i][0] = sortedStates[j][0];
-            sortedStates[i][1] = sortedStates[j][1];
-            
-            sortedStates[j][0] = tempState;
-            sortedStates[j][1] = tempVisits;
+            shouldSwap = true;
+         }
+         // Critério 2: Entre bloqueados, ordena por visitas (mais visitado primeiro)
+         else if(sortedStates[i][4] == 1 && sortedStates[j][4] == 1)
+         {
+            if(sortedStates[j][1] > sortedStates[i][1])
+               shouldSwap = true;
+         }
+         // Critério 3: Entre NÃO bloqueados, ordena por LUCRO (maior primeiro)
+         else if(sortedStates[i][4] == 0 && sortedStates[j][4] == 0)
+         {
+            // Se ambos têm pelo menos 5 visitas, usar lucro
+            if(sortedStates[i][1] >= 5 && sortedStates[j][1] >= 5)
+            {
+               if(sortedStates[j][5] > sortedStates[i][5])
+                  shouldSwap = true;
+            }
+            // Se pelo menos um tem menos de 5 visitas, ordenar por Win Rate
+            else
+            {
+               int totalI = sortedStates[i][1];
+               int totalJ = sortedStates[j][1];
+               double wrI = totalI > 0 ? (double)sortedStates[i][2] / totalI : 0;
+               double wrJ = totalJ > 0 ? (double)sortedStates[j][2] / totalJ : 0;
+               
+               if(wrJ > wrI)
+                  shouldSwap = true;
+               else if(wrJ == wrI && sortedStates[j][1] > sortedStates[i][1])
+                  shouldSwap = true;
+            }
+         }
+         
+         if(shouldSwap)
+         {
+            for(int k = 0; k < 6; k++)
+            {
+               int temp = sortedStates[i][k];
+               sortedStates[i][k] = sortedStates[j][k];
+               sortedStates[j][k] = temp;
+            }
          }
       }
    }
@@ -6239,10 +6285,11 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    {
       int state = sortedStates[i][0];
       int visits = sortedStates[i][1];
-      int losses = g_stateLosses[state];
-      int wins = g_stateWins[state];
+      int wins = sortedStates[i][2];
+      int losses = sortedStates[i][3];
+      bool isBlocked = sortedStates[i][4] == 1;
+      double profit = sortedStates[i][5] / 1000.0; // Restaurar profit original
       double winRate = visits > 0 ? (double)wins / visits * 100 : 0;
-      bool isBlocked = g_stateBlocked[state];
       
       // ✅ Determinar status do estado
       string statusInfo = "";
@@ -6265,13 +6312,18 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          {
             statusInfo = " [⚠️ EM AVALIAÇÃO - WinRate baixo]";
          }
+         else if(profit > 0 && winRate > 50)
+         {
+            statusInfo = " [⭐ DESEMPENHO POSITIVO]";
+         }
       }
       
       string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
                         ": " + IntegerToString(visits) + " visitas | " + 
                         IntegerToString(wins) + " wins (" + 
                         DoubleToString(winRate, 1) + "%) | " + 
-                        IntegerToString(losses) + " losses" + 
+                        IntegerToString(losses) + " losses | Lucro: " +
+                        DoubleToString(profit, 2) + 
                         statusInfo;
       FileWrite(file_handle, stateLine);
    }
