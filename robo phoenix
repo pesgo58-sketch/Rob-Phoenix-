@@ -879,28 +879,52 @@ bool ShouldBlockState(int state)
     
     int visits = g_stateVisits[state];
     int losses = g_stateLosses[state];
+    int wins = g_stateWins[state];
     
-    if(visits < MinVisitsForBlockDecision) return false;
+    if(visits < MinVisitsForBlockDecision) 
+    {
+        // 🔍 DEBUG: Estado sem visitas suficientes
+        Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não bloqueia)");
+        return false;
+    }
     
     double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
+    double winRate = SafeDivide((double)wins, (double)visits, 0.0);
     
     // Critério 1: Taxa de perda muito alta
     bool highLossRate = (lossRate >= BlockLossRateThreshold);
     
     // Critério 2: Sharpe Ratio muito baixo (se habilitado)
     bool lowSharpe = false;
+    double sharpe = 0.0;
     if(EnableSharpeFilter)
     {
         int trades = g_stateWins[state] + g_stateLosses[state];
         if(trades >= MinTradesForSharpe)
         {
-            double sharpe = CalculateSharpeRatio(state);
+            sharpe = CalculateSharpeRatio(state);
             lowSharpe = (sharpe < MaxSharpeToBlock);
         }
     }
     
+    // 🔍 DEBUG: Log detalhado de avaliação de bloqueio
+    bool shouldBlock = (highLossRate || lowSharpe);
+    Print("🔍 BLOCK DEBUG: State=", state, 
+          " | Visits=", visits,
+          " | Wins=", wins,
+          " | Losses=", losses,
+          " | WinRate=", DoubleToString(winRate*100, 1), "%",
+          " | LossRate=", DoubleToString(lossRate*100, 1), "%",
+          " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+          " | Sharpe=", DoubleToString(sharpe, 2),
+          " | SharpeTH=", DoubleToString(MaxSharpeToBlock, 2),
+          " | EnableSharpe=", EnableSharpeFilter,
+          " | HighLoss?=", highLossRate,
+          " | LowSharpe?=", lowSharpe,
+          " → SHOULD BLOCK=", shouldBlock);
+    
     // Bloquear se OU taxa de perda alta OU Sharpe muito baixo
-    return (highLossRate || lowSharpe);
+    return shouldBlock;
 }
 
 // ✅✅✅ 4️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER DESBLOQUEADO (CORRIGIDA)
@@ -911,8 +935,15 @@ bool ShouldUnblockState(int state)
     if(!g_stateBlocked[state]) return false;
     
     int visits = g_stateVisits[state];
+    int wins = g_stateWins[state];
+    int losses = g_stateLosses[state];
     
-    if(visits < MinVisitsForBlockDecision) return false;
+    if(visits < MinVisitsForBlockDecision) 
+    {
+        // 🔍 DEBUG: Estado bloqueado sem visitas suficientes para desbloquear
+        Print("🔓 UNBLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não desbloqueia)");
+        return false;
+    }
     
     double winRate = CalculateWinRate(state);
     
@@ -921,12 +952,13 @@ bool ShouldUnblockState(int state)
     
     // Critério 2: Sharpe Ratio suficientemente alto (se habilitado)
     bool goodSharpe = true;
+    double sharpe = 0.0;
     if(EnableSharpeFilter)
     {
         int trades = g_stateWins[state] + g_stateLosses[state];
         if(trades >= MinTradesForSharpe)
         {
-            double sharpe = CalculateSharpeRatio(state);
+            sharpe = CalculateSharpeRatio(state);
             goodSharpe = (sharpe >= MinSharpeToUnblock);
         }
         else
@@ -936,8 +968,23 @@ bool ShouldUnblockState(int state)
         }
     }
     
+    // 🔍 DEBUG: Log detalhado de avaliação de desbloqueio
+    bool shouldUnblock = (goodWinRate && goodSharpe);
+    Print("🔓 UNBLOCK DEBUG: State=", state, 
+          " | Visits=", visits,
+          " | Wins=", wins,
+          " | Losses=", losses,
+          " | WinRate=", DoubleToString(winRate*100, 1), "%",
+          " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
+          " | Sharpe=", DoubleToString(sharpe, 2),
+          " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
+          " | EnableSharpe=", EnableSharpeFilter,
+          " | GoodWR?=", goodWinRate,
+          " | GoodSharpe?=", goodSharpe,
+          " → SHOULD UNBLOCK=", shouldUnblock);
+    
     // Desbloquear apenas se AMBOS win rate E Sharpe forem bons
-    return (goodWinRate && goodSharpe);
+    return shouldUnblock;
 }
 
 // ✅✅✅ 5️⃣ FUNÇÃO PRINCIPAL DE VERIFICAÇÃO DE BLOQUEIO (SOMENTE LEITURA)
