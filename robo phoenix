@@ -4157,6 +4157,30 @@ void ExecuteAction(int action, int state)
       {
          Print("📈 SETUP NEUTRO");
       }
+      
+      // 📊 LOT DECISION SUMMARY: Mostra a decisão final de lote
+      string lotDecision = "";
+      double lotMultiplier = desiredLot / LotSize;
+      if(quality >= UltraQualityThreshold)
+         lotDecision = "💎 ULTRA";
+      else if(quality >= HighQualityThreshold)
+         lotDecision = "🚀 FORCE";
+      else if(quality > 0.1)
+         lotDecision = "📈 POSITIVE";
+      else if(quality < -0.3)
+         lotDecision = "⚠️ NEGATIVE";
+      else
+         lotDecision = "📊 NORMAL";
+      
+      Print("📊 LOT DECISION SUMMARY: ",
+            lotDecision, " → ",
+            "BaseLot=", DoubleToString(LotSize, 2),
+            " × ", DoubleToString(lotMultiplier, 2),
+            " = FinalLot=", DoubleToString(desiredLot, 2),
+            " | Quality=", DoubleToString(quality, 3),
+            " | HighTH=", DoubleToString(HighQualityThreshold, 2),
+            " | UltraTH=", DoubleToString(UltraQualityThreshold, 2),
+            " | MULTIPLIER APPLIED: ", (lotMultiplier > 1.0 ? "YES ✅" : "NO ❌"));
    }
    else if(sameDirCount > 0)
    {
