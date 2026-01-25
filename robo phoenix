@@ -4121,9 +4121,14 @@ void ExecuteAction(int action, int state)
    int sameDirCount = CountSameDirectionPositions(isBuy);
    double desiredLot = LotSize;
    
-   if(sameDirCount == 0 && EnableSmartLot)
+   // ✅ CORREÇÃO: Calcular Smart Lot SEMPRE (não só para primeira entrada)
+   double smartLotMultiplier = 1.0;  // Multiplicador padrão
+   double quality = 0.0;
+   string lotDecision = "📊 NORMAL";
+   
+   if(EnableSmartLot)
    {
-      double quality = GetStateQuality(state);
+      quality = GetStateQuality(state);
       
       // 🔍 DEBUG SMART LOT: Log detalhado para diagnóstico
       int visits = (state >= 0 && state < ArraySize(g_stateVisits)) ? g_stateVisits[state] : 0;
@@ -4144,25 +4149,30 @@ void ExecuteAction(int action, int state)
             " | HighTH=", DoubleToString(HighQualityThreshold, 2),
             " | UltraTH=", DoubleToString(UltraQualityThreshold, 2));
       
+      // Determinar multiplicador baseado na qualidade
       if(quality >= UltraQualityThreshold)
       {
-         desiredLot = LotSize * UltraLotMultiplier;
-         Print("💎💎💎 SETUP ULTRA DETECTADO!");
+         smartLotMultiplier = UltraLotMultiplier;
+         lotDecision = "💎 ULTRA";
+         Print("💎💎💎 SETUP ULTRA DETECTADO! Multiplicador: ", smartLotMultiplier, "x");
          g_statusMessage = "💎 ULTRA SETUP - Aposta Máxima!";
       }
       else if(quality >= HighQualityThreshold)
       {
-         desiredLot = LotSize * SmartLotMultiplier;
-         Print("🚀🚀 SETUP FORTE DETECTADO!");
+         smartLotMultiplier = SmartLotMultiplier;
+         lotDecision = "🚀 FORCE";
+         Print("🚀🚀 SETUP FORTE DETECTADO! Multiplicador: ", smartLotMultiplier, "x");
          g_statusMessage = "🚀 SETUP FORTE - Aposta Elevada!";
       }
       else if(quality > 0.1)
       {
+         lotDecision = "📈 POSITIVE";
          Print("📊 SETUP NORMAL POSITIVO");
          g_statusMessage = "📊 Setup Normal - Qualidade Positiva";
       }
       else if(quality < -0.3)
       {
+         lotDecision = "⚠️ NEGATIVE";
          Print("⚠️⚠️ SETUP NEGATIVO DETECTADO - Considerando cancelar trade");
          if(quality < -0.5)
          {
@@ -4176,36 +4186,40 @@ void ExecuteAction(int action, int state)
       {
          Print("📈 SETUP NEUTRO");
       }
-      
-      // 📊 LOT DECISION SUMMARY: Mostra a decisão final de lote
-      string lotDecision = "";
-      double lotMultiplier = desiredLot / LotSize;
-      if(quality >= UltraQualityThreshold)
-         lotDecision = "💎 ULTRA";
-      else if(quality >= HighQualityThreshold)
-         lotDecision = "🚀 FORCE";
-      else if(quality > 0.1)
-         lotDecision = "📈 POSITIVE";
-      else if(quality < -0.3)
-         lotDecision = "⚠️ NEGATIVE";
-      else
-         lotDecision = "📊 NORMAL";
-      
-      Print("📊 LOT DECISION SUMMARY: ",
-            lotDecision, " → ",
-            "BaseLot=", DoubleToString(LotSize, 2),
-            " × ", DoubleToString(lotMultiplier, 2),
-            " = FinalLot=", DoubleToString(desiredLot, 2),
-            " | Quality=", DoubleToString(quality, 3),
-            " | HighTH=", DoubleToString(HighQualityThreshold, 2),
-            " | UltraTH=", DoubleToString(UltraQualityThreshold, 2),
-            " | MULTIPLIER APPLIED: ", (lotMultiplier > 1.0 ? "YES ✅" : "NO ❌"));
    }
-   else if(sameDirCount > 0)
+   
+   // ✅ CORREÇÃO: Aplicar Smart Lot tanto para primeira entrada quanto para piramidação
+   if(sameDirCount == 0)
    {
-      desiredLot = CalculatePyramidLot(isBuy);
-      Print("🏗️ Entrada de piramidação #", sameDirCount + 1, " - Lote: ", desiredLot);
+      // Primeira entrada: usar lote base × Smart Lot
+      desiredLot = LotSize * smartLotMultiplier;
+      Print("💰 PRIMEIRA ENTRADA: LotSize=", DoubleToString(LotSize, 2), 
+            " × SmartMult=", DoubleToString(smartLotMultiplier, 2),
+            " = ", DoubleToString(desiredLot, 2));
    }
+   else
+   {
+      // ✅ PIRAMIDAÇÃO: Calcular lote base de piramidação E aplicar Smart Lot
+      double pyramidBaseLot = CalculatePyramidLot(isBuy);
+      desiredLot = pyramidBaseLot * smartLotMultiplier;
+      
+      Print("🏗️ PIRAMIDAÇÃO #", sameDirCount + 1, 
+            ": PyramidBase=", DoubleToString(pyramidBaseLot, 2),
+            " × SmartMult=", DoubleToString(smartLotMultiplier, 2),
+            " = ", DoubleToString(desiredLot, 2));
+   }
+   
+   // 📊 LOT DECISION SUMMARY: Mostra a decisão final de lote
+   Print("📊 LOT DECISION SUMMARY: ",
+         lotDecision, " → ",
+         "BaseLot=", DoubleToString(LotSize, 2),
+         " × ", DoubleToString(smartLotMultiplier, 2),
+         " = FinalLot=", DoubleToString(desiredLot, 2),
+         " | Quality=", DoubleToString(quality, 3),
+         " | HighTH=", DoubleToString(HighQualityThreshold, 2),
+         " | UltraTH=", DoubleToString(UltraQualityThreshold, 2),
+         " | PyramidLevel=", sameDirCount,
+         " | MULTIPLIER APPLIED: ", (smartLotMultiplier > 1.0 ? "YES ✅" : "NO ❌"));
    
    if(desiredLot > MaxAllowedLot) 
    {
@@ -5408,21 +5422,32 @@ double CalculatePyramidLot(bool isBuy)
    
    if(ReduceLotOnPyramiding)
    {
+      // ✅ VALIDAÇÃO: Se PyramidingLotMultiplier < 1.0, avisar que piramidação REDUZ capital
+      if(PyramidingLotMultiplier < 1.0)
+      {
+         Print("⚠️ AVISO: PyramidingLotMultiplier = ", DoubleToString(PyramidingLotMultiplier, 2),
+               " (< 1.0) - Piramidação REDUZIRÁ o capital investido!");
+         Print("⚠️ Configure PyramidingLotMultiplier ≥ 1.0 se quiser AUMENTAR capital em piramidação");
+      }
+      
       double multiplier = MathPow(PyramidingLotMultiplier, sameDirCount);
       double pyramidLot = baseLot * multiplier;
       
       double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
       if(pyramidLot < minLot) pyramidLot = minLot;
       
-      Print("💰 PIRAMIDAÇÃO: Lote calculado: ", DoubleToString(baseLot, 2), " * ", DoubleToString(multiplier, 2), " = ", DoubleToString(pyramidLot, 2),
-            " (entrada #", sameDirCount + 1, ")");
+      Print("💰 PIRAMIDAÇÃO: Lote calculado: ", DoubleToString(baseLot, 2), 
+            " * ", DoubleToString(multiplier, 2), 
+            " = ", DoubleToString(pyramidLot, 2),
+            " (entrada #", sameDirCount + 1, ")",
+            multiplier < 1.0 ? " ⚠️ REDUZIDO" : multiplier > 1.0 ? " ✅ AUMENTADO" : " ➡️ IGUAL");
       
       return pyramidLot;
    }
    else
    {
       Print("💰 PIRAMIDAÇÃO: Lote fixo: ", DoubleToString(baseLot, 2),
-            " (entrada #", sameDirCount + 1, ")");
+            " (entrada #", sameDirCount + 1, ") - Capital constante");
       
       return baseLot;
    }
