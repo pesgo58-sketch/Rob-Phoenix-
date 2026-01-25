@@ -233,9 +233,12 @@ input bool   EnableMemoryExport       = true;         // Habilitar exportação
 input int    AutoExportMinutes        = 30;           // Intervalo auto-export (min)
 input bool   ExportOnDeinit           = true;         // Exportar ao finalizar
 input bool   CreateBackupFiles        = true;         // Criar backups
-input int    MaxBackupFiles           = 1;            // Máximo de backups (SIMPLIFICADO: apenas 1 backup)
+input int    MaxBackupFiles           = 3;            // Máximo de backups (PROTEÇÃO: mantém 3 cópias)
 input bool   ExportMemoryToTextFile   = true;         // Exportar para texto
 input int    TextExportIntervalMinutes = 60;          // Intervalo export texto (min)
+input bool   SaveAfterEachTrade       = true;         // ✅ NOVO: Salvar após cada trade (ANTI-PERDA)
+input bool   EnablePeriodicAutoSave   = true;         // ✅ NOVO: Salvamento periódico automático
+input int    PeriodicSaveMinutes      = 15;           // ✅ NOVO: Salvar a cada X minutos
 
 input group "──── 📄 EXPORTAÇÃO TEXTO ────";
 input bool   EnableTextExport         = false;        // Habilitar export texto (apenas binário recomendado)
@@ -448,6 +451,8 @@ datetime g_lastExportTime = 0;
 int g_exportCount = 0;
 datetime g_lastTextExportTime = 0;
 int g_textExportCount = 0;
+datetime g_lastPeriodicSaveTime = 0;  // ✅ NOVO: Controle de salvamento periódico
+int g_periodicSaveCount = 0;          // ✅ NOVO: Contador de saves periódicos
 
 // ──────────────────────────────────────────────────────────────────────
 // 🐛 10. DEBUG E DIAGNÓSTICO
@@ -1817,20 +1822,34 @@ void ManageBackupFiles()
 {
    if(!CreateBackupFiles || !g_memoryInitialized) return;
    
-   string backupFile = GetBackupFileName(0);
+   // ✅ SISTEMA DE MÚLTIPLOS BACKUPS ROTATIVOS
+   // Mantém as últimas N cópias de segurança (padrão: 3)
+   int maxBackups = MathMax(1, MathMin(MaxBackupFiles, 10)); // Limita entre 1 e 10
    
-   // Sistema simplificado: apenas 1 backup
-   // Remove o backup antigo ANTES de criar novo
-   if(FileIsExist(backupFile, FILE_COMMON))
+   // Rotacionar backups: backup_2 -> backup_3, backup_1 -> backup_2, etc.
+   for(int i = maxBackups - 1; i >= 1; i--)
    {
-      FileDelete(backupFile, FILE_COMMON);
-      Print("🗑️ Backup antigo removido: ", backupFile);
+      string oldBackup = GetBackupFileName(i - 1);
+      string newBackup = GetBackupFileName(i);
+      
+      if(FileIsExist(oldBackup, FILE_COMMON))
+      {
+         // Remove backup mais antigo se existir
+         if(FileIsExist(newBackup, FILE_COMMON))
+         {
+            FileDelete(newBackup, FILE_COMMON);
+         }
+         
+         // Move o backup para a posição seguinte
+         FileCopy(oldBackup, 0, newBackup, 0);
+      }
    }
    
-   // Agora cria o novo backup
+   // Criar novo backup na posição 0 (mais recente)
+   string backupFile = GetBackupFileName(0);
    if(SaveBrainToFile(backupFile))
    {
-      Print("✅ Backup criado: ", backupFile);
+      Print("💾 Backup #0 criado: ", backupFile, " (mantendo últimas ", maxBackups, " cópias)");
    }
    else
    {
@@ -5673,10 +5692,15 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    }
    
    // Forçar save a cada trade crítico
-   if(g_lastTradeAction == 1 || g_lastTradeAction == 2)
+   // ✅ ANTI-PERDA: Salvar após cada trade (se habilitado)
+   if(SaveAfterEachTrade && (g_lastTradeAction == 1 || g_lastTradeAction == 2))
    {
       SaveState();
-      SaveBrain();
+      g_memoryDirty = true;  // Força salvamento
+      if(SaveBrain())
+      {
+         Print("💾 AUTO-SAVE: Memória salva após trade #", g_totalTrades);
+      }
    }
    
    Print("=== FIM ONTRADETRANSACTION ===");
@@ -5887,6 +5911,29 @@ void OnTick()
 
    // ✅ ATUALIZAÇÃO MAE/MFE: Rastrear eficiência dos trades em tempo real
    UpdatePositionMetrics();
+
+   // ✅ ANTI-PERDA: Salvamento periódico automático (a cada X minutos)
+   if(EnablePeriodicAutoSave && PeriodicSaveMinutes > 0)
+   {
+      datetime currentTime = TimeCurrent();
+      if(g_lastPeriodicSaveTime == 0)
+      {
+         g_lastPeriodicSaveTime = currentTime;
+      }
+      
+      int minutesSinceLastSave = (int)((currentTime - g_lastPeriodicSaveTime) / 60);
+      if(minutesSinceLastSave >= PeriodicSaveMinutes)
+      {
+         g_memoryDirty = true;  // Força salvamento
+         if(SaveBrain())
+         {
+            g_periodicSaveCount++;
+            g_lastPeriodicSaveTime = currentTime;
+            Print("💾 AUTO-SAVE PERIÓDICO #", g_periodicSaveCount, 
+                  ": Memória salva automaticamente (", PeriodicSaveMinutes, " minutos)");
+         }
+      }
+   }
 
    // ✅ MONITORAMENTO DE PERFORMANCE A CADA 100 TICKS
    static int tickCounter = 0;
@@ -6589,6 +6636,20 @@ int OnInit()
    Print("   • OverhaulBlockingSystem() - Revisão completa do bloqueio");
    Print("   • IntelligentPartialReset() - Reset parcial inteligente");
    Print("   • OptimizeParametersDynamically() - Otimização dinâmica");
+   Print("===============================================================");
+   Print("💾 CONFIGURAÇÃO DE BACKUP (ANTI-PERDA DE DADOS):");
+   Print("   • Salvamento após cada trade: ", (SaveAfterEachTrade ? "ATIVO ✅" : "DESATIVADO ❌"));
+   Print("   • Salvamento periódico: ", (EnablePeriodicAutoSave ? ("ATIVO ✅ (a cada " + IntegerToString(PeriodicSaveMinutes) + " minutos)") : "DESATIVADO ❌"));
+   Print("   • Backups múltiplos: ", (CreateBackupFiles ? ("ATIVO ✅ (mantém " + IntegerToString(MaxBackupFiles) + " cópias)") : "DESATIVADO ❌"));
+   Print("   • Exportar ao finalizar: ", (ExportOnDeinit ? "ATIVO ✅" : "DESATIVADO ❌"));
+   if(SaveAfterEachTrade || EnablePeriodicAutoSave)
+   {
+      Print("   🛡️ PROTEÇÃO MÁXIMA CONTRA PERDA DE DADOS ATIVADA!");
+   }
+   else
+   {
+      Print("   ⚠️ AVISO: Salvamento automático desativado - dados podem ser perdidos!");
+   }
    Print("===============================================================");
    
    // ✅ Funções de correção inicial removidas (não mais necessárias)
