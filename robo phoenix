@@ -430,7 +430,7 @@ int     g_trailingCount = 0;
 // ──────────────────────────────────────────────────────────────────────
 // 🖥️ 8. HUD (INTERFACE VISUAL)
 // ──────────────────────────────────────────────────────────────────────
-string hudObjects[15];
+string hudObjects[20];  // Increased to accommodate all HUD objects + buffer for future additions
 int hudObjectCount = 0;
 datetime hudLastUpdate = 0;
 string g_statusMessage = "Inicializando...";
