@@ -455,6 +455,19 @@ datetime g_lastPeriodicSaveTime = 0;  // ✅ NOVO: Controle de salvamento perió
 int g_periodicSaveCount = 0;          // ✅ NOVO: Contador de saves periódicos
 
 // ──────────────────────────────────────────────────────────────────────
+// 📅 RELATÓRIO MENSAL/ANUAL DE LUCROS
+// ──────────────────────────────────────────────────────────────────────
+struct MonthlyStats {
+   double totalProfit;
+   double totalLoss;
+   int tradeCount;
+};
+
+MonthlyStats g_monthlyStats[20][12];  // [ano_index][mês_index] - últimos 20 anos
+int g_firstYearTracked = 0;            // Primeiro ano que começou o tracking
+bool g_monthlyStatsInitialized = false;
+
+// ──────────────────────────────────────────────────────────────────────
 // 🐛 10. DEBUG E DIAGNÓSTICO
 // ──────────────────────────────────────────────────────────────────────
 int g_debugState = -1;
@@ -5632,6 +5645,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    g_totalTrades++;
    g_sumProfit += net_profit;
    
+   // ✅ NOVO: Atualizar estatísticas mensais
+   UpdateMonthlyStats(net_profit);
+   
    // ⚠️ DIAGNÓSTICO DETALHADO
    Print("DIAGNÓSTICO DETALHADO:");
    Print("net_profit: ", DoubleToString(net_profit, 2));
@@ -5755,6 +5771,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       if(SaveBrain())
       {
          Print("💾 AUTO-SAVE: Memória salva após trade #", g_totalTrades);
+         
+         // ✅ NOVO: Exportar relatório mensal após cada trade
+         ExportMonthlyReport();
       }
    }
    
@@ -5863,6 +5882,188 @@ void ForceTextExport()
    {
       Print("❌ Falha na exportação forçada para texto");
    }
+}
+
+// ======================================================================
+// ✅✅✅ FUNÇÕES: RELATÓRIO MENSAL/ANUAL DE LUCROS
+// ======================================================================
+
+// Inicializa sistema de tracking mensal
+void InitializeMonthlyStats()
+{
+   if(g_monthlyStatsInitialized) return;
+   
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   g_firstYearTracked = dt.year;
+   
+   // Inicializa todos os meses de todos os anos
+   for(int y = 0; y < 20; y++)
+   {
+      for(int m = 0; m < 12; m++)
+      {
+         g_monthlyStats[y][m].totalProfit = 0.0;
+         g_monthlyStats[y][m].totalLoss = 0.0;
+         g_monthlyStats[y][m].tradeCount = 0;
+      }
+   }
+   
+   g_monthlyStatsInitialized = true;
+   Print("📅 Sistema de relatório mensal/anual inicializado | Ano base: ", g_firstYearTracked);
+}
+
+// Atualiza estatísticas mensais com novo trade
+void UpdateMonthlyStats(double net_profit)
+{
+   if(!g_monthlyStatsInitialized) InitializeMonthlyStats();
+   
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   
+   int yearIndex = dt.year - g_firstYearTracked;
+   if(yearIndex < 0 || yearIndex >= 20) return;  // Fora do range de 20 anos
+   
+   int monthIndex = dt.mon - 1;  // meses 1-12 → índices 0-11
+   if(monthIndex < 0 || monthIndex >= 12) return;
+   
+   g_monthlyStats[yearIndex][monthIndex].tradeCount++;
+   
+   if(net_profit > 0)
+   {
+      g_monthlyStats[yearIndex][monthIndex].totalProfit += net_profit;
+   }
+   else if(net_profit < 0)
+   {
+      g_monthlyStats[yearIndex][monthIndex].totalLoss += MathAbs(net_profit);
+   }
+}
+
+// Exporta relatório mensal/anual
+bool ExportMonthlyReport()
+{
+   if(!g_monthlyStatsInitialized) return false;
+   
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_Monthly_Report_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
+   
+   if(!CreateDirectoryForFile(filename))
+   {
+      Print("❌ Erro ao criar diretório para relatório mensal");
+      return false;
+   }
+   
+   int file = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(file == INVALID_HANDLE)
+   {
+      Print("❌ Erro ao criar relatório mensal: ", GetLastError());
+      return false;
+   }
+   
+   FileWrite(file, "═══════════════════════════════════════════════════════════════");
+   FileWrite(file, "   PHOENIX TRADER - RELATÓRIO MENSAL/ANUAL DE LUCROS");
+   FileWrite(file, "═══════════════════════════════════════════════════════════════");
+   FileWrite(file, "");
+   FileWrite(file, "Símbolo: " + _Symbol + " | Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
+   FileWrite(file, "Data do Relatório: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+   FileWrite(file, "");
+   
+   string monthNames[12] = {"JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO",
+                             "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"};
+   
+   // Para cada ano que tem dados
+   for(int y = 0; y < 20; y++)
+   {
+      int currentYear = g_firstYearTracked + y;
+      bool yearHasData = false;
+      
+      // Verifica se o ano tem algum dado
+      for(int m = 0; m < 12; m++)
+      {
+         if(g_monthlyStats[y][m].tradeCount > 0)
+         {
+            yearHasData = true;
+            break;
+         }
+      }
+      
+      if(!yearHasData) continue;  // Pula ano sem dados
+      
+      FileWrite(file, "═══════════════════════════════════════════════════════════════");
+      FileWrite(file, "   ANO: " + IntegerToString(currentYear));
+      FileWrite(file, "═══════════════════════════════════════════════════════════════");
+      FileWrite(file, "");
+      
+      double yearTotalProfit = 0.0;
+      double yearTotalLoss = 0.0;
+      int yearTotalTrades = 0;
+      
+      // Para cada mês
+      for(int m = 0; m < 12; m++)
+      {
+         if(g_monthlyStats[y][m].tradeCount == 0) continue;  // Pula mês sem dados
+         
+         double profit = g_monthlyStats[y][m].totalProfit;
+         double loss = g_monthlyStats[y][m].totalLoss;
+         double balance = profit - loss;
+         int trades = g_monthlyStats[y][m].tradeCount;
+         
+         yearTotalProfit += profit;
+         yearTotalLoss += loss;
+         yearTotalTrades += trades;
+         
+         FileWrite(file, "────────────────────────────────────────────────────────────────");
+         FileWrite(file, monthNames[m]);
+         FileWrite(file, "  Lucro:  +" + DoubleToString(profit, 2));
+         FileWrite(file, "  Perda:  -" + DoubleToString(loss, 2));
+         
+         if(balance >= 0)
+         {
+            FileWrite(file, "  Saldo:  +" + DoubleToString(balance, 2) + " ✅");
+         }
+         else
+         {
+            FileWrite(file, "  Saldo:  " + DoubleToString(balance, 2) + " ❌");
+         }
+         
+         FileWrite(file, "  Trades: " + IntegerToString(trades));
+      }
+      
+      // Resumo anual
+      if(yearTotalTrades > 0)
+      {
+         double yearBalance = yearTotalProfit - yearTotalLoss;
+         FileWrite(file, "");
+         FileWrite(file, "════════════════════════════════════════════════════════════════");
+         FileWrite(file, "   RESUMO DO ANO " + IntegerToString(currentYear));
+         FileWrite(file, "────────────────────────────────────────────────────────────────");
+         FileWrite(file, "  Total Lucro:  +" + DoubleToString(yearTotalProfit, 2));
+         FileWrite(file, "  Total Perda:  -" + DoubleToString(yearTotalLoss, 2));
+         
+         if(yearBalance >= 0)
+         {
+            FileWrite(file, "  Saldo Anual:  +" + DoubleToString(yearBalance, 2) + " ✅");
+         }
+         else
+         {
+            FileWrite(file, "  Saldo Anual:  " + DoubleToString(yearBalance, 2) + " ❌");
+         }
+         
+         FileWrite(file, "  Total Trades: " + IntegerToString(yearTotalTrades));
+         FileWrite(file, "════════════════════════════════════════════════════════════════");
+         FileWrite(file, "");
+         FileWrite(file, "");
+      }
+   }
+   
+   FileWrite(file, "");
+   FileWrite(file, "═══════════════════════════════════════════════════════════════");
+   FileWrite(file, "   FIM DO RELATÓRIO");
+   FileWrite(file, "═══════════════════════════════════════════════════════════════");
+   
+   FileClose(file);
+   
+   Print("📅 Relatório mensal/anual exportado com sucesso: ", filename);
+   return true;
 }
 
 // ======================================================================
@@ -6716,6 +6917,9 @@ int OnInit()
       Print("🖥️ HUD inicializado com ", hudObjectCount, " objetos");
    }
    
+   // ✅ NOVO: Inicializa sistema de relatório mensal/anual
+   InitializeMonthlyStats();
+   
    g_statusMessage = "Pronto para operar (Sistema Super Corrigido v309)";
    
    return INIT_SUCCEEDED;
@@ -6773,6 +6977,9 @@ void OnDeinit(const int reason)
    {
       Print("✅ Memória salva com sucesso via SaveBrain()");
    }
+   
+   // ✅ NOVO: Exportar relatório mensal/anual final
+   ExportMonthlyReport();
    
    Print("💾 Processo de salvamento concluído");
    
