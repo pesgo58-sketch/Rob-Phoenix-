@@ -4346,7 +4346,8 @@ void ExecuteAction(int action, int state)
    int pyramidLevel = sameDirCount + 1;
    string commentType = "NORMAL";
    
-   double quality = GetStateQuality(state);
+   // quality já foi declarada anteriormente na linha 4169
+   quality = GetStateQuality(state);
    
    if(sameDirCount == 0 && EnableSmartLot)
    {
