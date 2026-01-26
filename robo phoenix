@@ -5944,21 +5944,19 @@ bool ExportMonthlyReport()
 {
    if(!g_monthlyStatsInitialized) return false;
    
-   string filename = "Phoenix_Files/Text_Logs/Phoenix_Monthly_Report_" + _Symbol + "_" + 
+   // Usar caminho simples sem subdiretorios para FILE_COMMON
+   string filename = "Phoenix_Monthly_Report_" + _Symbol + "_" + 
                      EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
-   
-   if(!CreateDirectoryForFile(filename))
-   {
-      Print("❌ Erro ao criar diretório para relatório mensal");
-      return false;
-   }
    
    int file = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(file == INVALID_HANDLE)
    {
       Print("❌ Erro ao criar relatório mensal: ", GetLastError());
+      Print("💡 Caminho do arquivo: ", filename);
       return false;
    }
+   
+   Print("✅ Relatório mensal criado: ", filename);
    
    FileWrite(file, "═══════════════════════════════════════════════════════════════");
    FileWrite(file, "   PHOENIX TRADER - RELATÓRIO MENSAL/ANUAL DE LUCROS");
