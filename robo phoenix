@@ -3258,6 +3258,22 @@ void CreateHUDObjects()
       currentY += lineHeight;
    }
    
+   // ✅ RELÓGIO DE VELA
+   if(ObjectCreate(0, "HUD_CandleTimer", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_COLOR, clrAqua);
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_CandleTimer", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_CandleTimer", OBJPROP_TEXT, "Tempo de vela: 00:00");
+      hudObjects[hudObjectCount++] = "HUD_CandleTimer";
+      currentY += lineHeight;
+   }
+   
    if(ObjectCreate(0, "HUD_WinRate", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_WinRate", OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -3490,6 +3506,20 @@ void UpdateHUDLight()
    // Atualizar total de trades
    string totalTradesText = StringFormat("Total de Trades: %d", g_totalTrades);
    ObjectSetString(0, "HUD_TotalTrades", OBJPROP_TEXT, totalTradesText);
+   
+   // ✅ ATUALIZAR RELÓGIO DE VELA
+   datetime candleOpenTime = iTime(_Symbol, _Period, 0);
+   int periodSeconds = PeriodSeconds(_Period);
+   datetime candleCloseTime = candleOpenTime + periodSeconds;
+   int remainingSeconds = (int)(candleCloseTime - TimeCurrent());
+   
+   if(remainingSeconds < 0) remainingSeconds = 0;
+   
+   int minutes = remainingSeconds / 60;
+   int seconds = remainingSeconds % 60;
+   
+   string candleTimerText = StringFormat("Tempo de vela: %02d:%02d", minutes, seconds);
+   ObjectSetString(0, "HUD_CandleTimer", OBJPROP_TEXT, candleTimerText);
    
    // Atualizar win rate com cor dinâmica
    double winRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0) * 100;
