@@ -4642,13 +4642,12 @@ int GetCurrentState()
    double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
+   // ✅ FIX BUG #4: Verificar se point é zero antes de usar como divisor
+   if(point <= 0) point = 0.00001; // Fallback seguro
+   
    // ✅ Cálculo da distância da MA
    double maDistance = 0;
    double atrValue = atr[0];
-   
-   // ✅ FIX BUG #4: Verificar se point é zero antes de usar como divisor
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   if(point <= 0) point = 0.00001; // Fallback seguro
    
    if(atrValue > 0)
       maDistance = SafeDivide(price - ma[0], atrValue, 0.0);
