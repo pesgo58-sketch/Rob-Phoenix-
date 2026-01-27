@@ -3872,28 +3872,36 @@ void UpdateQ(int state, int action, double reward)
    
    int idx = state * NUM_ACTIONS + action;
    
+   // ✅ FIX BUG #2: Q-learning correto com componente futuro
    double alpha = LearningRate;
+   double gamma = 0.95; // Fator de desconto
    double old = g_Q[idx];
-   double newq = old + alpha * (reward - old);
+   
+   // Encontrar melhor Q do próximo estado (se houver)
+   double maxNextQ = 0.0;
+   if(action != 0) // Se não for NOP, há próximo estado
+   {
+      int nextState = GetCurrentState();
+      if(nextState >= 0 && nextState < NUM_STATES)
+      {
+         for(int a = 0; a < NUM_ACTIONS; a++)
+         {
+            int nextIdx = nextState * NUM_ACTIONS + a;
+            if(nextIdx < ArraySize(g_Q) && g_Q[nextIdx] > maxNextQ)
+               maxNextQ = g_Q[nextIdx];
+         }
+      }
+   }
+   
+   // Q-learning completo: Q(s,a) = Q(s,a) + α[r + γ*max(Q(s',a')) - Q(s,a)]
+   double newq = old + alpha * (reward + gamma * maxNextQ - old);
    
    g_Q[idx] = CompressQValue(newq);
    
    g_stateLastUpdate[state] = g_totalTrades;
    
-   // ✅ ATUALIZAR CONTADORES DE VISITAS APENAS PARA TRADES REAIS
-   if(action == 1 || action == 2) // BUY ou SELL
-   {
-      g_stateVisits[state]++;
-      
-      if(reward > 0)
-      {
-         g_stateWins[state]++;
-      }
-      else
-      {
-         g_stateLosses[state]++;
-      }
-   }
+   // ✅ FIX BUG #1: REMOVIDO - Contadores agora só incrementam em OnTradeTransaction
+   // Evita dupla contagem (aqui + OnTradeTransaction)
    
    // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
    if(EnableUnifiedBlockingSystem && g_stateVisits[state] >= MinVisitsForBlockDecision)
@@ -4060,7 +4068,11 @@ int ChooseAction(int state)
       }
    }
    
-   double nopQ = g_Q[state * NUM_ACTIONS + 0];
+   // ✅ FIX BUG #3: Verificação de bounds antes de acessar Q-table
+   int nopIdx = state * NUM_ACTIONS + 0;
+   double nopQ = 0;
+   if(nopIdx >= 0 && nopIdx < ArraySize(g_Q))
+      nopQ = g_Q[nopIdx];
    
    // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
    double winRate = CalculateWinRate(state);
@@ -4349,6 +4361,10 @@ void ExecuteAction(int action, int state)
    // quality já foi declarada anteriormente na linha 4169
    quality = GetStateQuality(state);
    
+   // ✅ FIX BUG #12: Validar quality após GetStateQuality
+   if(quality != quality) quality = 0.0; // NaN check
+   if(quality < -10.0 || quality > 10.0) quality = 0.0; // Valor absurdo
+   
    if(sameDirCount == 0 && EnableSmartLot)
    {
       if(quality >= UltraQualityThreshold) commentType = "ULTRA";
@@ -4629,6 +4645,11 @@ int GetCurrentState()
    // ✅ Cálculo da distância da MA
    double maDistance = 0;
    double atrValue = atr[0];
+   
+   // ✅ FIX BUG #4: Verificar se point é zero antes de usar como divisor
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(point <= 0) point = 0.00001; // Fallback seguro
+   
    if(atrValue > 0)
       maDistance = SafeDivide(price - ma[0], atrValue, 0.0);
    else
@@ -4986,6 +5007,27 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
    
    if(UseFixedSL && slPrice > 0)
    {
+      // ✅ FIX BUG #6: Verificar relação preço PRIMEIRO, depois distância
+      if(isBuy)
+      {
+         if(slPrice >= entryPrice)
+         {
+            Print("❌ ERRO: SL de BUY deve estar abaixo do preço de entrada!");
+            Print("SL: ", DoubleToString(slPrice, 5), " >= Entry: ", DoubleToString(entryPrice, 5));
+            return false;
+         }
+      }
+      else // SELL
+      {
+         if(slPrice <= entryPrice)
+         {
+            Print("❌ ERRO: SL de SELL deve estar acima do preço de entrada!");
+            Print("SL: ", DoubleToString(slPrice, 5), " <= Entry: ", DoubleToString(entryPrice, 5));
+            return false;
+         }
+      }
+      
+      // Agora valida distância
       double slDistance = MathAbs(entryPrice - slPrice);
       double slPoints = SafeDivide(slDistance, point, 0.0);
       
@@ -5002,28 +5044,32 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
          return false;
       }
       
-      if(isBuy)
-      {
-         if(slPrice >= entryPrice)
-         {
-            Print("❌ ERRO: SL inválido para BUY! SL (", DoubleToString(slPrice, 5), ") >= Entry (", DoubleToString(entryPrice, 5), ")");
-            return false;
-         }
-      }
-      else
-      {
-         if(slPrice <= entryPrice)
-         {
-            Print("❌ ERRO: SL inválido para SELL! SL (", DoubleToString(slPrice, 5), ") <= Entry (", DoubleToString(entryPrice, 5), ")");
-            return false;
-         }
-      }
-      
       Print("✅ SL válido: ", DoubleToString(slPoints, 0), " pontos");
    }
    
    if(UseFixedTP && tpPrice > 0)
    {
+      // ✅ FIX BUG #6: Verificar relação preço PRIMEIRO, depois distância
+      if(isBuy)
+      {
+         if(tpPrice <= entryPrice)
+         {
+            Print("❌ ERRO: TP de BUY deve estar acima do preço de entrada!");
+            Print("TP: ", DoubleToString(tpPrice, 5), " <= Entry: ", DoubleToString(entryPrice, 5));
+            return false;
+         }
+      }
+      else // SELL
+      {
+         if(tpPrice >= entryPrice)
+         {
+            Print("❌ ERRO: TP de SELL deve estar abaixo do preço de entrada!");
+            Print("TP: ", DoubleToString(tpPrice, 5), " >= Entry: ", DoubleToString(entryPrice, 5));
+            return false;
+         }
+      }
+      
+      // Agora valida distância
       double tpDistance = MathAbs(entryPrice - tpPrice);
       double tpPoints = SafeDivide(tpDistance, point, 0.0);
       
@@ -5038,23 +5084,6 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
       {
          Print("❌ ERRO: TP muito pequeno!");
          return false;
-      }
-      
-      if(isBuy)
-      {
-         if(tpPrice <= entryPrice)
-         {
-            Print("❌ ERRO: TP inválido para BUY! TP (", DoubleToString(tpPrice, 5), ") <= Entry (", DoubleToString(entryPrice, 5), ")");
-            return false;
-         }
-      }
-      else
-      {
-         if(tpPrice >= entryPrice)
-         {
-            Print("❌ ERRO: TP inválido para SELL! TP (", DoubleToString(tpPrice, 5), ") >= Entry (", DoubleToString(entryPrice, 5), ")");
-            return false;
-         }
       }
       
       Print("✅ TP válido: ", DoubleToString(tpPoints, 0), " pontos");
@@ -5467,6 +5496,7 @@ double CalculatePyramidLot(bool isBuy)
    if(ReduceLotOnPyramiding)
    {
       // ✅ VALIDAÇÃO: Se PyramidingLotMultiplier < 1.0, avisar que piramidação REDUZ capital
+      // ✅ FIX BUG #5: Validar multiplicador antes de MathPow
       if(PyramidingLotMultiplier < 1.0)
       {
          Print("⚠️ AVISO: PyramidingLotMultiplier = ", DoubleToString(PyramidingLotMultiplier, 2),
@@ -5474,7 +5504,11 @@ double CalculatePyramidLot(bool isBuy)
          Print("⚠️ Configure PyramidingLotMultiplier ≥ 1.0 se quiser AUMENTAR capital em piramidação");
       }
       
-      double multiplier = MathPow(PyramidingLotMultiplier, sameDirCount);
+      // Garantir que multiplicador seja válido (> 0)
+      double validMultiplier = PyramidingLotMultiplier;
+      if(validMultiplier <= 0) validMultiplier = 1.0; // Fallback seguro
+      
+      double multiplier = MathPow(validMultiplier, sameDirCount);
       double pyramidLot = baseLot * multiplier;
       
       double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
