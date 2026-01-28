@@ -4306,20 +4306,24 @@ void ExecuteAction(int action, int state)
       double slPointsCheck = 0.0;
       double tpPointsCheck = 0.0;
 
-      if(sl_price > 0.0)
+      // ✅ FIX: Protect against division by zero - check if point > 0
+      if(point > 0.0)
       {
-         if(isBuy)
-            slPointsCheck = (price - sl_price) / point;
-         else
-            slPointsCheck = (sl_price - price) / point;
-      }
+         if(sl_price > 0.0)
+         {
+            if(isBuy)
+               slPointsCheck = (price - sl_price) / point;
+            else
+               slPointsCheck = (sl_price - price) / point;
+         }
 
-      if(tp_price > 0.0)
-      {
-         if(isBuy)
-            tpPointsCheck = (tp_price - price) / point;
-         else
-            tpPointsCheck = (price - tp_price) / point;
+         if(tp_price > 0.0)
+         {
+            if(isBuy)
+               tpPointsCheck = (tp_price - price) / point;
+            else
+               tpPointsCheck = (price - tp_price) / point;
+         }
       }
 
       Print("🎯 MINI-LOG SLTP: dir=", (isBuy ? "BUY" : "SELL"),
