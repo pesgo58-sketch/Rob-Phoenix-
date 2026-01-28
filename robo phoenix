@@ -901,8 +901,8 @@ bool ShouldBlockState(int state)
     
     if(visits < MinVisitsForBlockDecision) 
     {
-        // 🔍 DEBUG: Estado sem visitas suficientes
-        Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não bloqueia)");
+        // 🔍 DEBUG: Estado sem visitas suficientes (log reduzido)
+        // Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não bloqueia)");
         return false;
     }
     
@@ -925,21 +925,21 @@ bool ShouldBlockState(int state)
         }
     }
     
-    // 🔍 DEBUG: Log detalhado de avaliação de bloqueio
+    // 🔍 DEBUG: Log detalhado apenas quando bloqueio vai acontecer
     bool shouldBlock = (highLossRate || lowSharpe);
-    Print("🔍 BLOCK DEBUG: State=", state, 
-          " | Visits=", visits,
-          " | Wins=", wins,
-          " | Losses=", losses,
-          " | WinRate=", DoubleToString(winRate*100, 1), "%",
-          " | LossRate=", DoubleToString(lossRate*100, 1), "%",
-          " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
-          " | Sharpe=", DoubleToString(sharpe, 2),
-          " | SharpeTH=", DoubleToString(MaxSharpeToBlock, 2),
-          " | EnableSharpe=", EnableSharpeFilter,
-          " | HighLoss?=", highLossRate,
-          " | LowSharpe?=", lowSharpe,
-          " → SHOULD BLOCK=", shouldBlock);
+    if(shouldBlock)
+    {
+        Print("🚫 BLOQUEANDO Estado ", state, 
+              " | Visits=", visits,
+              " | Wins=", wins,
+              " | Losses=", losses,
+              " | WinRate=", DoubleToString(winRate*100, 1), "%",
+              " | LossRate=", DoubleToString(lossRate*100, 1), "%",
+              " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+              " | Sharpe=", DoubleToString(sharpe, 2),
+              " | HighLoss?=", highLossRate,
+              " | LowSharpe?=", lowSharpe);
+    }
     
     // Bloquear se OU taxa de perda alta OU Sharpe muito baixo
     return shouldBlock;
@@ -1018,11 +1018,8 @@ void EvaluateAndUpdateBlockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return;
     
-    static datetime lastBlockCheck = 0;
-    if(TimeCurrent() - lastBlockCheck < 300)
-        return;
-    
-    lastBlockCheck = TimeCurrent();
+    // ✅ FIX: Removido cooldown timer - avaliar estado IMEDIATAMENTE após cada trade
+    // Isso garante que estados ruins sejam bloqueados assim que atingem os critérios
     
     bool shouldBeBlocked = ShouldBlockState(state);
     bool currentlyBlocked = g_stateBlocked[state];
@@ -1043,9 +1040,11 @@ void EvaluateAndUpdateBlockState(int state)
 // ✅✅✅ 7️⃣ FUNÇÃO PARA AVALIAR TODOS OS ESTADOS ATIVOS (CORRIGIDA)
 void EvaluateAllActiveStates()
 {
+    // ✅ FIX: Reduzido cooldown de 300s para 60s para avaliação mais frequente
+    // Estados ruins serão detectados e bloqueados mais rapidamente
     static datetime lastFullEvaluation = 0;
     
-    if(TimeCurrent() - lastFullEvaluation < 300)
+    if(TimeCurrent() - lastFullEvaluation < 60)
         return;
     
     lastFullEvaluation = TimeCurrent();
@@ -1077,7 +1076,7 @@ void EvaluateAllActiveStates()
     
     if(blocked > 0 || unblocked > 0)
     {
-      Print("📊 Avaliação de estados (c/ cooldown): ", blocked, " bloqueados, ", unblocked, " desbloqueados");
+      Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados, ", unblocked, " desbloqueados");
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
     }
 }
@@ -5716,11 +5715,13 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             g_totalLosses++;
             g_stateLosses[g_lastTradeState]++;
             Print("❌❌❌ PERDA REGISTRADA para estado ", g_lastTradeState);
-            
-            if(EnableUnifiedBlockingSystem && g_stateVisits[g_lastTradeState] >= MinVisitsForBlockDecision)
-            {
-               EvaluateAndUpdateBlockState(g_lastTradeState);
-            }
+         }
+         
+         // ✅ FIX: Avaliar bloqueio após QUALQUER trade (win ou loss), não só após perda
+         // Isso garante que estados sejam bloqueados assim que atingem os critérios
+         if(EnableUnifiedBlockingSystem && g_stateVisits[g_lastTradeState] >= MinVisitsForBlockDecision)
+         {
+            EvaluateAndUpdateBlockState(g_lastTradeState);
          }
          
          Print("PÓS-ATUALIZAÇÃO Estado ", g_lastTradeState, ":");
@@ -6282,6 +6283,13 @@ void OnTick()
    if(UseDynamicTrailingStop)
    {
       ManageAllDynamicStops();
+   }
+
+   // ✅ FIX: Avaliar todos estados ativos periodicamente (a cada 60 segundos)
+   // Garante que estados ruins sejam bloqueados mesmo se perderam o timing no OnTradeTransaction
+   if(EnableUnifiedBlockingSystem)
+   {
+      EvaluateAllActiveStates();
    }
 
    if(current_bar_time != last_bar_time)
