@@ -152,7 +152,7 @@ input double MaxAllowedLot            = 1.0;          // Lote máximo permitido
 input group "──── 📊 PIRAMIDAÇÃO ────";
 input bool   EnablePyramiding         = true;         // Habilitar piramidação
 input int    MaxPyramidPositions      = 4;            // Máximo de posições pirâmide
-input double PyramidingDistanceATR    = 0.4;          // Distância entre posições (ATR)
+input double PyramidingDistanceATR    = 0.2;          // ✅ BUG FIX #13: Reduzido de 0.4 para 0.2 ATR (menos restritivo)
 input bool   ReduceLotOnPyramiding    = false;        // Reduzir lote na piramidação
 input double PyramidingLotMultiplier  = 0.8;          // Multiplicador lote pirâmide
 
@@ -195,7 +195,7 @@ input int    MinPyramidVisitsForBlock = 50;           // Visitas mín. para bloq
 // ──────────────────────────────────────────────────────────────────────
 input group "──── 💾 OTIMIZAÇÃO DE MEMÓRIA ────";
 input bool   EnableMemoryOptimization = true;         // Habilitar otimização memória
-input int    MaxMemoryStates          = 1000;         // Máximo de estados na memória
+input int    MaxMemoryStates          = 1500;         // ✅ BUG FIX #11: Aumentado de 1000 para 1500 (margem segurança para 576 estados)
 input bool   CompressQValues          = true;         // Comprimir Q-values
 input double QValuePrecision          = 2;            // Precisão dos Q-values
 input bool   AutoCleanMemory          = true;         // Limpeza automática
@@ -215,7 +215,7 @@ input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
-input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
+input double BlockLossRateThreshold   = 0.90;         // ✅ BUG FIX #2: Taxa perda aumentada de 0.80 para 0.90 (90% - menos agressivo)
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
 input int    MinVisitsForBlockDecision    = 15;       // ✅ BUG FIX #7: Reduzido de 30 para 15 (aprendizado mais rápido)
 input bool   EnableBlockingDebug      = false;        // Logs detalhados do sistema de bloqueio
@@ -710,9 +710,9 @@ void ApplyStateDecay()
       {
          totalMemoryBefore += g_stateVisits[s];
          
-         // Aplicar decay somente em estados com histórico muito significativo
-         // ✅ CORREÇÃO: Aumentado de >10 para >50 para evitar cap artificial em 10 visitas
-         if(g_stateVisits[s] > 50)
+         // ✅ BUG FIX #12: REDUZIR threshold de decay de 50 para 20
+         // Aplicar decay em estados com pelo menos 20 visitas
+         if(g_stateVisits[s] > 20)
          {
             // ✅ CORREÇÃO: Decay deve REMOVER X%, não MANTER X%
             // Se DecayFactor = 0.05 (5%), deve manter 95% (1.0 - 0.05)
@@ -4701,12 +4701,24 @@ void ExecuteAction(int action, int state)
       return;
    }
    
+   // ✅ BUG FIX #6: Filtro de volume menos restritivo
    if(UseRealVolumeFilter)
    {
       bool volumeOk = CheckRealVolume();
-      if(!volumeOk && g_volumeMultiplier < 0.6)
+      // MUDADO: threshold de 0.6 para 0.3 (mais permissivo)
+      if(!volumeOk && g_volumeMultiplier < 0.3)
       {
-         Print("⚠️ Volume moderado, mantendo lote mínimo");
+         Print("❌ Volume MUITO baixo (", DoubleToString(g_volumeMultiplier*100,1), 
+               "%) - trade cancelado");
+         UpdateQ_NOP(state);
+         return;
+      }
+      else if(!volumeOk)
+      {
+         Print("⚠️ Volume moderado (", DoubleToString(g_volumeMultiplier*100,1), 
+               "%) - reduzindo lote");
+         // Reduz lote mas PERMITE trade
+         desiredLot *= 0.5;
       }
    }
    
@@ -5162,7 +5174,9 @@ int GetTimeBucket()
 // ======================================================================
 int GetCurrentState()
 {
-   // ✅ BUG FIX #10: Validar handles ANTES de tentar copiar buffers
+   // ✅ BUG FIX #1: Validar handles e usar fallback ao invés de travar
+   static int handleFailCount = 0;
+   
    if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
       g_adxHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
       g_atrHandle == INVALID_HANDLE)
@@ -5174,29 +5188,46 @@ int GetCurrentState()
       Print("   BB Handle: ", g_bbHandle == INVALID_HANDLE ? "INVÁLIDO" : "OK");
       Print("   ATR Handle: ", g_atrHandle == INVALID_HANDLE ? "INVÁLIDO" : "OK");
       
-      // Tentar recriar handles inválidos
-      Print("🔄 Tentando recriar handles de indicadores...");
-      if(g_maHandle == INVALID_HANDLE)
-         g_maHandle = iMA(_Symbol, _Period, MAPeriod, 0, MAMethod, PRICE_CLOSE);
-      if(g_rsiHandle == INVALID_HANDLE)
-         g_rsiHandle = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
-      if(g_adxHandle == INVALID_HANDLE)
-         g_adxHandle = iADX(_Symbol, _Period, 20);
-      if(g_bbHandle == INVALID_HANDLE)
-         g_bbHandle = iBands(_Symbol, _Period, BBPeriod, 0, BBDeviation, PRICE_CLOSE);
-      if(g_atrHandle == INVALID_HANDLE)
-         g_atrHandle = iATR(_Symbol, _Period, ATRPeriod);
+      handleFailCount++;
       
-      // Verificar se recriação teve sucesso
-      if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
-         g_adxHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
-         g_atrHandle == INVALID_HANDLE)
+      // Tentar recriar handles inválidos (até 5 tentativas)
+      if(handleFailCount <= 5)
       {
-         Print("❌ FALHA: Não foi possível recriar todos os handles");
-         return -1;
+         Print("🔄 Tentando recriar handles de indicadores (tentativa ", handleFailCount, "/5)...");
+         if(g_maHandle == INVALID_HANDLE)
+            g_maHandle = iMA(_Symbol, _Period, MAPeriod, 0, MAMethod, PRICE_CLOSE);
+         if(g_rsiHandle == INVALID_HANDLE)
+            g_rsiHandle = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
+         if(g_adxHandle == INVALID_HANDLE)
+            g_adxHandle = iADX(_Symbol, _Period, 20);
+         if(g_bbHandle == INVALID_HANDLE)
+            g_bbHandle = iBands(_Symbol, _Period, BBPeriod, 0, BBDeviation, PRICE_CLOSE);
+         if(g_atrHandle == INVALID_HANDLE)
+            g_atrHandle = iATR(_Symbol, _Period, ATRPeriod);
+         
+         // Verificar se recriação teve sucesso
+         if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
+            g_adxHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
+            g_atrHandle == INVALID_HANDLE)
+         {
+            Print("❌ FALHA: Não foi possível recriar todos os handles");
+            return -1;  // Ainda tentando
+         }
+         
+         Print("✅ Handles recriados com sucesso");
+         handleFailCount = 0;  // Reset contador
       }
-      
-      Print("✅ Handles recriados com sucesso");
+      else
+      {
+         // ✅ BUG FIX #1: Após 5 falhas, usar estado PADRÃO ao invés de bloquear
+         Print("⚠️ FALLBACK: Usando estado padrão (0) após ", handleFailCount, " falhas");
+         handleFailCount = 0;  // Reset para próxima tentativa
+         return 0;  // Estado neutro ao invés de -1
+      }
+   }
+   else
+   {
+      handleFailCount = 0;  // Reset contador se handles OK
    }
 
    double ma[], rsi[], adx[], bb_upper[], bb_lower[], atr[];
@@ -7055,26 +7086,9 @@ void OnTick()
          }
          else
          {
-            // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
-            if(g_currentExplorationRate <= 0.0)
-            {
-               bool stateInActiveList = false;
-               for(int i = 0; i < g_activeStatesCount; i++)
-               {
-                  if(g_activeStates[i] == s)
-                  {
-                     stateInActiveList = true;
-                     break;
-                  }
-               }
-               
-               if(!stateInActiveList)
-               {
-                  // Estado novo mas exploração = 0% → NÃO usar este estado
-                  g_statusMessage = StringFormat("⏸️ Estado %d desconhecido (exploração 0%%)", s);
-                  return;  // ✅ BLOQUEIA uso de estados novos
-               }
-            }
+            // ✅ BUG FIX #3: REMOVER bloqueio de estados novos com exploração zero
+            // Permitir estados novos SEMPRE, mesmo com exploração = 0%
+            // O sistema de bloqueio já cuida de estados ruins
             
             // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
             if(IsStateBlocked(s))
