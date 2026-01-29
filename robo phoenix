@@ -4669,6 +4669,9 @@ int ChooseAction(int state)
       g_statusMessage = "NOP (indecisão)";
    }
    
+   // ✅ FIX: Calcular winRate para exibir no log
+   double winRate = CalculateWinRate(state);
+   
    Print("💡 DECISÃO: Estado ", state, " | Ação ", 
          (bestA==0?"NOP":(bestA==1?"BUY":"SELL")), 
          " | Q = ", bestA==0 ? nopQ : best,
@@ -4687,6 +4690,9 @@ void ExecuteAction(int action, int state)
    g_lastTradeStateExecuted = -1;
    
    bool isBuy = (action == 1);
+   
+   // ✅ FIX: Declarar desiredLot no início da função (usado em linha 4724)
+   double desiredLot = LotSize;
    
    Print("=== TENTATIVA DE EXECUÇÃO: ", isBuy ? "BUY" : "SELL", " ===");
    Print("Estado: ", state, " | Visitas REAIS: ", g_stateVisits[state], 
@@ -4751,7 +4757,7 @@ void ExecuteAction(int action, int state)
    }
    
    int sameDirCount = CountSameDirectionPositions(isBuy);
-   double desiredLot = LotSize;
+   // ✅ REMOVIDO: double desiredLot = LotSize; (já declarado no início da função)
    
    // ✅ CORREÇÃO: Calcular Smart Lot SEMPRE (não só para primeira entrada)
    double smartLotMultiplier = 1.0;  // Multiplicador padrão
