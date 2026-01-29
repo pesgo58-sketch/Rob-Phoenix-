@@ -6371,22 +6371,54 @@ void OnTick()
       if(g_tradesToday >= MaxTradesPerDay)
       {
          g_statusMessage = StringFormat("⛔ Limite diário (%d) atingido", MaxTradesPerDay);
+         Print("🚫 LIMITE DIÁRIO ATINGIDO: ", g_tradesToday, "/", MaxTradesPerDay);
       }
       else if(g_consecutiveLosses >= ConsecutiveLossLimit)
       {
          g_statusMessage = StringFormat("⛔ %d perdas consecutivas", ConsecutiveLossLimit);
+         Print("🚫 LIMITE DE PERDAS CONSECUTIVAS: ", g_consecutiveLosses, "/", ConsecutiveLossLimit);
       }
       else
       {
          g_statusMessage = "Analisando (Sistema Corrigido v2)";
+         
+         // 🔍 DEBUG: Log para diagnóstico
+         static int diagCounter = 0;
+         diagCounter++;
+         if(diagCounter % 10 == 0)  // A cada 10 barras
+         {
+            Print("🔍 DIAGNÓSTICO TRADING:");
+            Print("  - Trades hoje: ", g_tradesToday, "/", MaxTradesPerDay);
+            Print("  - Perdas consecutivas: ", g_consecutiveLosses, "/", ConsecutiveLossLimit);
+            Print("  - Taxa exploração: ", DoubleToString(g_currentExplorationRate*100,2), "%");
+            Print("  - Estados ativos: ", g_activeStatesCount);
+            Print("  - Estados bloqueados: ", CountBlockedStates());
+         }
             
          int s = GetCurrentState();
          if(s < 0)
          {
             g_statusMessage = "Aguardando dados dos indicadores";
+            if(diagCounter % 10 == 0)
+            {
+               Print("  ❌ Estado inválido (s < 0) - aguardando indicadores");
+            }
          }
          else
          {
+            // 🔍 DEBUG: Log estado atual
+            if(diagCounter % 10 == 0)
+            {
+               Print("  ✅ Estado atual: ", s);
+               Print("  - Visits: ", g_stateVisits[s]);
+               Print("  - Bloqueado: ", (IsStateBlocked(s) ? "SIM" : "NÃO"));
+               if(g_stateVisits[s] > 0)
+               {
+                  double wr = CalculateWinRate(s);
+                  Print("  - Win Rate: ", DoubleToString(wr*100,1), "%");
+               }
+            }
+            
             // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
             if(g_currentExplorationRate <= 0.0)
             {
@@ -6404,6 +6436,10 @@ void OnTick()
                {
                   // Estado novo mas exploração = 0% → NÃO usar este estado
                   g_statusMessage = StringFormat("⏸️ Estado %d desconhecido (exploração 0%%)", s);
+                  if(diagCounter % 10 == 0)
+                  {
+                     Print("  ⏸️ Estado desconhecido + exploração 0% → sem trade");
+                  }
                   return;  // ✅ BLOQUEIA uso de estados novos
                }
             }
@@ -6412,6 +6448,11 @@ void OnTick()
             if(IsStateBlocked(s))
             {
                double winRate = CalculateWinRate(s);
+               
+               if(diagCounter % 10 == 0)
+               {
+                  Print("  ⛔ Estado bloqueado! Win Rate: ", DoubleToString(winRate*100,1), "%");
+               }
                
                // Auto-desbloqueio se performance melhorou
                if(winRate >= 0.35 && g_stateVisits[s] >= 5)
@@ -6430,6 +6471,11 @@ void OnTick()
             
             int a = ChooseAction(s);
             
+            if(diagCounter % 10 == 0)
+            {
+               Print("  🎯 Ação escolhida: ", (a==0?"NOP":(a==1?"BUY":"SELL")));
+            }
+            
             if(a == 0)
             {
                g_statusMessage = "NOP (Análise)";
@@ -6437,6 +6483,10 @@ void OnTick()
             }
             else
             {
+               if(diagCounter % 10 == 0)
+               {
+                  Print("  ✅ Executando ação de trade!");
+               }
                ExecuteAction(a,s);
             }
          }
