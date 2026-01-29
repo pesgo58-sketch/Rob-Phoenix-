@@ -821,6 +821,64 @@ void UnblockGoodStatesAutomatic()
 }
 
 // ======================================================================
+// 💰 DESBLOQUEAR ESTADOS LUCRATIVOS
+// ======================================================================
+// Esta função percorre todos os estados bloqueados e desbloqueia
+// automaticamente aqueles que têm lucro total positivo, independente
+// da taxa de vitórias ou perdas.
+//
+// Lógica: Se um estado tem mais perdas que vitórias mas ainda assim
+// é lucrativo, significa que os ganhos quando acerta são maiores
+// que as perdas quando erra, o que é uma característica POSITIVA.
+//
+// Chamada durante a manutenção periódica para corrigir bloqueios
+// injustos de estados rentáveis.
+// ======================================================================
+void UnblockProfitableStates()
+{
+   if(!EnableUnifiedBlockingSystem) return;
+   
+   int statesUnblocked = 0;
+   int statesReviewed = 0;
+   
+   for(int s = 0; s < NUM_STATES; s++)
+   {
+      // Apenas estados bloqueados com visitas suficientes
+      if(!g_stateBlocked[s]) continue;
+      if(g_stateVisits[s] < MinVisitsForBlockDecision) continue;
+      
+      statesReviewed++;
+      
+      double totalProfit = g_stateProfitSum[s];
+      
+      // Se estado bloqueado é LUCRATIVO, desbloquear imediatamente
+      if(totalProfit > 0.0)
+      {
+         UnblockState(s);
+         statesUnblocked++;
+         
+         double winRate = CalculateWinRate(s);
+         int wins = g_stateWins[s];
+         int losses = g_stateLosses[s];
+         
+         Print("💰 DESBLOQUEIO LUCRATIVO -> Estado: ", s,
+               " | Lucro Total: +", DoubleToString(totalProfit, 2),
+               " | Visitas: ", g_stateVisits[s],
+               " | Wins: ", wins, " (", DoubleToString(winRate*100, 1), "%)",
+               " | Losses: ", losses,
+               " | Razão: Estado lucrativo não deve ser bloqueado");
+      }
+   }
+   
+   if(statesUnblocked > 0)
+   {
+      Print("💰✅ ", statesUnblocked, " de ", statesReviewed, 
+            " estados bloqueados foram desbloqueados por serem LUCRATIVOS",
+            " | Total bloqueados agora: ", CountBlockedStates());
+   }
+}
+
+// ======================================================================
 // ✅ RESUMO DETALHADO DO SISTEMA DE BLOQUEIO (PARA DEBUG)
 // ======================================================================
 // Esta função gera um relatório completo sobre o estado atual do sistema
@@ -1003,25 +1061,32 @@ void PerformMemoryMaintenance()
       ApplyStateDecay();
    }
    
-   // 2. Desbloquear estados bons (apenas após atingir limite mínimo)
+   // 2. 💰 PRIORIDADE MÁXIMA: Desbloquear estados lucrativos
+   // Estados com lucro positivo NUNCA devem permanecer bloqueados
+   if(EnableUnifiedBlockingSystem)
+   {
+      UnblockProfitableStates();
+   }
+   
+   // 3. Desbloquear estados bons (apenas após atingir limite mínimo)
    if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
    {
       UnblockGoodStatesAutomatic();
    }
    
-   // 3. Limpar memória se necessário
+   // 4. Limpar memória se necessário
    if(AutoCleanMemory)
    {
       CleanMemory();
    }
    
-   // 4. Auto desbloquear estados bons
+   // 5. Auto desbloquear estados bons
    if(EnableUnifiedBlockingSystem)
    {
       AutoUnblockGoodStates();
    }
    
-   // 5. ✅ BUG FIX #6: Limpar posições fechadas do tracking MAE/MFE
+   // 6. ✅ BUG FIX #6: Limpar posições fechadas do tracking MAE/MFE
    CleanClosedPositionsFromTracking();
    
    lastMaintenance = TimeCurrent();
@@ -1237,6 +1302,24 @@ bool ShouldBlockState(int state)
     
     double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     double winRate = SafeDivide((double)wins, (double)visits, 0.0);
+    double totalProfit = g_stateProfitSum[state];
+    
+    // 🌟 REGRA PRIORITÁRIA: Estados LUCRATIVOS nunca são bloqueados
+    // Mesmo com alta taxa de perdas, se o lucro total é positivo, 
+    // significa que as vitórias compensam (maior tamanho de ganho)
+    if(totalProfit > 0.0)
+    {
+        if(EnableBlockingDebug || lossRate >= BlockLossRateThreshold)
+        {
+            Print("✅ ESTADO LUCRATIVO PRESERVADO: Estado ", state,
+                  " | Lucro Total: +", DoubleToString(totalProfit, 2),
+                  " | WinRate=", DoubleToString(winRate*100, 1), "%",
+                  " | LossRate=", DoubleToString(lossRate*100, 1), "%",
+                  " | Wins=", wins, " | Losses=", losses,
+                  " → NÃO BLOQUEIA (lucro positivo protege o estado)");
+        }
+        return false; // NUNCA bloquear estados lucrativos
+    }
     
     // Critério 1: Taxa de perda muito alta
     bool highLossRate = (lossRate >= BlockLossRateThreshold);
@@ -1262,6 +1345,7 @@ bool ShouldBlockState(int state)
               " | Visits=", visits,
               " | Wins=", wins,
               " | Losses=", losses,
+              " | Lucro=", DoubleToString(totalProfit, 2),
               " | WinRate=", DoubleToString(winRate*100, 1), "%",
               " | LossRate=", DoubleToString(lossRate*100, 1), "%",
               " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
@@ -1284,6 +1368,7 @@ bool ShouldUnblockState(int state)
     int visits = g_stateVisits[state];
     int wins = g_stateWins[state];
     int losses = g_stateLosses[state];
+    double totalProfit = g_stateProfitSum[state];
     
     if(visits < MinVisitsForBlockDecision) 
     {
@@ -1296,6 +1381,18 @@ bool ShouldUnblockState(int state)
     }
     
     double winRate = CalculateWinRate(state);
+    
+    // 🌟 REGRA PRIORITÁRIA: Estados LUCRATIVOS devem ser SEMPRE desbloqueados
+    // Se o estado foi bloqueado mas agora está com lucro positivo, desbloquear imediatamente
+    if(totalProfit > 0.0)
+    {
+        Print("🔓💰 DESBLOQUEIO PRIORITÁRIO: Estado ", state, " é LUCRATIVO",
+              " | Lucro Total: +", DoubleToString(totalProfit, 2),
+              " | WinRate=", DoubleToString(winRate*100, 1), "%",
+              " | Wins=", wins, " | Losses=", losses,
+              " → DESBLOQUEANDO IMEDIATAMENTE (lucro positivo)");
+        return true; // SEMPRE desbloquear estados lucrativos
+    }
     
     // Critério 1: Win rate suficientemente alto
     bool goodWinRate = (winRate >= UnblockWinRateThreshold);
@@ -1326,6 +1423,7 @@ bool ShouldUnblockState(int state)
               " | Visits=", visits,
               " | Wins=", wins,
               " | Losses=", losses,
+              " | Lucro=", DoubleToString(totalProfit, 2),
               " | WinRate=", DoubleToString(winRate*100, 1), "%",
               " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
               " | Sharpe=", DoubleToString(sharpe, 2),
@@ -7356,8 +7454,13 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       string statusInfo = "";
       if(isBlocked)
       {
+         // 💰 PRIORIDADE: Estados bloqueados mas LUCRATIVOS (não deveriam estar bloqueados)
+         if(profit > 0.0)
+         {
+            statusInfo = " [💰 BLOQUEADO MAS LUCRATIVO - SERÁ DESBLOQUEADO]";
+         }
          // Estado bloqueado - verificar se está em fase de reativação
-         if(winRate >= UnblockWinRateThreshold * 100 && visits >= MinVisitsForBlockDecision)
+         else if(winRate >= UnblockWinRateThreshold * 100 && visits >= MinVisitsForBlockDecision)
          {
             statusInfo = " [🔄 EM REATIVAÇÃO - WinRate melhorou]";
          }
