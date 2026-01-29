@@ -890,7 +890,7 @@ void UnblockState(int state)
     }
 }
 
-// ✅✅✅ 3️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER BLOQUEADO (CORRIGIDA)
+// ✅✅✅ 3️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER BLOQUEADO (CORRIGIDA + DEBUG)
 bool ShouldBlockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return false;
@@ -898,6 +898,19 @@ bool ShouldBlockState(int state)
     int visits = g_stateVisits[state];
     int losses = g_stateLosses[state];
     int wins = g_stateWins[state];
+    
+    // 🔍 DEBUG COMPLETO: Mostrar PARÂMETROS DE BLOQUEIO (apenas uma vez)
+    static bool parametersLogged = false;
+    if(!parametersLogged)
+    {
+        Print("🔍🔍🔍 PARÂMETROS DE BLOQUEIO ATIVADOS:");
+        Print("  MinVisitsForBlockDecision = ", MinVisitsForBlockDecision);
+        Print("  BlockLossRateThreshold = ", DoubleToString(BlockLossRateThreshold*100, 1), "%");
+        Print("  StateBlockThreshold = ", DoubleToString(StateBlockThreshold*100, 1), "%");
+        Print("  EnableSharpeFilter = ", EnableSharpeFilter);
+        Print("  EnableUnifiedBlockingSystem = ", EnableUnifiedBlockingSystem);
+        parametersLogged = true;
+    }
     
     if(visits < MinVisitsForBlockDecision) 
     {
@@ -925,8 +938,10 @@ bool ShouldBlockState(int state)
         }
     }
     
-    // 🔍 DEBUG: Log detalhado apenas quando bloqueio vai acontecer
+    // 🔍 DEBUG: Log detalhado para TODOS os estados com visitas suficientes
     bool shouldBlock = (highLossRate || lowSharpe);
+    
+    // Log completo para estados que deveriam ser bloqueados
     if(shouldBlock)
     {
         Print("🚫 BLOQUEANDO Estado ", state, 
@@ -939,6 +954,16 @@ bool ShouldBlockState(int state)
               " | Sharpe=", DoubleToString(sharpe, 2),
               " | HighLoss?=", highLossRate,
               " | LowSharpe?=", lowSharpe);
+    }
+    // Log para estados com MUITAS visitas mas NÃO bloqueados (debug)
+    else if(visits >= 50 && lossRate >= 0.50)
+    {
+        Print("⚠️ ESTADO NÃO BLOQUEADO: State=", state,
+              " | Visits=", visits,
+              " | LossRate=", DoubleToString(lossRate*100, 1), "%",
+              " | Threshold=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+              " | HighLoss?=", highLossRate,
+              " → Não atinge critério de bloqueio");
     }
     
     // Bloquear se OU taxa de perda alta OU Sharpe muito baixo
