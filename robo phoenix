@@ -218,6 +218,7 @@ input double StateBlockThreshold      = 0.20;         // Win rate mínimo para N
 input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
 input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input bool   EnableBlockingDebug      = false;        // Logs detalhados do sistema de bloqueio
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
@@ -536,31 +537,23 @@ void DebugStuckStatesEnhanced()
    Print("   Taxa de erro no bloqueio: ", totalBlocked > 0 ? 
          DoubleToString((double)wronglyBlocked/totalBlocked*100, 1) : "0.0", "%");
    
-   // ✅ CORREÇÃO AUTOMÁTICA
+   // ✅ DIAGNÓSTICO APENAS - DESBLOQUEIO AUTOMÁTICO DESATIVADO
+   // Função DebugStuckStatesEnhanced() é APENAS para diagnóstico e relatório.
+   // O desbloqueio automático de estados é realizado EXCLUSIVAMENTE por:
+   // 1. AutoUnblockGoodStates() - critérios rigorosos (55% win rate, 30+ visitas)
+   // 2. UnblockGoodStates() - chamado periodicamente com validação de MinStatesBeforeReset
+   // 3. TestBlockedStatesPeriodically() - reteste gradual após 30 dias
+   //
+   // MOTIVO: Desbloquear estados aqui com critérios permissivos (30% win rate, 5 visitas)
+   // causaria desbloqueios prematuros de estados que ainda não provaram ser lucrativos.
    if(wronglyBlocked > 0)
    {
-      Print("🔥🔥🔥 APLICANDO CORREÇÃO AUTOMÁTICA...");
-      
-      // ❌ REMOVIDO - Desbloqueio deve ser feito APENAS por:
-      // 1. AutoUnblockGoodStates() com critérios rigorosos (55% win rate, 30 visitas)
-      // 2. TestBlockedStatesPeriodically() após 30 dias com reteste gradual
-      // Desbloquear aqui com 30% e 5 visitas é MUITO permissivo e causa desbloqueios prematuros
-      
-      // for(int state = 0; state < NUM_STATES; state++)
-      // {
-      //    if(g_stateBlocked[state])
-      //    {
-      //       double winRate = CalculateWinRate(state);
-      //       
-      //       if(winRate >= 0.30 && g_stateVisits[state] >= 5)
-      //       {
-      //          g_stateBlocked[state] = false;
-      //          Print("✅ Estado ", state, " desbloqueado automaticamente");
-      //       }
-      //    }
-      // }
-      
-      Print("✅✅✅ ", wronglyBlocked, " estados desbloqueados automaticamente");
+      Print("⚠️ ATENÇÃO: ", wronglyBlocked, " estados com possível bloqueio prematuro detectados");
+      Print("   Estes estados serão reavaliados automaticamente pelos sistemas:");
+      Print("   • AutoUnblockGoodStates() - quando atingirem ", DoubleToString(UnblockWinRateThreshold*100,1), "% win rate");
+      Print("   • UnblockGoodStates() - reavaliação periódica de estados bloqueados");
+      Print("   • TestBlockedStatesPeriodically() - reteste após período de espera");
+      Print("   Correção automática DESATIVADA nesta função para evitar desbloqueios prematuros.");
    }
    
    Print("=== FIM DEBUG ===");
@@ -753,6 +746,171 @@ void UnblockGoodStatesAutomatic()
 }
 
 // ======================================================================
+// ✅ RESUMO DETALHADO DO SISTEMA DE BLOQUEIO (PARA DEBUG)
+// ======================================================================
+// Esta função gera um relatório completo sobre o estado atual do sistema
+// de bloqueio de estados, útil para diagnóstico e análise de comportamento.
+// 
+// É chamada automaticamente durante a manutenção periódica quando
+// EnableBlockingDebug = true, fornecendo visibilidade detalhada sobre:
+// - Quantos estados estão bloqueados
+// - Quantos estados têm dados suficientes para decisão
+// - Exemplos de estados com alta taxa de perda (críticos)
+// - Exemplos de estados bloqueados com potencial de desbloqueio
+//
+void PrintBlockingSystemSummary()
+{
+   Print("═══════════════════════════════════════════════════════════");
+   Print("🔍 RESUMO DO SISTEMA DE BLOQUEIO DE ESTADOS");
+   Print("═══════════════════════════════════════════════════════════");
+   
+   int totalStatesVisited = 0;
+   int statesWithMinVisits = 0;
+   int statesBlocked = 0;
+   int statesBlockedWithGoodWR = 0;
+   int statesUnblockedWithBadWR = 0;
+   
+   // Arrays para armazenar estados críticos (top 5)
+   int criticalStates[5];
+   double criticalLossRates[5];
+   int blockedStatesNearUnblock[5];
+   double blockedWinRates[5];
+   
+   // Inicializar arrays
+   for(int i = 0; i < 5; i++)
+   {
+      criticalStates[i] = -1;
+      criticalLossRates[i] = 0.0;
+      blockedStatesNearUnblock[i] = -1;
+      blockedWinRates[i] = 0.0;
+   }
+   
+   // Coletar estatísticas
+   for(int state = 0; state < NUM_STATES; state++)
+   {
+      if(g_stateVisits[state] > 0)
+      {
+         totalStatesVisited++;
+         
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision)
+         {
+            statesWithMinVisits++;
+            
+            double winRate = CalculateWinRate(state);
+            double lossRate = SafeDivide((double)g_stateLosses[state], (double)g_stateVisits[state], 0.0);
+            
+            if(g_stateBlocked[state])
+            {
+               statesBlocked++;
+               
+               // Estados bloqueados com win rate razoável (podem ser candidatos a desbloqueio)
+               if(winRate >= 0.45)
+               {
+                  statesBlockedWithGoodWR++;
+                  
+                  // Guardar top 5 estados bloqueados com melhor win rate
+                  for(int i = 0; i < 5; i++)
+                  {
+                     if(blockedStatesNearUnblock[i] == -1 || winRate > blockedWinRates[i])
+                     {
+                        // Deslocar elementos
+                        for(int j = 4; j > i; j--)
+                        {
+                           blockedStatesNearUnblock[j] = blockedStatesNearUnblock[j-1];
+                           blockedWinRates[j] = blockedWinRates[j-1];
+                        }
+                        blockedStatesNearUnblock[i] = state;
+                        blockedWinRates[i] = winRate;
+                        break;
+                     }
+                  }
+               }
+            }
+            else
+            {
+               // Estados desbloqueados com win rate ruim (podem precisar bloqueio)
+               if(winRate < 0.30)
+               {
+                  statesUnblockedWithBadWR++;
+               }
+               
+               // Guardar top 5 estados com maior taxa de perda (críticos)
+               for(int i = 0; i < 5; i++)
+               {
+                  if(criticalStates[i] == -1 || lossRate > criticalLossRates[i])
+                  {
+                     // Deslocar elementos
+                     for(int j = 4; j > i; j--)
+                     {
+                        criticalStates[j] = criticalStates[j-1];
+                        criticalLossRates[j] = criticalLossRates[j-1];
+                     }
+                     criticalStates[i] = state;
+                     criticalLossRates[i] = lossRate;
+                     break;
+                  }
+               }
+            }
+         }
+      }
+   }
+   
+   // Imprimir resumo
+   Print("📊 ESTATÍSTICAS GERAIS:");
+   Print("   • Total de estados visitados: ", totalStatesVisited, " de ", NUM_STATES, " (", 
+         DoubleToString((double)totalStatesVisited/NUM_STATES*100, 1), "%)");
+   Print("   • Estados com visitas >= ", MinVisitsForBlockDecision, ": ", statesWithMinVisits);
+   Print("   • Estados atualmente bloqueados: ", statesBlocked, " (", 
+         DoubleToString(SafeDivide((double)statesBlocked, (double)statesWithMinVisits, 0.0)*100, 1), "% dos avaliáveis)");
+   Print("   • Estados bloqueados com WR >= 45%: ", statesBlockedWithGoodWR);
+   Print("   • Estados ativos com WR < 30%: ", statesUnblockedWithBadWR);
+   
+   // Imprimir estados críticos (não bloqueados com alta perda)
+   if(criticalStates[0] != -1)
+   {
+      Print("");
+      Print("⚠️ TOP 5 ESTADOS CRÍTICOS (não bloqueados, alta taxa de perda):");
+      for(int i = 0; i < 5 && criticalStates[i] != -1; i++)
+      {
+         int state = criticalStates[i];
+         Print("   ", (i+1), ". Estado ", state, 
+               " | Visitas: ", g_stateVisits[state],
+               " | Vitórias: ", g_stateWins[state],
+               " | Perdas: ", g_stateLosses[state],
+               " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%",
+               " | Loss Rate: ", DoubleToString(criticalLossRates[i]*100, 1), "%");
+      }
+   }
+   
+   // Imprimir estados bloqueados próximos de desbloqueio
+   if(blockedStatesNearUnblock[0] != -1)
+   {
+      Print("");
+      Print("🔓 TOP 5 ESTADOS BLOQUEADOS COM MELHOR DESEMPENHO:");
+      for(int i = 0; i < 5 && blockedStatesNearUnblock[i] != -1; i++)
+      {
+         int state = blockedStatesNearUnblock[i];
+         Print("   ", (i+1), ". Estado ", state,
+               " | Visitas: ", g_stateVisits[state],
+               " | Vitórias: ", g_stateWins[state],
+               " | Perdas: ", g_stateLosses[state],
+               " | Win Rate: ", DoubleToString(blockedWinRates[i]*100, 1), "%",
+               " | Bloqueado há: ", (int)((TimeCurrent() - g_stateLastBlockTime[state])/3600), " horas");
+      }
+   }
+   
+   // Thresholds configurados
+   Print("");
+   Print("⚙️ CONFIGURAÇÃO DE THRESHOLDS:");
+   Print("   • Bloqueio - Loss Rate >= ", DoubleToString(BlockLossRateThreshold*100, 1), "%");
+   Print("   • Desbloqueio - Win Rate >= ", DoubleToString(UnblockWinRateThreshold*100, 1), "%");
+   Print("   • Visitas mínimas para decisão: ", MinVisitsForBlockDecision);
+   Print("   • Filtro Sharpe habilitado: ", EnableSharpeFilter ? "SIM" : "NÃO");
+   
+   Print("═══════════════════════════════════════════════════════════");
+}
+
+// ======================================================================
 // ✅✅✅ 3. MANUTENÇÃO PERIÓDICA DO SISTEMA
 // ======================================================================
 void PerformMemoryMaintenance()
@@ -790,6 +948,12 @@ void PerformMemoryMaintenance()
    
    lastMaintenance = TimeCurrent();
    
+   // 🔍 DEBUG: Resumo detalhado do sistema de bloqueio (se habilitado)
+   if(EnableBlockingDebug)
+   {
+      PrintBlockingSystemSummary();
+   }
+   
    // Salvar após manutenção
    SaveBrain();
    SaveState();
@@ -800,9 +964,82 @@ void PerformMemoryMaintenance()
    Print("   • Estados bloqueados: ", CountBlockedStates());
 }
 
-// ======================================================================
+// ══════════════════════════════════════════════════════════════════════
 // ✅✅✅ SISTEMA DE BLOQUEIO UNIFICADO CORRIGIDO
-// ======================================================================
+// ══════════════════════════════════════════════════════════════════════
+//
+// 📚 O QUE É UM ESTADO BLOQUEADO?
+// ────────────────────────────────────────────────────────────────────
+// Um estado é uma combinação de condições de mercado (RSI, ADX, posição
+// nas Bandas de Bollinger, distância da média móvel, etc.) que o robô
+// usa para decidir quando operar.
+//
+// Um estado é considerado "BLOQUEADO" quando seu histórico mostra que
+// operar nesse estado resulta em muitas perdas. Quando um estado está
+// bloqueado, o robô evita abrir novas operações nesse estado, retornando
+// NOP (No Operation) ao invés de Buy ou Sell.
+//
+// 📊 CRITÉRIOS PARA BLOQUEIO:
+// ────────────────────────────────────────────────────────────────────
+// Um estado é bloqueado automaticamente quando:
+// 1. Tem pelo menos MinVisitsForBlockDecision visitas (padrão: 30)
+// 2. Sua taxa de perda (LossRate) >= BlockLossRateThreshold (padrão: 80%)
+// 3. OU seu Sharpe Ratio < MaxSharpeToBlock (se EnableSharpeFilter=true)
+//
+// 📈 CRITÉRIOS PARA DESBLOQUEIO:
+// ────────────────────────────────────────────────────────────────────
+// Um estado bloqueado é desbloqueado automaticamente quando:
+// 1. Tem pelo menos MinVisitsForBlockDecision visitas (padrão: 30)
+// 2. Sua taxa de vitória (WinRate) >= UnblockWinRateThreshold (padrão: 55%)
+// 3. E seu Sharpe Ratio >= MinSharpeToUnblock (se EnableSharpeFilter=true)
+//
+// 🔄 CENTRALIZAÇÃO DOS DESBLOQUEIOS:
+// ────────────────────────────────────────────────────────────────────
+// Os desbloqueios automáticos são realizados EXCLUSIVAMENTE por:
+//
+// 1. AutoUnblockGoodStates() - Chamada periodicamente durante manutenção
+//    - Usa critérios rigorosos (WinRate >= UnblockWinRateThreshold)
+//    - Valida também Sharpe Ratio se habilitado
+//
+// 2. UnblockGoodStates() - Chamada diariamente e periodicamente
+//    - Só executa se EnableIntelligentReset = true
+//    - Só executa se g_activeStatesCount >= MinStatesBeforeReset
+//    - Usa threshold de 35% de win rate
+//
+// 3. TestBlockedStatesPeriodically() - Reteste após período longo
+//    - Testa estados bloqueados há mais de 30 dias
+//    - Reteste gradual e controlado
+//
+// ⚠️ IMPORTANTE: A função DebugStuckStatesEnhanced() é APENAS diagnóstica
+//    e NÃO realiza desbloqueios automáticos. Isso evita desbloqueios
+//    prematuros de estados que ainda não provaram ser lucrativos.
+//
+// 🔍 MODO DEBUG:
+// ────────────────────────────────────────────────────────────────────
+// Para investigar problemas de bloqueio/desbloqueio, ative:
+//    EnableBlockingDebug = true
+//
+// Com debug habilitado, você terá:
+// - Logs detalhados em ShouldBlockState() mostrando todos os critérios
+// - Logs detalhados em ShouldUnblockState() mostrando avaliações completas
+// - Resumo periódico (a cada hora) com:
+//   • Número de estados bloqueados
+//   • Estados com dados suficientes para decisão
+//   • Top 5 estados críticos (alta perda, não bloqueados)
+//   • Top 5 estados bloqueados próximos de desbloqueio
+//
+// ⚙️ COMO O BLOQUEIO É VERIFICADO ANTES DE OPERAR:
+// ────────────────────────────────────────────────────────────────────
+// Antes de executar qualquer ação (Buy/Sell), o robô:
+// 1. Calcula o estado atual em GetCurrentState()
+// 2. Em OnTick(), verifica IsStateBlocked(state)
+// 3. Em ChooseAction(state), verifica novamente IsStateBlocked(state)
+// 4. Se bloqueado, retorna NOP (ação 0) ao invés de operar
+//
+// Isso garante que estados com histórico ruim sejam evitados, protegendo
+// o capital enquanto o robô continua aprendendo com estados produtivos.
+//
+// ══════════════════════════════════════════════════════════════════════
 
 // ✅✅✅ 1️⃣ FUNÇÃO UNIFICADA PARA BLOQUEAR ESTADO (CORRIGIDA)
 void BlockState(int state)
@@ -901,8 +1138,11 @@ bool ShouldBlockState(int state)
     
     if(visits < MinVisitsForBlockDecision) 
     {
-        // 🔍 DEBUG: Estado sem visitas suficientes (log reduzido)
-        // Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não bloqueia)");
+        // 🔍 DEBUG: Estado sem visitas suficientes (log apenas se debug habilitado)
+        if(EnableBlockingDebug)
+        {
+            Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não bloqueia)");
+        }
         return false;
     }
     
@@ -925,11 +1165,11 @@ bool ShouldBlockState(int state)
         }
     }
     
-    // 🔍 DEBUG: Log detalhado apenas quando bloqueio vai acontecer
+    // 🔍 DEBUG: Log detalhado quando bloqueio vai acontecer ou quando debug está habilitado
     bool shouldBlock = (highLossRate || lowSharpe);
-    if(shouldBlock)
+    if(shouldBlock || EnableBlockingDebug)
     {
-        Print("🚫 BLOQUEANDO Estado ", state, 
+        Print(shouldBlock ? "🚫 BLOQUEANDO Estado " : "✅ NÃO BLOQUEANDO Estado ", state, 
               " | Visits=", visits,
               " | Wins=", wins,
               " | Losses=", losses,
@@ -959,7 +1199,10 @@ bool ShouldUnblockState(int state)
     if(visits < MinVisitsForBlockDecision) 
     {
         // 🔍 DEBUG: Estado bloqueado sem visitas suficientes para desbloquear
-        Print("🔓 UNBLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não desbloqueia)");
+        if(EnableBlockingDebug)
+        {
+            Print("🔓 UNBLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não desbloqueia)");
+        }
         return false;
     }
     
@@ -986,20 +1229,23 @@ bool ShouldUnblockState(int state)
         }
     }
     
-    // 🔍 DEBUG: Log detalhado de avaliação de desbloqueio
+    // 🔍 DEBUG: Log detalhado quando debug habilitado ou quando vai desbloquear
     bool shouldUnblock = (goodWinRate && goodSharpe);
-    Print("🔓 UNBLOCK DEBUG: State=", state, 
-          " | Visits=", visits,
-          " | Wins=", wins,
-          " | Losses=", losses,
-          " | WinRate=", DoubleToString(winRate*100, 1), "%",
-          " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
-          " | Sharpe=", DoubleToString(sharpe, 2),
-          " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
-          " | EnableSharpe=", EnableSharpeFilter,
-          " | GoodWR?=", goodWinRate,
-          " | GoodSharpe?=", goodSharpe,
-          " → SHOULD UNBLOCK=", shouldUnblock);
+    if(EnableBlockingDebug || shouldUnblock)
+    {
+        Print(shouldUnblock ? "🔓 DESBLOQUEANDO Estado " : "⛔ NÃO DESBLOQUEANDO Estado ", state, 
+              " | Visits=", visits,
+              " | Wins=", wins,
+              " | Losses=", losses,
+              " | WinRate=", DoubleToString(winRate*100, 1), "%",
+              " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
+              " | Sharpe=", DoubleToString(sharpe, 2),
+              " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
+              " | EnableSharpe=", EnableSharpeFilter,
+              " | GoodWR?=", goodWinRate,
+              " | GoodSharpe?=", goodSharpe,
+              " → SHOULD UNBLOCK=", shouldUnblock);
+    }
     
     // Desbloquear apenas se AMBOS win rate E Sharpe forem bons
     return shouldUnblock;
