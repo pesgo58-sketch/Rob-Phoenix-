@@ -476,6 +476,39 @@ int g_debugVisitas = 0;
 int g_debugPerdas = 0;
 
 // ======================================================================
+// 🐛 CORREÇÃO DE BUGS - FUNÇÕES UTILITÁRIAS DE VALIDAÇÃO
+// ======================================================================
+
+// ✅ BUG FIX #1: Função centralizada para obter point com validação
+// Previne divisão por zero e valores inválidos que podem crashar o EA
+double GetValidatedPoint()
+{
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   // Validar se point é válido
+   if(point <= 0 || point < 0.0000001)
+   {
+      Print("⚠️ ERRO CRÍTICO: Point inválido para símbolo ", _Symbol, ": ", point);
+      
+      // Tentar usar _Point built-in como fallback
+      point = _Point;
+      
+      if(point <= 0 || point < 0.0000001)
+      {
+         // Se ainda inválido, usar valor padrão baseado no tipo de símbolo
+         Print("⚠️ ERRO: _Point também inválido. Usando fallback: 0.00001");
+         point = 0.00001; // Valor padrão seguro para forex
+      }
+      else
+      {
+         Print("✅ Usando _Point built-in como fallback: ", point);
+      }
+   }
+   
+   return point;
+}
+
+// ======================================================================
 // ✅✅✅ CORREÇÕES AGUDAS PARA O PROBLEMA DE ESTADOS TRAVADOS
 // ======================================================================
 
@@ -3913,14 +3946,7 @@ void ManageDynamicTrailingStop()
          SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
          SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       
-      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      
-      // Validar point antes de usar - valor zero indica problema de configuração
-      if(point <= 0 || point < 0.0000001)
-      {
-         Print("⚠️ ERRO: Point inválido para símbolo ", _Symbol, ": ", point);
-         continue;
-      }
+      double point = GetValidatedPoint(); // ✅ BUG FIX #1: Usar função validada
       
       double currentProfit = isBuy ? 
          SafeDivide(currentPrice - entryPrice, point, 0.0) : 
@@ -4538,7 +4564,7 @@ void ExecuteAction(int action, int state)
    
    double price = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
                         : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double point = GetValidatedPoint(); // ✅ BUG FIX #1: Usar função validada
 
    double sl_price = 0.0;
    double tp_price = 0.0;
@@ -4547,40 +4573,33 @@ void ExecuteAction(int action, int state)
    if(UseFixedTP) tp_price = CalculateTPByPoints(isBuy, price);
 
    // MINI-LOG PARA VALIDAR SL/TP EM PONTOS
-   if(point > 0.0)
+   double slPointsCheck = 0.0;
+   double tpPointsCheck = 0.0;
+
+   if(sl_price > 0.0)
    {
-      double slPointsCheck = 0.0;
-      double tpPointsCheck = 0.0;
-
-      // ✅ FIX: Protect against division by zero - check if point > 0
-      if(point > 0.0)
-      {
-         if(sl_price > 0.0)
-         {
-            if(isBuy)
-               slPointsCheck = (price - sl_price) / point;
-            else
-               slPointsCheck = (sl_price - price) / point;
-         }
-
-         if(tp_price > 0.0)
-         {
-            if(isBuy)
-               tpPointsCheck = (tp_price - price) / point;
-            else
-               tpPointsCheck = (price - tp_price) / point;
-         }
-      }
-
-      Print("🎯 MINI-LOG SLTP: dir=", (isBuy ? "BUY" : "SELL"),
-            " | entry=", DoubleToString(price, 5),
-            " | SL=", DoubleToString(sl_price, 5),
-            " | TP=", DoubleToString(tp_price, 5),
-            " | SL_pts~=", DoubleToString(slPointsCheck, 0),
-            " | TP_pts~=", DoubleToString(tpPointsCheck, 0),
-            " | FixedSL_Points=", FixedSL_Points,
-            " | FixedTP_Points=", FixedTP_Points);
+      if(isBuy)
+         slPointsCheck = (price - sl_price) / point;
+      else
+         slPointsCheck = (sl_price - price) / point;
    }
+
+   if(tp_price > 0.0)
+   {
+      if(isBuy)
+         tpPointsCheck = (tp_price - price) / point;
+      else
+         tpPointsCheck = (price - tp_price) / point;
+   }
+
+   Print("🎯 MINI-LOG SLTP: dir=", (isBuy ? "BUY" : "SELL"),
+         " | entry=", DoubleToString(price, 5),
+         " | SL=", DoubleToString(sl_price, 5),
+         " | TP=", DoubleToString(tp_price, 5),
+         " | SL_pts~=", DoubleToString(slPointsCheck, 0),
+         " | TP_pts~=", DoubleToString(tpPointsCheck, 0),
+         " | FixedSL_Points=", FixedSL_Points,
+         " | FixedTP_Points=", FixedTP_Points);
 
    if(!AreStopsValid(isBuy, price, sl_price, tp_price))
    {
@@ -4718,7 +4737,7 @@ double ComputeRewardFromTrade(double profit)
       else return RewardLoss;
    }
    
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double point = GetValidatedPoint(); // ✅ BUG FIX #1: Usar função validada
    double profit_points = SafeDivide(profit, (LotSize * point * 100), 0.0);
    
    if(profit > 0)
@@ -4889,10 +4908,7 @@ int GetCurrentState()
    }
    
    double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   
-   // ✅ FIX BUG #4: Verificar se point é zero antes de usar como divisor
-   if(point <= 0) point = 0.00001; // Fallback seguro
+   double point = GetValidatedPoint(); // ✅ BUG FIX #1: Usar função validada
    
    // ✅ Cálculo da distância da MA
    double maDistance = 0;
@@ -5198,7 +5214,7 @@ double CalculateSLByPoints(bool isBuy, double entryPrice)
    int slPoints = FixedSL_Points;
    if(slPoints <= 0) return 0.0;
    
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double point = GetValidatedPoint(); // ✅ BUG FIX #1: Usar função validada
    double slDistance = slPoints * point;
    
    if(isBuy)
@@ -5224,7 +5240,7 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
    int tpPoints = FixedTP_Points;
    if(tpPoints <= 0) return 0.0;
    
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double point = GetValidatedPoint(); // ✅ BUG FIX #1: Usar função validada
    double tpDistance = tpPoints * point;
    
    if(isBuy)
@@ -5245,7 +5261,7 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
 
 bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice)
 {
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double point = GetValidatedPoint(); // ✅ BUG FIX #1 e #4: Usar função validada
    
    Print("=== VERIFICAÇÃO DE STOPS ===");
    Print("Direção: ", isBuy ? "BUY" : "SELL");
@@ -5278,6 +5294,14 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
       // Agora valida distância
       double slDistance = MathAbs(entryPrice - slPrice);
       double slPoints = SafeDivide(slDistance, point, 0.0);
+      
+      // ✅ BUG FIX #4: Validar valor de slPoints para evitar overflow
+      if(slPoints > 1000000)
+      {
+         Print("⚠️ AVISO: SL extremamente distante: ", DoubleToString(slPoints, 0), " pontos");
+         Print("   Isto pode indicar problema com point (", point, ") ou configuração incorreta");
+         Print("   SL Distance: ", DoubleToString(slDistance, 5));
+      }
       
       long minStopsLevel = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minSL = minStopsLevel * point;
@@ -5320,6 +5344,14 @@ bool AreStopsValid(bool isBuy, double entryPrice, double slPrice, double tpPrice
       // Agora valida distância
       double tpDistance = MathAbs(entryPrice - tpPrice);
       double tpPoints = SafeDivide(tpDistance, point, 0.0);
+      
+      // ✅ BUG FIX #4: Validar valor de tpPoints para evitar overflow
+      if(tpPoints > 1000000)
+      {
+         Print("⚠️ AVISO: TP extremamente distante: ", DoubleToString(tpPoints, 0), " pontos");
+         Print("   Isto pode indicar problema com point (", point, ") ou configuração incorreta");
+         Print("   TP Distance: ", DoubleToString(tpDistance, 5));
+      }
       
       long minStopsLevel = (long)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minTP = minStopsLevel * point;
@@ -5528,7 +5560,7 @@ bool ValidateWithTrend(bool isBuy)
    if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1) return false;
    
    double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double point = GetValidatedPoint(); // ✅ BUG FIX #1: Usar função validada
    
    double atr_value = atr[0];
    if(atr_value < point * 10)
@@ -5757,6 +5789,15 @@ double CalculatePyramidLot(bool isBuy)
       if(validMultiplier <= 0) validMultiplier = 1.0; // Fallback seguro
       
       double multiplier = MathPow(validMultiplier, sameDirCount);
+      
+      // ✅ BUG FIX #5: Limitar multiplicador para prevenir lotes absurdos
+      if(multiplier > 10.0)
+      {
+         Print("⚠️ AVISO CRÍTICO: Multiplicador piramidal muito alto: ", DoubleToString(multiplier, 2));
+         Print("   Limitando a 10x para evitar margin call (", sameDirCount, " níveis de piramidação)");
+         multiplier = 10.0;
+      }
+      
       double pyramidLot = baseLot * multiplier;
       
       double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
