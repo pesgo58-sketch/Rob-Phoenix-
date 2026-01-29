@@ -1983,6 +1983,12 @@ void SaveState()
    FileWriteArray(handle, g_stateLastBlockTime);
    FileWriteArray(handle, g_stateLastUnblockTime);
    FileWriteArray(handle, g_stateBlockCount);
+   
+   // ✅ BUG FIX #4: Adicionar g_stateWasBlockedBefore e g_stateBlockTime para consistência
+   // SaveBrainToFile() já salva estes arrays, SaveState() também deve salvar
+   FileWriteArray(handle, g_stateWasBlockedBefore);
+   FileWriteArray(handle, g_stateBlockTime);
+   
    FileWriteInteger(handle, (int)g_activeStatesCount);
    FileWriteArray(handle, g_stateWinRate);
    FileWriteArray(handle, g_stateAvgProfit);
@@ -2029,6 +2035,11 @@ void LoadState()
    FileReadArray(handle, g_stateLastBlockTime);
    FileReadArray(handle, g_stateLastUnblockTime);
    FileReadArray(handle, g_stateBlockCount);
+   
+   // ✅ BUG FIX #4: Carregar g_stateWasBlockedBefore e g_stateBlockTime para consistência
+   // SaveBrainToFile() já carrega estes arrays, LoadState() também deve carregar
+   FileReadArray(handle, g_stateWasBlockedBefore);
+   FileReadArray(handle, g_stateBlockTime);
    
    // 🔧 REGRA 3 — Converter para int se necessário
    int tempActiveStatesCount = FileReadInteger(handle);
