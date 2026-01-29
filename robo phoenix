@@ -2105,21 +2105,36 @@ void CleanMemory()
          if(g_stateVisits[state] < 3 && 
             (g_totalTrades - g_stateLastUpdate[state]) > 100)
          {
-            g_stateVisits[state] = 0;
-            g_stateLosses[state] = 0;
-            g_stateWins[state] = 0;
-            g_stateLastUpdate[state] = 0;
-            g_stateLastBlockTime[state] = 0;
-            g_stateLastUnblockTime[state] = 0;
+            // ✅ BUG FIX #5: NÃO desbloquear estados que foram bloqueados por performance ruim
+            // Apenas limpar estados com poucas visitas que NUNCA foram bloqueados
+            // Estados bloqueados devem permanecer bloqueados até decisão explícita de desbloqueio
+            bool wasBlocked = g_stateBlocked[state] || g_stateWasBlockedBefore[state];
             
-            for(int a = 0; a < NUM_ACTIONS; a++)
+            if(!wasBlocked)
             {
-               g_Q[state * NUM_ACTIONS + a] = 0.0;
+               // Estado nunca foi bloqueado, seguro limpar
+               g_stateVisits[state] = 0;
+               g_stateLosses[state] = 0;
+               g_stateWins[state] = 0;
+               g_stateLastUpdate[state] = 0;
+               g_stateLastBlockTime[state] = 0;
+               g_stateLastUnblockTime[state] = 0;
+               
+               for(int a = 0; a < NUM_ACTIONS; a++)
+               {
+                  g_Q[state * NUM_ACTIONS + a] = 0.0;
+               }
+               
+               g_stateBlocked[state] = false;
+               
+               cleaned++;
             }
-            
-            g_stateBlocked[state] = false;
-            
-            cleaned++;
+            else
+            {
+               // Estado foi/está bloqueado, MANTER histórico
+               Print("🛡️ Preservando estado ", state, " (foi bloqueado antes, não limpar)");
+               kept++;
+            }
          }
          else
          {
@@ -2129,6 +2144,8 @@ void CleanMemory()
    }
    
    g_activeStatesCount = 0;
+   int statesSkipped = 0; // ✅ BUG FIX #11: Contar estados que não couberam
+   
    for(int state = 0; state < NUM_STATES; state++)
    {
       if(g_stateVisits[state] > 0)
@@ -2138,11 +2155,30 @@ void CleanMemory()
             g_activeStates[g_activeStatesCount] = state;
             g_activeStatesCount++;
          }
+         else
+         {
+            // ✅ BUG FIX #11: Estado com visitas > 0 mas não cabe em g_activeStates[]
+            // AVISO: Este estado NÃO será salvo no próximo save!
+            statesSkipped++;
+         }
       }
+   }
+   
+   if(statesSkipped > 0)
+   {
+      Print("⚠️ AVISO CRÍTICO: ", statesSkipped, " estados COM DADOS não couberam em g_activeStates[]!");
+      Print("   MaxMemoryStates = ", MaxMemoryStates, " mas temos ", 
+            g_activeStatesCount + statesSkipped, " estados com visitas > 0");
+      Print("   Considere AUMENTAR MaxMemoryStates ou fazer limpeza mais agressiva");
+      Print("   Estados perdidos NÃO serão salvos e serão ESQUECIDOS!");
    }
    
    Print("✅ Memória limpa: ", cleaned, " estados removidos, ", kept, " mantidos");
    Print("   Estados ativos na memória: ", g_activeStatesCount);
+   if(statesSkipped > 0)
+   {
+      Print("   ⚠️ Estados pulados (PERDA DE DADOS): ", statesSkipped);
+   }
    
    SaveState();
 }
@@ -2289,6 +2325,12 @@ bool SaveBrainToFile(string filename)
    FileWriteArray(h, g_stateBlockCount);
    FileWriteArray(h, g_stateLastBlockTime);
    FileWriteArray(h, g_stateLastUnblockTime);
+   
+   // ✅ BUG FIX #1: Salvar histórico de bloqueios (g_stateWasBlockedBefore e g_stateBlockTime)
+   // Estes arrays rastreiam se um estado já foi bloqueado antes e quando foi bloqueado pela primeira vez
+   // SEM estes dados, estados ruins podem receber tentativas infinitas após restart
+   FileWriteArray(h, g_stateWasBlockedBefore);
+   FileWriteArray(h, g_stateBlockTime);
 
    FileClose(h);
    return true;
@@ -2450,7 +2492,50 @@ bool LoadBrainFromFile(string filename)
    FileReadArray(h, g_stateLastBlockTime, 0, NUM_STATES);
    FileReadArray(h, g_stateLastUnblockTime, 0, NUM_STATES);
    
+   // ✅ BUG FIX #1: Carregar histórico de bloqueios (g_stateWasBlockedBefore e g_stateBlockTime)
+   // Estes arrays rastreiam se um estado já foi bloqueado antes e quando foi bloqueado pela primeira vez
+   // SEM estes dados, estados ruins podem receber tentativas infinitas após restart
+   FileReadArray(h, g_stateWasBlockedBefore, 0, NUM_STATES);
+   FileReadArray(h, g_stateBlockTime, 0, NUM_STATES);
+   
    FileClose(h);
+   
+   // ✅ BUG FIX #6: Validar que arrays foram carregados corretamente
+   // Se configuração mudou (ex: BINS_MA_DIST alterado), NUM_STATES será diferente
+   // e arrays podem estar corrompidos ou com tamanho incorreto
+   bool arraysValid = true;
+   if(ArraySize(g_stateBlocked) != NUM_STATES)
+   {
+      Print("⚠️ ERRO: g_stateBlocked tem tamanho incorreto: ", ArraySize(g_stateBlocked), " (esperado: ", NUM_STATES, ")");
+      arraysValid = false;
+   }
+   if(ArraySize(g_stateWasBlockedBefore) != NUM_STATES)
+   {
+      Print("⚠️ ERRO: g_stateWasBlockedBefore tem tamanho incorreto: ", ArraySize(g_stateWasBlockedBefore), " (esperado: ", NUM_STATES, ")");
+      arraysValid = false;
+   }
+   
+   if(!arraysValid)
+   {
+      Print("❌ ATENÇÃO: Arrays carregados com tamanho incorreto!");
+      Print("   Isso pode indicar que a configuração foi alterada (BINS_* diferentes)");
+      Print("   Redimensionando arrays e inicializando com valores padrão...");
+      
+      // Redimensionar e inicializar arrays com valores seguros
+      ArrayResize(g_stateBlocked, NUM_STATES);
+      ArrayInitialize(g_stateBlocked, false);
+      
+      ArrayResize(g_stateWasBlockedBefore, NUM_STATES);
+      ArrayInitialize(g_stateWasBlockedBefore, false);
+      
+      ArrayResize(g_stateBlockTime, NUM_STATES);
+      ArrayInitialize(g_stateBlockTime, 0);
+      
+      ArrayResize(g_stateBlockCount, NUM_STATES);
+      ArrayInitialize(g_stateBlockCount, 0);
+      
+      Print("✅ Arrays redimensionados para NUM_STATES = ", NUM_STATES);
+   }
    
    Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
    Print("📊 Estados bloqueados: ", CountBlockedStates());
