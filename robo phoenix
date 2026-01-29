@@ -615,14 +615,15 @@ void UnblockGoodStates()
       {
          double winRate = CalculateWinRate(s);
          
-         // ✅ DESBLOQUEAR ESTADOS BONS (APENAS TESTAR, SEM RESETAR)
-         if(g_stateBlocked[s] && winRate >= 0.35)
+         // ✅ DESBLOQUEAR ESTADOS BONS (usar threshold configurável)
+         if(g_stateBlocked[s] && winRate >= UnblockWinRateThreshold)
          {
             g_stateBlocked[s] = false;
             g_stateLastUnblockTime[s] = TimeCurrent();
             statesUnblocked++;
             Print("✅ DESBLOQUEIO Estado ", s,
                   " | Win Rate boa: ", DoubleToString(winRate*100,1), "%",
+                  " | Threshold: ", DoubleToString(UnblockWinRateThreshold*100,1), "%",
                   " | Visitas: ", g_stateVisits[s]);
             
             g_memoryDirty = true;
@@ -756,8 +757,8 @@ void UnblockGoodStatesAutomatic()
       
       double winRate = CalculateWinRate(s);
       
-      // ✅ DESBLOQUEAR ESTADOS BONS - Win rate >= 35%
-      if(winRate >= 0.35)
+      // ✅ DESBLOQUEAR ESTADOS BONS - usar threshold configurável
+      if(winRate >= UnblockWinRateThreshold)
       {
          g_stateBlocked[s] = false;
          g_stateLastUnblockTime[s] = TimeCurrent();
@@ -767,7 +768,8 @@ void UnblockGoodStatesAutomatic()
          Print("✅ DESBLOQUEIO AUTOMÁTICO -> Estado: ", s,
                " | Visitas: ", g_stateVisits[s],
                " | Vitórias: ", g_stateWins[s],
-               " | Win Rate: ", DoubleToString(winRate*100, 1), "%");
+               " | Win Rate: ", DoubleToString(winRate*100, 1), "%",
+               " | Threshold: ", DoubleToString(UnblockWinRateThreshold*100, 1), "%");
          
          g_memoryDirty = true;
          InvalidateHUDCache();
@@ -1043,7 +1045,7 @@ void PerformMemoryMaintenance()
 // 2. UnblockGoodStates() - Chamada diariamente e periodicamente
 //    - Só executa se EnableIntelligentReset = true
 //    - Só executa se g_activeStatesCount >= MinStatesBeforeReset
-//    - Usa threshold de 35% de win rate
+//    - Usa threshold configurável (UnblockWinRateThreshold)
 //
 // 3. TestBlockedStatesPeriodically() - Reteste após período longo
 //    - Testa estados bloqueados há mais de 30 dias
@@ -6796,12 +6798,13 @@ void OnTick()
             {
                double winRate = CalculateWinRate(s);
                
-               // Auto-desbloqueio se performance melhorou
-               if(winRate >= 0.35 && g_stateVisits[s] >= 5)
+               // Auto-desbloqueio se performance melhorou (usar threshold configurável)
+               if(winRate >= UnblockWinRateThreshold && g_stateVisits[s] >= MinVisitsForBlockDecision)
                {
                   g_stateBlocked[s] = false;
                   Print("🔄 AUTO-DESBLOQUEIO Estado ", s, 
-                        " | Win Rate: ", DoubleToString(winRate*100,1), "%");
+                        " | Win Rate: ", DoubleToString(winRate*100,1), "%",
+                        " | Threshold: ", DoubleToString(UnblockWinRateThreshold*100,1), "%");
                }
                else
                {
@@ -7051,7 +7054,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       if(isBlocked)
       {
          // Estado bloqueado - verificar se está em fase de reativação
-         if(winRate >= 35.0 && visits >= MinVisitsForBlockDecision)
+         if(winRate >= UnblockWinRateThreshold * 100 && visits >= MinVisitsForBlockDecision)
          {
             statusInfo = " [🔄 EM REATIVAÇÃO - WinRate melhorou]";
          }
@@ -7334,7 +7337,7 @@ int OnInit()
    Print("===============================================================");
    Print("🔴 CORREÇÕES EXTREMAS IMPLEMENTADAS:");
    Print("   1. ✅ REMOÇÃO COMPLETA do limite de 10 visitas");
-   Print("   2. ✅ Auto-desbloqueio de estados com win rate > 35%");
+   Print("   2. ✅ Auto-desbloqueio de estados com win rate configurável (UnblockWinRateThreshold)");
    Print("   3. ✅ Reset parcial em vez de completo");
    Print("   4. ✅ Correção automática de estados travados");
    Print("   5. ✅ Sistema anti-bloqueio-erroneo ativado");
