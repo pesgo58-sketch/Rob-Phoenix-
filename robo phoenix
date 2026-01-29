@@ -994,9 +994,19 @@ void PerformMemoryMaintenance()
       PrintBlockingSystemSummary();
    }
    
-   // Salvar após manutenção
-   SaveBrain();
-   SaveState();
+   // ✅ BUG FIX #10: Salvar apenas se houve modificações
+   // Evita writes desnecessários ao disco a cada hora
+   if(g_memoryDirty)
+   {
+      Print("💾 Salvando memória (houve modificações)...");
+      SaveBrain();
+      SaveState();
+      g_memoryDirty = false;
+   }
+   else
+   {
+      Print("⏭️ Pulando save (sem modificações desde último save)");
+   }
    
    Print("✅ MANUTENÇÃO COMPLETA REALIZADA");
    Print("   • Decay aplicado: ", g_totalDecayCycles, " ciclos");
@@ -1434,10 +1444,21 @@ void TestBlockedStatesPeriodically()
       // Se estado está bloqueado há mais de 30 dias, dar nova chance
       if(timeSinceBlock > 2592000) // 30 dias em segundos
       {
-         // Resetar estatísticas mas manter Q-values (aprendizado)
+         // ✅ BUG FIX #8: Resetar Q-values também para reteste verdadeiramente limpo
+         // Se não resetar Q-values, estado com Q negativo continua sendo evitado
+         // mesmo após resetar estatísticas, impedindo reteste genuíno
+         Print("🧪 Resetando estado ", state, " para reteste limpo (incluindo Q-values)");
+         
          g_stateVisits[state] = 0;
          g_stateWins[state] = 0;
          g_stateLosses[state] = 0;
+         
+         // Resetar Q-values para este estado (reteste limpo)
+         for(int a = 0; a < NUM_ACTIONS; a++)
+         {
+            int idx = state * NUM_ACTIONS + a;
+            g_Q[idx] = 0.0;
+         }
          
          // Desbloquear temporariamente para teste
          g_stateBlocked[state] = false;
@@ -2657,26 +2678,36 @@ bool LoadBrain()
    if(!FileIsExist(fn, FILE_COMMON))
    {
       Print("⚠️ Arquivo principal não encontrado: ", fn);
-      Print("🔍 Procurando backup único...");
+      Print("🔍 Procurando backups...");
       
-      string backupFile = GetBackupFileName(0);
-      Print("   Verificando: ", backupFile);
-      if(FileIsExist(backupFile, FILE_COMMON))
+      // ✅ BUG FIX #12: Tentar TODOS os backups disponíveis, não apenas backup 0
+      for(int backupNum = 0; backupNum < MaxBackupFiles; backupNum++)
       {
-         Print("✅ Backup encontrado: ", backupFile);
-         Print("🔄 Carregando backup...");
-         bool result = LoadBrainFromFile(backupFile);
-         if(result)
+         string backupFile = GetBackupFileName(backupNum);
+         Print("   Verificando backup #", backupNum, ": ", backupFile);
+         
+         if(FileIsExist(backupFile, FILE_COMMON))
          {
-            Print("✅ Backup carregado com sucesso!");
-            Print("💾 Copiando backup para arquivo principal...");
-            SaveBrainToFile(fn);
-            Print("✅ Backup copiado para arquivo principal: ", fn);
+            Print("✅ Backup #", backupNum, " encontrado: ", backupFile);
+            Print("🔄 Carregando backup #", backupNum, "...");
+            bool result = LoadBrainFromFile(backupFile);
+            if(result)
+            {
+               Print("✅ Backup #", backupNum, " carregado com sucesso!");
+               Print("💾 Copiando backup para arquivo principal...");
+               SaveBrainToFile(fn);
+               Print("✅ Backup copiado para arquivo principal: ", fn);
+               return result;
+            }
+            else
+            {
+               Print("❌ Backup #", backupNum, " corrompido, tentando próximo...");
+            }
          }
-         return result;
       }
       
-      Print("❌ Nenhum backup encontrado, será criada nova memória");
+      Print("❌ Nenhum backup válido encontrado entre ", MaxBackupFiles, " backups");
+      Print("   Será criada nova memória");
       return false;
    }
    
@@ -2689,23 +2720,34 @@ bool LoadBrain()
    else
    {
       Print("❌ ERRO ao carregar arquivo principal!");
-      Print("🔍 Tentando carregar backup único como fallback...");
+      Print("🔍 Tentando carregar backups como fallback...");
       
-      string backupFile = GetBackupFileName(0);
-      if(FileIsExist(backupFile, FILE_COMMON))
+      // ✅ BUG FIX #12: Tentar TODOS os backups disponíveis em ordem
+      for(int backupNum = 0; backupNum < MaxBackupFiles; backupNum++)
       {
-         Print("🔄 Tentando backup: ", backupFile);
-         result = LoadBrainFromFile(backupFile);
-         if(result)
+         string backupFile = GetBackupFileName(backupNum);
+         
+         if(FileIsExist(backupFile, FILE_COMMON))
          {
-            Print("✅ Backup carregado com sucesso!");
-            Print("💾 Copiando backup para arquivo principal...");
-            SaveBrainToFile(fn);
-            Print("✅ Backup copiado para arquivo principal: ", fn);
-            return result;
+            Print("🔄 Tentando backup #", backupNum, ": ", backupFile);
+            result = LoadBrainFromFile(backupFile);
+            if(result)
+            {
+               Print("✅ Backup #", backupNum, " carregado com sucesso!");
+               Print("💾 Copiando backup para arquivo principal...");
+               SaveBrainToFile(fn);
+               Print("✅ Backup copiado para arquivo principal: ", fn);
+               return result;
+            }
+            else
+            {
+               Print("❌ Backup #", backupNum, " também corrompido, tentando próximo...");
+            }
          }
       }
-      Print("❌ Falha ao carregar qualquer arquivo");
+      
+      Print("❌ CRÍTICO: Arquivo principal E todos os ", MaxBackupFiles, " backups falharam!");
+      Print("   Considere restaurar de backup manual ou começar nova memória");
    }
    
    return result;
