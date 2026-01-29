@@ -4572,21 +4572,41 @@ int ChooseAction(int state)
       }
    }
    
-   // ⚠️ CORREÇÃO: REDUZIR EXPLORAÇÃO DRAMATICAMENTE
+   // ✅ BUG FIX #9: REDUZIR exploração inicial de 80% para 40%
+   // 80% causava excesso de trades aleatórios ruins, bloqueando estados prematuramente
    if(g_stateVisits[state] < MinStateVisitsToTrade)
    {
-      double eps = 0.8; // 80% de exploração para estados novos
+      double eps = 0.40; // ✅ REDUZIDO de 0.80 para 0.40 (40%)
       
       if(((double)MathRand() / 32767.0) < eps) 
       {
-         int randomAction = 1 + (MathRand() % 2);
-         Print("🔍 EXPLORAÇÃO (estado novo): Ação aleatória ", randomAction, " | Estado: ", state);
+         // ✅ Usar Q-values iniciais ao invés de 50/50 puro
+         // Mesmo com poucos dados, escolher baseado no aprendizado inicial
+         double buyQ = 0, sellQ = 0;
+         int buyIdx = state * NUM_ACTIONS + 1;
+         int sellIdx = state * NUM_ACTIONS + 2;
+         
+         if(buyIdx < ArraySize(g_Q)) buyQ = g_Q[buyIdx];
+         if(sellIdx < ArraySize(g_Q)) sellQ = g_Q[sellIdx];
+         
+         // Escolher baseado em Q inicial (com pequeno random para variedade)
+         int randomAction = (buyQ >= sellQ) ? 1 : 2;
+         if(MathAbs(buyQ - sellQ) < 0.1)  // Se Q's muito próximos, aleatorizar
+         {
+            randomAction = 1 + (MathRand() % 2);
+         }
+         
+         Print("🔍 EXPLORAÇÃO (estado novo com bias Q): ", 
+               randomAction == 1 ? "BUY" : "SELL", 
+               " | BuyQ=", DoubleToString(buyQ,2), 
+               " | SellQ=", DoubleToString(sellQ,2));
          g_statusMessage = "🔍 Exploração (estado novo)";
          return randomAction;
       }
       else
       {
-         Print("🤔 Estado novo, mas escolhendo NOP (20% chance)");
+         // 60% chance de NOP para estados novos (mais conservador)
+         Print("🤔 Estado novo, escolhendo NOP (60% chance - conservador)");
          return 0;
       }
    }
@@ -5952,36 +5972,89 @@ bool CheckVolatility()
    return true;
 }
 
+// ✅ BUG FIX #4: Sistema de pontuação ao invés de ALL-OR-NOTHING
+// Antes: TODOS os 4 indicadores precisavam confirmar (muito restritivo)
+// Depois: Pelo menos 75% dos indicadores ativos precisam confirmar
 bool ValidateAllIndicators(bool isBuy)
 {
    Print("=== VALIDAÇÃO DE INDICADORES PARA ", isBuy ? "BUY" : "SELL", " ===");
    
-   if(!ValidateWithRSI(isBuy))
+   int validationScore = 0;
+   int totalValidations = 0;
+   
+   // Validar apenas indicadores habilitados
+   if(UseRSIValidation)
    {
-      Print("❌ VALIDAÇÃO FALHOU: RSI");
-      return false;
+      totalValidations++;
+      if(ValidateWithRSI(isBuy))
+      {
+         Print("✅ RSI: Confirmado");
+         validationScore++;
+      }
+      else
+      {
+         Print("❌ RSI: Não confirmado");
+      }
    }
    
-   if(!ValidateWithBollingerBands(isBuy))
+   if(UseBBValidation)
    {
-      Print("❌ VALIDAÇÃO FALHOU: Bollinger Bands");
-      return false;
+      totalValidations++;
+      if(ValidateWithBollingerBands(isBuy))
+      {
+         Print("✅ Bollinger Bands: Confirmado");
+         validationScore++;
+      }
+      else
+      {
+         Print("❌ Bollinger Bands: Não confirmado");
+      }
    }
    
-   if(!ValidateWithADX())
+   if(UseADXValidation)
    {
-      Print("❌ VALIDAÇÃO FALHOU: ADX");
-      return false;
+      totalValidations++;
+      if(ValidateWithADX())
+      {
+         Print("✅ ADX: Confirmado");
+         validationScore++;
+      }
+      else
+      {
+         Print("❌ ADX: Não confirmado");
+      }
    }
    
-   if(!ValidateWithTrend(isBuy))
+   if(UseTrendValidation)
    {
-      Print("❌ VALIDAÇÃO FALHOU: Tendência MA");
-      return false;
+      totalValidations++;
+      if(ValidateWithTrend(isBuy))
+      {
+         Print("✅ Tendência: Confirmada");
+         validationScore++;
+      }
+      else
+      {
+         Print("❌ Tendência: Não confirmada");
+      }
    }
    
-   Print("✅ TODOS OS INDICADORES VALIDADOS COM SUCESSO!");
-   return true;
+   // Se nenhuma validação está habilitada, aceitar trade
+   if(totalValidations == 0)
+   {
+      Print("⚠️ Nenhuma validação habilitada - trade aceito por padrão");
+      return true;
+   }
+   
+   // ✅ ACEITAR trade se pelo menos 75% dos indicadores confirmarem
+   double confirmationRate = SafeDivide((double)validationScore, (double)totalValidations, 0.0);
+   bool isValid = confirmationRate >= 0.75;
+   
+   Print(isValid ? "✅ " : "❌ ", "RESULTADO: ", validationScore, "/", totalValidations, 
+         " indicadores confirmam (", DoubleToString(confirmationRate*100,1), "%)");
+   Print(isValid ? "✅ TRADE APROVADO!" : "❌ TRADE REJEITADO (mínimo 75% necessário)");
+   
+   return isValid;
 }
 
 // ======================================================================
