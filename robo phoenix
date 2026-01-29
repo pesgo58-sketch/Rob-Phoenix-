@@ -81,7 +81,7 @@ const double BB_NEUTRAL_POSITION = 0.5;
 // 🛡️ 1. CONTROLE DE RISCO E LIMITES
 // ──────────────────────────────────────────────────────────────────────
 input group "──── 🛡️ LIMITES DIÁRIOS ────";
-input int    MaxTradesPerDay          = 30;           // Máximo de trades por dia
+input int    MaxTradesPerDay          = 100;          // ✅ BUG FIX #14: Aumentado de 30 para 100 (aprendizado efetivo)
 input int    ConsecutiveLossLimit     = 15;           // Limite de perdas consecutivas
 
 input group "──── 💰 NEGOCIAÇÃO BÁSICA ────";
@@ -217,7 +217,7 @@ input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqu
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
 input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input int    MinVisitsForBlockDecision    = 15;       // ✅ BUG FIX #7: Reduzido de 30 para 15 (aprendizado mais rápido)
 input bool   EnableBlockingDebug      = false;        // Logs detalhados do sistema de bloqueio
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
@@ -510,6 +510,40 @@ double GetValidatedPoint()
    }
    
    return point;
+}
+
+// ✅ BUG FIX #8: Função para copiar buffer com retry automático
+// CopyBuffer pode falhar temporariamente, retry garante que dados sejam obtidos
+bool CopyBufferWithRetry(int handle, int buffer_num, int start, int count, double &array[], int maxRetries = 3)
+{
+   if(handle == INVALID_HANDLE)
+   {
+      Print("❌ Handle inválido passado para CopyBufferWithRetry");
+      return false;
+   }
+   
+   for(int attempt = 0; attempt < maxRetries; attempt++)
+   {
+      int copied = CopyBuffer(handle, buffer_num, start, count, array);
+      if(copied >= count)
+      {
+         if(attempt > 0)
+         {
+            Print("✅ CopyBuffer sucesso na tentativa ", attempt + 1);
+         }
+         return true;
+      }
+      
+      if(attempt < maxRetries - 1)
+      {
+         Print("⚠️ CopyBuffer falhou (tentativa ", attempt + 1, "/", maxRetries, 
+               "), retornado: ", copied, ", esperado: ", count);
+         Sleep(100);  // Aguardar 100ms antes de retry
+      }
+   }
+   
+   Print("❌ CopyBuffer falhou após ", maxRetries, " tentativas (buffer ", buffer_num, ")");
+   return false;
 }
 
 // ======================================================================
@@ -5158,34 +5192,35 @@ int GetCurrentState()
    ArraySetAsSeries(bb_lower, true);
    ArraySetAsSeries(atr, true);
    
-   if(CopyBuffer(g_maHandle, 0, 0, 1, ma) < 1) 
+   // ✅ BUG FIX #8: Usar CopyBufferWithRetry para garantir dados
+   if(!CopyBufferWithRetry(g_maHandle, 0, 0, 1, ma)) 
    {
-      Print("❌ Erro ao copiar MA");
+      Print("❌ Erro ao copiar MA após retries");
       return -1;
    }
-   if(CopyBuffer(g_rsiHandle, 0, 0, 1, rsi) < 1) 
+   if(!CopyBufferWithRetry(g_rsiHandle, 0, 0, 1, rsi)) 
    {
-      Print("❌ Erro ao copiar RSI");
+      Print("❌ Erro ao copiar RSI após retries");
       return -1;
    }
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) 
+   if(!CopyBufferWithRetry(g_adxHandle, 0, 0, 1, adx)) 
    {
-      Print("❌ Erro ao copiar ADX");
+      Print("❌ Erro ao copiar ADX após retries");
       return -1;
    }
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) 
+   if(!CopyBufferWithRetry(g_bbHandle, 0, 0, 1, bb_upper)) 
    {
-      Print("❌ Erro ao copiar BB Upper");
+      Print("❌ Erro ao copiar BB Upper após retries");
       return -1;
    }
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) 
+   if(!CopyBufferWithRetry(g_bbHandle, 2, 0, 1, bb_lower)) 
    {
-      Print("❌ Erro ao copiar BB Lower");
+      Print("❌ Erro ao copiar BB Lower após retries");
       return -1;
    }
-   if(CopyBuffer(g_atrHandle, 0, 0, 2, atr) < 2) 
+   if(!CopyBufferWithRetry(g_atrHandle, 0, 0, 2, atr, 3))  // ATR precisa 2 valores
    {
-      Print("❌ Erro ao copiar ATR");
+      Print("❌ Erro ao copiar ATR após retries");
       return -1;
    }
    
