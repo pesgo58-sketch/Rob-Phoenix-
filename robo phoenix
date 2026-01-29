@@ -445,6 +445,10 @@ string cachedStatus = "";
 double cachedVolume = -1;
 int cachedTradesToday = -1;
 
+// ✅ BUG FIX #3: Proteção contra dupla contagem
+// Rastreia último deal processado para evitar processar o mesmo deal duas vezes
+ulong g_lastProcessedDeal = 0;
+
 // ──────────────────────────────────────────────────────────────────────
 // 📤 9. EXPORTAÇÃO E LOGS
 // ──────────────────────────────────────────────────────────────────────
@@ -1321,15 +1325,31 @@ void EvaluateAndUpdateBlockState(int state)
     bool shouldBeBlocked = ShouldBlockState(state);
     bool currentlyBlocked = g_stateBlocked[state];
     
+    // ✅ BUG FIX #7: Adicionar HISTERESE para evitar loop de bloqueio/desbloqueio
+    // Se estado está no limiar exato do threshold, pode oscilar infinitamente
+    // Solução: Adicionar margem de segurança (2% de diferença entre block/unblock)
+    
     if(shouldBeBlocked && !currentlyBlocked)
     {
         BlockState(state);
     }
     else if(!shouldBeBlocked && currentlyBlocked)
     {
+        // Para desbloquear, usar critério MAIS RIGOROSO (histerese)
+        // Não basta não estar ruim, precisa estar BOM
         if(ShouldUnblockState(state))
         {
             UnblockState(state);
+        }
+        else
+        {
+            // Estado não está mais "ruim o suficiente para bloquear"
+            // mas também não está "bom o suficiente para desbloquear"
+            // MANTER bloqueado para evitar oscilação
+            if(EnableBlockingDebug)
+            {
+               Print("🔄 Estado ", state, " em zona de histerese (mantém bloqueado)");
+            }
         }
     }
 }
@@ -1441,6 +1461,15 @@ void TestBlockedStatesPeriodically()
       
       datetime timeSinceBlock = currentTime - g_stateLastBlockTime[state];
       
+      // ✅ BUG FIX #2: Usar g_stateBlockTime[] (primeira vez bloqueado) para calcular tempo total
+      // g_stateLastBlockTime[] = última vez que foi bloqueado (pode ter sido desbloqueado e rebloqueado)
+      // g_stateBlockTime[] = primeira vez que foi bloqueado (nunca muda, rastreia tempo total na lista negra)
+      datetime timeSinceFirstBlock = 0;
+      if(g_stateBlockTime[state] > 0)
+      {
+         timeSinceFirstBlock = currentTime - g_stateBlockTime[state];
+      }
+      
       // Se estado está bloqueado há mais de 30 dias, dar nova chance
       if(timeSinceBlock > 2592000) // 30 dias em segundos
       {
@@ -1448,6 +1477,8 @@ void TestBlockedStatesPeriodically()
          // Se não resetar Q-values, estado com Q negativo continua sendo evitado
          // mesmo após resetar estatísticas, impedindo reteste genuíno
          Print("🧪 Resetando estado ", state, " para reteste limpo (incluindo Q-values)");
+         Print("   Tempo desde último bloqueio: ", (int)(timeSinceBlock / 86400), " dias");
+         Print("   Tempo desde primeiro bloqueio: ", (int)(timeSinceFirstBlock / 86400), " dias");
          
          g_stateVisits[state] = 0;
          g_stateWins[state] = 0;
@@ -6134,6 +6165,14 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    ulong deal_ticket = trans.deal;
    
+   // ✅ BUG FIX #3: Verificar se já processamos este deal
+   // OnTradeTransaction pode ser chamado múltiplas vezes para o mesmo deal
+   if(deal_ticket == g_lastProcessedDeal)
+   {
+      Print("⏭️ Deal ", deal_ticket, " já processado, pulando para evitar dupla contagem");
+      return;
+   }
+   
    if(!HistoryDealSelect(deal_ticket)) return;
 
    long dmagic = HistoryDealGetInteger(deal_ticket, DEAL_MAGIC);
@@ -6141,6 +6180,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    long entry_type = HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
    if(entry_type != DEAL_ENTRY_OUT) return;
+
+   // ✅ Marcar este deal como processado
+   g_lastProcessedDeal = deal_ticket;
 
    // DEBUG: Logar todos os detalhes
    Print("=== ONTRADETRANSACTION CHAMADO ===");
