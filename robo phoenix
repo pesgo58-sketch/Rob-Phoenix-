@@ -981,6 +981,9 @@ void PerformMemoryMaintenance()
       AutoUnblockGoodStates();
    }
    
+   // 5. ✅ BUG FIX #6: Limpar posições fechadas do tracking MAE/MFE
+   CleanClosedPositionsFromTracking();
+   
    lastMaintenance = TimeCurrent();
    
    // 🔍 DEBUG: Resumo detalhado do sistema de bloqueio (se habilitado)
@@ -997,6 +1000,7 @@ void PerformMemoryMaintenance()
    Print("   • Decay aplicado: ", g_totalDecayCycles, " ciclos");
    Print("   • Estados ativos: ", g_activeStatesCount);
    Print("   • Estados bloqueados: ", CountBlockedStates());
+   Print("   • Posições trackadas: ", g_trackedPositionsCount); // ✅ Novo log
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1846,6 +1850,47 @@ bool GetPositionMAEMFE(ulong ticket, double &mae, double &mfe)
    mae = 0.0;
    mfe = 0.0;
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| ✅ BUG FIX #6: Limpa posições fechadas do sistema de tracking    |
+//| Previne memory leak removendo posições que não existem mais     |
+//+------------------------------------------------------------------+
+void CleanClosedPositionsFromTracking()
+{
+   // Varrer array de trás para frente para evitar problemas com shift
+   for(int i = g_trackedPositionsCount - 1; i >= 0; i--)
+   {
+      // Verificar se posição ainda existe
+      if(!PositionSelectByTicket(g_positionTickets[i]))
+      {
+         // Posição não existe mais, remover do tracking
+         Print("🧹 Limpando posição fechada do tracking: #", g_positionTickets[i]);
+         
+         // Shift elementos do array
+         for(int j = i; j < g_trackedPositionsCount - 1; j++)
+         {
+            g_positionTickets[j] = g_positionTickets[j + 1];
+            g_positionMAE[j] = g_positionMAE[j + 1];
+            g_positionMFE[j] = g_positionMFE[j + 1];
+            g_positionEntry[j] = g_positionEntry[j + 1];
+            g_positionSL[j] = g_positionSL[j + 1];
+            g_positionTP[j] = g_positionTP[j + 1];
+            g_positionDirection[j] = g_positionDirection[j + 1];
+         }
+         
+         g_trackedPositionsCount--;
+         
+         // Redimensionar arrays
+         ArrayResize(g_positionTickets, g_trackedPositionsCount);
+         ArrayResize(g_positionMAE, g_trackedPositionsCount);
+         ArrayResize(g_positionMFE, g_trackedPositionsCount);
+         ArrayResize(g_positionEntry, g_trackedPositionsCount);
+         ArrayResize(g_positionSL, g_trackedPositionsCount);
+         ArrayResize(g_positionTP, g_trackedPositionsCount);
+         ArrayResize(g_positionDirection, g_trackedPositionsCount);
+      }
+   }
 }
 
 
@@ -6307,7 +6352,17 @@ void InitializeMonthlyStats()
 // Atualiza estatísticas mensais com novo trade
 void UpdateMonthlyStats(double net_profit)
 {
-   if(!g_monthlyStatsInitialized) InitializeMonthlyStats();
+   if(!g_monthlyStatsInitialized) 
+   {
+      InitializeMonthlyStats();
+      
+      // ✅ BUG FIX #7: Verificar se inicialização teve sucesso
+      if(!g_monthlyStatsInitialized)
+      {
+         Print("⚠️ ERRO: Falha ao inicializar estatísticas mensais");
+         return; // Abortar se ainda não inicializado
+      }
+   }
    
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
