@@ -548,8 +548,8 @@ void DebugStuckStatesEnhanced()
    // causaria desbloqueios prematuros de estados que ainda não provaram ser lucrativos.
    if(wronglyBlocked > 0)
    {
-      Print("⚠️ ATENÇÃO: ", wronglyBlocked, " estados com possível bloqueio prematuro detectados");
-      Print("   Estes estados serão reavaliados automaticamente pelos sistemas:");
+      Print("⚠️ ATENÇÃO: ", wronglyBlocked, " estados bloqueados com win rate >= 30% detectados");
+      Print("   Estes estados podem estar bloqueados inadequadamente e serão reavaliados pelos sistemas:");
       Print("   • AutoUnblockGoodStates() - quando atingirem ", DoubleToString(UnblockWinRateThreshold*100,1), "% win rate");
       Print("   • UnblockGoodStates() - reavaliação periódica de estados bloqueados");
       Print("   • TestBlockedStatesPeriodically() - reteste após período de espera");
@@ -861,7 +861,7 @@ void PrintBlockingSystemSummary()
          DoubleToString((double)totalStatesVisited/NUM_STATES*100, 1), "%)");
    Print("   • Estados com visitas >= ", MinVisitsForBlockDecision, ": ", statesWithMinVisits);
    Print("   • Estados atualmente bloqueados: ", statesBlocked, " (", 
-         DoubleToString(SafeDivide((double)statesBlocked, (double)statesWithMinVisits, 0.0)*100, 1), "% dos avaliáveis)");
+         DoubleToString(SafeDivide((double)statesBlocked, (double)statesWithMinVisits, 0.0)*100, 1), "% dos avaliaveis)");
    Print("   • Estados bloqueados com WR >= 45%: ", statesBlockedWithGoodWR);
    Print("   • Estados ativos com WR < 30%: ", statesUnblockedWithBadWR);
    
