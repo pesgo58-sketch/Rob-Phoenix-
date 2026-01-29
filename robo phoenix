@@ -4529,7 +4529,7 @@ void UpdateQ_NOP(int state)
    {
       int idx = state * NUM_ACTIONS;
       double oldQ = g_Q[idx];
-      double newQ = oldQ - 0.02;  // ✅ PENALIDADE MODERADA: -0.02 (BTC M5 precisa de NOP mais tolerante)
+      double newQ = oldQ - 0.10;  // ✅ BUG FIX #5: AUMENTADO de -0.02 para -0.10 (desencorajar NOP)
       g_Q[idx] = CompressQValue(newQ);
       
       g_memoryDirty = true;
@@ -4644,26 +4644,21 @@ int ChooseAction(int state)
    if(nopIdx >= 0 && nopIdx < ArraySize(g_Q))
       nopQ = g_Q[nopIdx];
    
-   // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
-   double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)  // ✅ REDUZIDO: 15% ao invés de 30%
+   // ✅ BUG FIX #5: REDUZIR escolha de NOP - apenas em casos extremos
+   // Estados ruins já são BLOQUEADOS, não precisam virar NOP
+   // REMOVER escolha de NOP por win rate - deixar Q-Learning decidir
+   
+   // NOP só é escolhido se for MUITO superior (10x melhor)
+   if(nopQ > best * 10.0 && bestA > 0)  // ✅ AUMENTADO de 5x para 10x
    {
       bestA = 0;
-      Print("🤔 NOP escolhido (estado muito ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
-      g_statusMessage = "NOP (estado muito ruim)";
-   }
-   else if(nopQ > best * 5.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 5x melhor ao invés de 1.5x
-   {
-      bestA = 0;
-      Print("🤔 NOP escolhido (superioridade: ", nopQ, " vs ", best, ")");
+      Print("🤔 NOP escolhido (superioridade extrema: ", DoubleToString(nopQ,2), 
+            " vs melhor ação: ", DoubleToString(best,2), ")");
       g_statusMessage = "NOP (melhor opção)";
    }
-   else if(best <= -50.0)  // ✅ REDUZIDO: -50 ao invés de -20 (ações precisam estar MUITO ruins)
-   {
-      bestA = 0;
-      Print("🤔 NOP escolhido (ações de trade muito ruins: ", best, ")");
-      g_statusMessage = "NOP (ações ruins)";
-   }
+   // ✅ REMOVIDO: Escolha de NOP por win rate baixo
+   // ✅ REMOVIDO: Escolha de NOP por Q negativo
+   // Deixar Q-Learning aprender naturalmente
    else if(bestA == 1 || bestA == 2)
    {
       if(bestA == 1) g_statusMessage = "BUY recomendado";
