@@ -689,10 +689,12 @@ void ApplyStateDecay()
             statesDecayed++;
             
             // Atualizar Q-values gradualmente
+            const double EPSILON = 0.0000001; // ✅ BUG FIX #8: Tolerância para comparação float
             for(int a = 0; a < NUM_ACTIONS; a++)
             {
                int idx = s * NUM_ACTIONS + a;
-               if(g_Q[idx] != 0.0)
+               // ✅ BUG FIX #8: Usar tolerância ao invés de comparação exata
+               if(MathAbs(g_Q[idx]) > EPSILON)
                {
                   g_Q[idx] *= (1.0 - DECAY_FACTOR);
                }
@@ -2299,6 +2301,18 @@ bool LoadBrainFromFile(string filename)
    
    // 🔧 REGRA 3 — Converter para int se necessário
    int tempActiveStatesCount = FileReadInteger(h);
+   
+   // ✅ BUG FIX #9: Validar contador antes de usar para evitar loop infinito/crash
+   if(tempActiveStatesCount < 0 || tempActiveStatesCount > MaxMemoryStates)
+   {
+      Print("❌ ERRO CRÍTICO: Contador de estados corrompido no arquivo!");
+      Print("   Valor lido: ", tempActiveStatesCount);
+      Print("   Esperado: 0 a ", MaxMemoryStates);
+      Print("   O arquivo pode estar corrompido. Não é seguro continuar.");
+      FileClose(h);
+      return false;
+   }
+   
    g_activeStatesCount = tempActiveStatesCount;
    
    Print("📊 Carregando ", g_activeStatesCount, " estados ativos...");
@@ -4115,7 +4129,14 @@ void UpdateQ(int state, int action, double reward)
 {
    if(state < 0 || state >= NUM_STATES) return;
    if(action < 0 || action >= NUM_ACTIONS) return;
-   if(ArraySize(g_Q) <= state * NUM_ACTIONS + action) return;
+   
+   // ✅ BUG FIX #2: Validar tamanho do array ANTES de calcular índice
+   int idx = state * NUM_ACTIONS + action;
+   if(idx < 0 || idx >= ArraySize(g_Q))
+   {
+      Print("⚠️ ERRO: Índice Q fora dos limites: ", idx, " (tamanho: ", ArraySize(g_Q), ")");
+      return;
+   }
    
    // ✅ REMOVER QUALQUER VERIFICAÇÃO DE LIMITE DE VISITAS
    // NÃO DEVE TER: if(g_stateVisits[state] >= 10) return;
@@ -4141,8 +4162,6 @@ void UpdateQ(int state, int action, double reward)
    
    AddActiveState(state);
    
-   int idx = state * NUM_ACTIONS + action;
-   
    // ✅ FIX BUG #2: Q-learning correto com componente futuro
    double alpha = LearningRate;
    double gamma = 0.95; // Fator de desconto
@@ -4158,7 +4177,8 @@ void UpdateQ(int state, int action, double reward)
          for(int a = 0; a < NUM_ACTIONS; a++)
          {
             int nextIdx = nextState * NUM_ACTIONS + a;
-            if(nextIdx < ArraySize(g_Q) && g_Q[nextIdx] > maxNextQ)
+            // ✅ BUG FIX #2: Sempre validar bounds antes de acessar
+            if(nextIdx >= 0 && nextIdx < ArraySize(g_Q) && g_Q[nextIdx] > maxNextQ)
                maxNextQ = g_Q[nextIdx];
          }
       }
@@ -4167,7 +4187,16 @@ void UpdateQ(int state, int action, double reward)
    // Q-learning completo: Q(s,a) = Q(s,a) + α[r + γ*max(Q(s',a')) - Q(s,a)]
    double newq = old + alpha * (reward + gamma * maxNextQ - old);
    
-   g_Q[idx] = CompressQValue(newq);
+   // ✅ BUG FIX #2: Validar novamente antes de escrever (caso array tenha sido redimensionado)
+   if(idx >= 0 && idx < ArraySize(g_Q))
+   {
+      g_Q[idx] = CompressQValue(newq);
+   }
+   else
+   {
+      Print("⚠️ ERRO: Não foi possível atualizar Q[", idx, "] - array redimensionado");
+      return;
+   }
    
    g_stateLastUpdate[state] = g_totalTrades;
    
@@ -4868,6 +4897,43 @@ int GetTimeBucket()
 // ======================================================================
 int GetCurrentState()
 {
+   // ✅ BUG FIX #10: Validar handles ANTES de tentar copiar buffers
+   if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
+      g_adxHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
+      g_atrHandle == INVALID_HANDLE)
+   {
+      Print("⚠️ ERRO CRÍTICO: Um ou mais handles de indicadores estão inválidos!");
+      Print("   MA Handle: ", g_maHandle == INVALID_HANDLE ? "INVÁLIDO" : "OK");
+      Print("   RSI Handle: ", g_rsiHandle == INVALID_HANDLE ? "INVÁLIDO" : "OK");
+      Print("   ADX Handle: ", g_adxHandle == INVALID_HANDLE ? "INVÁLIDO" : "OK");
+      Print("   BB Handle: ", g_bbHandle == INVALID_HANDLE ? "INVÁLIDO" : "OK");
+      Print("   ATR Handle: ", g_atrHandle == INVALID_HANDLE ? "INVÁLIDO" : "OK");
+      
+      // Tentar recriar handles inválidos
+      Print("🔄 Tentando recriar handles de indicadores...");
+      if(g_maHandle == INVALID_HANDLE)
+         g_maHandle = iMA(_Symbol, _Period, MAPeriod, 0, MAMethod, PRICE_CLOSE);
+      if(g_rsiHandle == INVALID_HANDLE)
+         g_rsiHandle = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
+      if(g_adxHandle == INVALID_HANDLE)
+         g_adxHandle = iADX(_Symbol, _Period, 20);
+      if(g_bbHandle == INVALID_HANDLE)
+         g_bbHandle = iBands(_Symbol, _Period, BBPeriod, 0, BBDeviation, PRICE_CLOSE);
+      if(g_atrHandle == INVALID_HANDLE)
+         g_atrHandle = iATR(_Symbol, _Period, ATRPeriod);
+      
+      // Verificar se recriação teve sucesso
+      if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
+         g_adxHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
+         g_atrHandle == INVALID_HANDLE)
+      {
+         Print("❌ FALHA: Não foi possível recriar todos os handles");
+         return -1;
+      }
+      
+      Print("✅ Handles recriados com sucesso");
+   }
+
    double ma[], rsi[], adx[], bb_upper[], bb_lower[], atr[];
    ArraySetAsSeries(ma, true);
    ArraySetAsSeries(rsi, true);
