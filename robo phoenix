@@ -278,7 +278,7 @@ int g_stateWins[];                     // Contadores de vitórias por estado
 int g_stateLosses[];                   // Contadores de perdas por estado
 double g_stateProfitSum[];             // Soma de lucros por estado (para Sharpe Ratio)
 double g_stateProfitSqSum[];           // Soma de lucros ao quadrado por estado (para Sharpe Ratio)
-int g_stateLastUpdate[];               // Último update de cada estado
+ulong g_stateLastUpdate[];             // Último update de cada estado (ulong para compatibilidade com g_totalTrades)
 bool g_stateBlocked[];                 // Estados bloqueados por má performance
 datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
 datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio
@@ -2450,7 +2450,7 @@ bool SaveBrainToFile(string filename)
       FileWriteInteger(h, (int)g_stateVisits[state]);
       FileWriteInteger(h, (int)g_stateLosses[state]);
       FileWriteInteger(h, (int)g_stateWins[state]);
-      FileWriteInteger(h, (int)g_stateLastUpdate[state]);
+      FileWriteLong(h, (long)g_stateLastUpdate[state]);  // ✅ FIX: ulong agora salvo como long
       FileWriteInteger(h, (int)g_stateBlocked[state]);
       FileWriteLong(h, (long)g_stateLastBlockTime[state]);
       FileWriteLong(h, (long)g_stateLastUnblockTime[state]);
@@ -2626,7 +2626,7 @@ bool LoadBrainFromFile(string filename)
          g_stateVisits[state] = FileReadInteger(h);
          g_stateLosses[state] = FileReadInteger(h);
          g_stateWins[state] = FileReadInteger(h);
-         g_stateLastUpdate[state] = FileReadInteger(h);
+         g_stateLastUpdate[state] = (ulong)FileReadLong(h);  // ✅ FIX: ulong agora lido como long
          g_stateBlocked[state] = (bool)FileReadInteger(h);
          g_stateLastBlockTime[state] = (datetime)FileReadLong(h);
          g_stateLastUnblockTime[state] = (datetime)FileReadLong(h);
@@ -7350,10 +7350,10 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          FileWrite(file_handle, lossesInfo);
          
          // Verificação de integridade
-         int soma = g_totalWins + g_totalLosses;
-         int diferenca = g_totalTrades - soma;
-         FileWrite(file_handle, "  Soma Wins+Losses: " + IntegerToString(soma));
-         FileWrite(file_handle, "  Diferença (NOPs): " + IntegerToString(diferenca));
+         ulong soma = g_totalWins + g_totalLosses;  // ✅ FIX: ulong para compatibilidade
+         ulong diferenca = g_totalTrades - soma;     // ✅ FIX: ulong para compatibilidade
+         FileWrite(file_handle, "  Soma Wins+Losses: " + IntegerToString((long)soma));
+         FileWrite(file_handle, "  Diferença (NOPs): " + IntegerToString((long)diferenca));
       }
       else
       {
