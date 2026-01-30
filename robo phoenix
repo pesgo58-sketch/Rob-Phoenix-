@@ -2257,7 +2257,7 @@ void AddActiveState(int state)
    else
    {
       int oldestIndex = 0;
-      int oldestTime = INT_MAX;
+      ulong oldestTime = ULONG_MAX;  // ✅ FIX: Mudado de int para ulong para compatibilidade com g_stateLastUpdate[]
       
       for(int i = 0; i < g_activeStatesCount; i++)
       {
