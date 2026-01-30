@@ -379,9 +379,11 @@ datetime g_lastResetDate = 0;
 // 📊 5. ESTATÍSTICAS E PERFORMANCE
 // ──────────────────────────────────────────────────────────────────────
 // Estatísticas gerais
-int g_totalTrades = 0;
-int g_totalWins   = 0;
-int g_totalLosses = 0;
+// ✅ BUG FIX #5: Mudado de int para ulong para evitar overflow em backtests longos
+// int pode overflow após ~2 bilhões de trades
+ulong g_totalTrades = 0;
+ulong g_totalWins   = 0;
+ulong g_totalLosses = 0;
 double g_sumProfit = 0.0;
 int g_consecutiveLosses = 0;
 
@@ -6741,13 +6743,23 @@ void ForceTextExport()
 // ✅✅✅ FUNÇÕES: RELATÓRIO MENSAL/ANUAL DE LUCROS
 // ======================================================================
 
+// ✅ BUG FIX #1: Retorna bool para permitir validação de sucesso
 // Inicializa sistema de tracking mensal
-void InitializeMonthlyStats()
+bool InitializeMonthlyStats()
 {
-   if(g_monthlyStatsInitialized) return;
+   if(g_monthlyStatsInitialized) 
+   {
+      Print("📅 Sistema de relatório mensal já estava inicializado");
+      return true;
+   }
    
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   if(!TimeToStruct(TimeCurrent(), dt))
+   {
+      Print("❌ ERRO: Falha ao obter data/hora atual para relatório mensal");
+      return false;
+   }
+   
    g_firstYearTracked = dt.year;
    
    // Inicializa todos os meses de todos os anos
@@ -6762,7 +6774,8 @@ void InitializeMonthlyStats()
    }
    
    g_monthlyStatsInitialized = true;
-   Print("📅 Sistema de relatório mensal/anual inicializado | Ano base: ", g_firstYearTracked);
+   Print("✅ Sistema de relatório mensal/anual inicializado com sucesso | Ano base: ", g_firstYearTracked);
+   return true;
 }
 
 // Atualiza estatísticas mensais com novo trade
