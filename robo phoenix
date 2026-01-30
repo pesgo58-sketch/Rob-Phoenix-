@@ -2526,6 +2526,19 @@ bool SaveBrainToFile(string filename)
    // SEM estes dados, estados ruins podem receber tentativas infinitas após restart
    FileWriteArray(h, g_stateWasBlockedBefore);
    FileWriteArray(h, g_stateBlockTime);
+   
+   // ✅ CORREÇÃO: Salvar estatísticas mensais para persistir entre restarts
+   FileWriteInteger(h, (int)g_monthlyStatsInitialized);
+   FileWriteInteger(h, (int)g_firstYearTracked);
+   for(int y = 0; y < 20; y++)
+   {
+      for(int m = 0; m < 12; m++)
+      {
+         FileWriteDouble(h, g_monthlyStats[y][m].totalProfit);
+         FileWriteDouble(h, g_monthlyStats[y][m].totalLoss);
+         FileWriteInteger(h, (int)g_monthlyStats[y][m].tradeCount);
+      }
+   }
 
    FileClose(h);
    return true;
@@ -2692,6 +2705,21 @@ bool LoadBrainFromFile(string filename)
    // SEM estes dados, estados ruins podem receber tentativas infinitas após restart
    FileReadArray(h, g_stateWasBlockedBefore, 0, NUM_STATES);
    FileReadArray(h, g_stateBlockTime, 0, NUM_STATES);
+   
+   // ✅ CORREÇÃO: Carregar estatísticas mensais
+   g_monthlyStatsInitialized = (bool)FileReadInteger(h);
+   g_firstYearTracked = FileReadInteger(h);
+   for(int y = 0; y < 20; y++)
+   {
+      for(int m = 0; m < 12; m++)
+      {
+         g_monthlyStats[y][m].totalProfit = FileReadDouble(h);
+         g_monthlyStats[y][m].totalLoss = FileReadDouble(h);
+         g_monthlyStats[y][m].tradeCount = FileReadInteger(h);
+      }
+   }
+   
+   Print("📅 Estatísticas mensais carregadas | Inicializado: ", g_monthlyStatsInitialized, " | Ano base: ", g_firstYearTracked);
    
    FileClose(h);
    
@@ -6593,8 +6621,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       {
          Print("💾 AUTO-SAVE: Memória salva após trade #", g_totalTrades);
          
-         // ✅ NOVO: Exportar relatório mensal após cada trade
-         ExportMonthlyReport();
+         // ✅ CORREÇÃO: Exportar relatório mensal apenas a cada 100 trades (não a cada trade)
+         if(g_totalTrades % 100 == 0)
+         {
+            ExportMonthlyReport();
+            Print("📅 Relatório mensal exportado (trade #", g_totalTrades, ")");
+         }
       }
    }
    
@@ -6772,7 +6804,11 @@ void UpdateMonthlyStats(double net_profit)
 // Exporta relatório mensal/anual
 bool ExportMonthlyReport()
 {
-   if(!g_monthlyStatsInitialized) return false;
+   if(!g_monthlyStatsInitialized) 
+   {
+      Print("⚠️ Estatísticas mensais não inicializadas. Impossível gerar relatório.");
+      return false;
+   }
    
    // Usar caminho simples sem subdiretorios para FILE_COMMON
    string filename = "Phoenix_Monthly_Report_" + _Symbol + "_" + 
@@ -6782,11 +6818,15 @@ bool ExportMonthlyReport()
    if(file == INVALID_HANDLE)
    {
       Print("❌ Erro ao criar relatório mensal: ", GetLastError());
-      Print("💡 Caminho do arquivo: ", filename);
+      Print("💡 Nome do arquivo: ", filename);
       return false;
    }
    
+   // Mostrar caminho completo
+   string commonPath = TerminalInfoString(TERMINAL_COMMONDATA_PATH);
    Print("✅ Relatório mensal criado: ", filename);
+   Print("📂 Pasta Common: ", commonPath, "\\Files\\");
+   Print("📄 Caminho completo: ", commonPath, "\\Files\\", filename);
    
    FileWrite(file, "═══════════════════════════════════════════════════════════════");
    FileWrite(file, "   PHOENIX TRADER - RELATÓRIO MENSAL/ANUAL DE LUCROS");
@@ -6794,6 +6834,7 @@ bool ExportMonthlyReport()
    FileWrite(file, "");
    FileWrite(file, "Símbolo: " + _Symbol + " | Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
    FileWrite(file, "Data do Relatório: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+   FileWrite(file, "Total de Trades: " + IntegerToString(g_totalTrades));
    FileWrite(file, "");
    
    string monthNames[12] = {"JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO",
