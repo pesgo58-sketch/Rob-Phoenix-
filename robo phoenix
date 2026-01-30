@@ -2763,7 +2763,17 @@ bool LoadBrainFromFile(string filename)
       Print("✅ Arrays redimensionados para NUM_STATES = ", NUM_STATES);
    }
    
+   // ✅ CRITICAL FIX: Recalcular estados descobertos (com visitas > 0)
+   g_totalStatesDiscovered = 0;
+   for(int s = 0; s < NUM_STATES; s++)
+   {
+      if(g_stateVisits[s] > 0)
+         g_totalStatesDiscovered++;
+   }
+   
    Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
+   Print("📊 Estados descobertos: ", g_totalStatesDiscovered, "/", NUM_STATES, 
+         " (", DoubleToString((double)g_totalStatesDiscovered/NUM_STATES*100, 1), "%)");
    Print("📊 Estados bloqueados: ", CountBlockedStates());
    Print("📊 Ciclos de decay: ", g_totalDecayCycles);
    Print("📊 Estados resetados: ", g_totalBadStateResets);
@@ -7348,6 +7358,18 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)";
    FileWrite(file_handle, systemInfo);
    
+   // ✅ CRITICAL FIX: Calcular estados REALMENTE descobertos (com visitas > 0)
+   int discoveredCount = 0;
+   for(int s = 0; s < NUM_STATES; s++)
+   {
+      if(g_stateVisits[s] > 0)
+         discoveredCount++;
+   }
+   
+   string discoveredInfo = "Estados descobertos: " + IntegerToString(discoveredCount) + 
+                          " (" + DoubleToString((double)discoveredCount/NUM_STATES*100, 1) + "%)";
+   FileWrite(file_handle, discoveredInfo);
+   
    string activeInfo = "Estados ativos na memória: " + IntegerToString(g_activeStatesCount);
    FileWrite(file_handle, activeInfo);
    
@@ -7355,7 +7377,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    string blockedInfo = "Estados bloqueados: " + IntegerToString(blockedCount);
    FileWrite(file_handle, blockedInfo);
    
-   double discoveryRate = (double)g_activeStatesCount / NUM_STATES * 100;
+   double discoveryRate = (double)discoveredCount / NUM_STATES * 100;
    string discoveryInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
    FileWrite(file_handle, discoveryInfo);
    
