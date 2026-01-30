@@ -1707,7 +1707,8 @@ double CalculateSharpeRatio(int state)
     
     // Calcular variância
     double avgSquared = SafeDivide(g_stateProfitSqSum[state], (double)trades, 0.0);
-    double variance = avgSquared - (avgReturn * avgReturn);
+    // ✅ BUG FIX #1: Proteção contra variância negativa por precisão de float
+    double variance = MathMax(0.0, avgSquared - (avgReturn * avgReturn));
     
     if(variance <= 0.0) return 0.0;
     
@@ -5046,14 +5047,9 @@ void ExecuteAction(int action, int state)
       else commentType = "NEUTRO";
    }
    
-   string comment = StringFormat("PHX307F_CORRIGIDO_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f_DECAY%d", 
-                   isBuy ? "BUY" : "SELL",
-                   commentType,
-                   pyramidLevel,
-                   FixedSL_Points, FixedTP_Points,
-                   g_volumeMultiplier,
-                   quality,
-                   g_totalDecayCycles);
+   // ✅ BUG FIX #2 & #3: Formato curto para evitar truncamento (31 chars)
+   // e permitir recovery do estado após restart
+   string comment = StringFormat("PHX_S%d", state);
    
    // ✅ CORREÇÃO: Atribuir string diretamente ao campo comment
    req.comment = comment;
@@ -6439,6 +6435,34 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    double swap = HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
    double net_profit = profit + commission + swap;
 
+   // ✅ BUG FIX #2: STATE RECOVERY após restart
+   // Tenta recuperar o estado do comentário da posição
+   int recoveredState = -1;
+   if(HistorySelectByPosition(HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID)))
+   {
+      string comment = HistoryDealGetString(deal_ticket, DEAL_COMMENT);
+      if(StringFind(comment, "PHX_S") == 0)
+      {
+         string stateStr = StringSubstr(comment, 5); // Pula "PHX_S"
+         recoveredState = (int)StringToInteger(stateStr);
+         
+         if(recoveredState >= 0 && recoveredState < NUM_STATES)
+         {
+            Print("🔄 STATE RECOVERY: Estado ", recoveredState, " recuperado do comentário após restart");
+         }
+      }
+   }
+   
+   // Usa estado recuperado se g_lastTradeState foi perdido (= -1 após restart)
+   int effectiveState = (g_lastTradeState < 0 && recoveredState >= 0) ? recoveredState : g_lastTradeState;
+   
+   // Atualiza g_lastTradeState se foi recuperado
+   if(effectiveState != g_lastTradeState && recoveredState >= 0)
+   {
+      Print("✅ Estado atualizado de ", g_lastTradeState, " para ", effectiveState, " (recovery)");
+      g_lastTradeState = effectiveState;
+   }
+
    // ✅ REWARD DINÂMICA: Ajusta baseado no histórico do estado
    double reward = GetDynamicReward(net_profit > 0, g_lastTradeState);
    
@@ -6796,8 +6820,22 @@ void UpdateMonthlyStats(double net_profit)
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
    
+   // ✅ BUG FIX #4: Proteção contra overflow em backtests > 20 anos
    int yearIndex = dt.year - g_firstYearTracked;
-   if(yearIndex < 0 || yearIndex >= 20) return;  // Fora do range de 20 anos
+   if(yearIndex < 0) yearIndex = 0;  // Antes do início
+   if(yearIndex >= 20) 
+   {
+      yearIndex = 19;  // Trava no último ano disponível
+      
+      // Aviso apenas uma vez (quando excede pela primeira vez)
+      static bool warningShown = false;
+      if(!warningShown)
+      {
+         Print("⚠️ AVISO: Backtest excede 20 anos. Dados dos últimos anos serão agrupados no índice 19.");
+         Print("📅 Primeiro ano: ", g_firstYearTracked, " | Ano atual: ", dt.year, " | Diferença: ", (dt.year - g_firstYearTracked), " anos");
+         warningShown = true;
+      }
+   }
    
    int monthIndex = dt.mon - 1;  // meses 1-12 → índices 0-11
    if(monthIndex < 0 || monthIndex >= 12) return;
