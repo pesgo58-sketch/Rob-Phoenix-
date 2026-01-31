@@ -281,6 +281,7 @@ input bool   ShowHUD                  = true;         // Mostrar HUD
 input int    HUD_X                    = 10;           // Posição X
 input int    HUD_Y                    = 20;           // Posição Y
 input int    HUD_UpdateMS             = 500;          // Intervalo atualização (ms)
+input int    HUDLineSpacing           = 18;           // ✅ Espaçamento entre linhas (pixels)
 input color  HUD_TitleColor           = clrLime;      // Cor título
 input color  HUD_TextColor            = clrWhite;     // Cor texto
 input color  HUD_WarningColor         = clrOrange;    // Cor aviso
@@ -3989,7 +3990,8 @@ void CreateHUDObjects()
 {
    if(!ShowHUD || hudObjectCount > 0) return;
    
-   int lineHeight = 18;
+   // ✅ Usar HUDLineSpacing configurável ao invés de hardcoded
+   int lineHeight = HUDLineSpacing;
    int currentY = HUD_Y;
    
    Print("🛠️ Criando objetos do HUD...");
