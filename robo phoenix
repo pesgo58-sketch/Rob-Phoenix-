@@ -62,6 +62,24 @@ const int MIN_VISITS_FOR_BLOCK = 30;
 // como valor neutro, indicando que o preço está no centro
 const double BB_NEUTRAL_POSITION = 0.5;
 
+// ══════════════════════════════════════════════════════════════════════
+// 🎯 ENUM: CLASSIFICAÇÃO DE QUALIDADE DE ESTADOS
+// ══════════════════════════════════════════════════════════════════════
+// Define categorias de qualidade para cada estado baseado em desempenho
+// BLOCKED: Estado bloqueado pelo sistema unificado (má performance)
+// BAD: Estado com win rate ruim (abaixo de limites aceitáveis)
+// NEUTRAL: Estado com desempenho neutro/mediano
+// GOOD: Estado com bom desempenho (win rate acima de 55%)
+// ELITE: Estado com excelente desempenho (win rate acima de 70%)
+enum ENUM_STATE_QUALITY
+{
+   STATE_QUALITY_BLOCKED = 0,  // Estado bloqueado - não operar
+   STATE_QUALITY_BAD = 1,      // Estado ruim - reduzir lote ou evitar
+   STATE_QUALITY_NEUTRAL = 2,  // Estado neutro - lote padrão
+   STATE_QUALITY_GOOD = 3,     // Estado bom - aumentar lote
+   STATE_QUALITY_ELITE = 4     // Estado elite - lote máximo
+};
+
 // Persistência
 #define FILE_MAGIC   0x50484F45
 #define FILE_VERSION 3073
@@ -219,6 +237,12 @@ input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquea
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
 input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
 
+input group "──── 🎯 CLASSIFICAÇÃO DE QUALIDADE ────";
+input int    MinVisitsForQualityDecision = 30;        // Visitas mín. para classificar qualidade
+input double EliteWinRateThreshold    = 0.70;         // Win rate para ELITE (70%)
+input double GoodWinRateThreshold     = 0.55;         // Win rate para BOM (55%)
+input double BadWinRateThreshold      = 0.35;         // Win rate abaixo = RUIM (35%)
+
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
 input double MinSharpeToUnblock       = 0.8;          // Sharpe mínimo para desbloquear
@@ -286,6 +310,31 @@ datetime g_stateBlockTime[];           // Timestamp de quando o estado foi bloqu
 int g_stateBlockCount[];               // Contador de quantas vezes o estado foi bloqueado
 double g_stateWinRate[];               // Win rate calculado por estado
 double g_stateAvgProfit[];             // Lucro médio por estado
+
+// ──────────────────────────────────────────────────────────────────────
+// 🏆 RANKING DE ESTADOS - Sistema de classificação de qualidade
+// ──────────────────────────────────────────────────────────────────────
+// Estrutura para armazenar informações de ranking de estados
+struct StateRankInfo
+{
+   int state;                // Número do estado
+   double winRate;           // Taxa de vitória
+   int visits;               // Número de visitas
+   double profit;            // Lucro total
+   ENUM_STATE_QUALITY quality; // Qualidade do estado
+};
+
+StateRankInfo g_bestStates[10];       // Top 10 melhores estados
+StateRankInfo g_worstStates[10];      // Top 10 piores estados
+datetime g_lastRankingUpdate = 0;     // Última atualização do ranking
+int g_rankingUpdateIntervalMinutes = 30; // Atualizar ranking a cada 30 minutos
+
+// Contadores de qualidade (para HUD)
+int g_eliteStatesCount = 0;
+int g_goodStatesCount = 0;
+int g_neutralStatesCount = 0;
+int g_badStatesCount = 0;
+int g_blockedStatesCount = 0;
 
 // Aprendizado - Controle
 bool g_learningInitialized = false;
@@ -3147,6 +3196,22 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Blocked", OBJPROP_TEXT, "   Bloqueados: 0 (0.0%)");
       hudObjects[hudObjectCount++] = "HUD_Blocked";
+      currentY += lineHeight;
+   }
+   
+   // ✅ NOVO: Exibir classificação de qualidade dos estados
+   if(ObjectCreate(0, "HUD_Quality", OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_Quality", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_Quality", OBJPROP_TEXT, "   Qualidade: ELITE=0 | BONS=0 | NEUTROS=0 | RUINS=0 | BLOQ=0");
+      hudObjects[hudObjectCount++] = "HUD_Quality";
       currentY += lineHeight + 5;
    }
    
@@ -3435,6 +3500,24 @@ void UpdateHUDLight()
    color blockedColor = (blockedStates > 0) ? HUD_WarningColor : HUD_TextColor;
    ObjectSetInteger(0, "HUD_Blocked", OBJPROP_COLOR, blockedColor);
    ObjectSetString(0, "HUD_Blocked", OBJPROP_TEXT, newBlocked);
+   
+   // ✅ ATUALIZAR CONTADORES DE QUALIDADE
+   // Atualizar contadores apenas a cada 30 segundos para otimização
+   static datetime lastQualityUpdate = 0;
+   if(TimeCurrent() - lastQualityUpdate > 30 || lastQualityUpdate == 0)
+   {
+      UpdateQualityCounts();
+      lastQualityUpdate = TimeCurrent();
+   }
+   
+   // ✅ EXIBIR CLASSIFICAÇÃO DE QUALIDADE NO HUD
+   string qualityText = StringFormat("   Qualidade: ELITE=%d | BONS=%d | NEUTROS=%d | RUINS=%d | BLOQ=%d",
+                                     g_eliteStatesCount,
+                                     g_goodStatesCount,
+                                     g_neutralStatesCount,
+                                     g_badStatesCount,
+                                     g_blockedStatesCount);
+   ObjectSetString(0, "HUD_Quality", OBJPROP_TEXT, qualityText);
    
    string decayInfo = StringFormat("   Decay: %s | Ciclos: %d", 
                                    EnableMemoryDecay ? "Ativo" : "Inativo",
@@ -4135,6 +4218,21 @@ void ExecuteAction(int action, int state)
       return;
    }
    
+   // ✅ NOVO: Verificar qualidade do estado antes de permitir trade
+   ENUM_STATE_QUALITY stateQuality = GetStateQuality(state);
+   if(stateQuality == STATE_QUALITY_BLOCKED)
+   {
+      Print("⛔ FILTRO DE QUALIDADE: Estado ", state, " classificado como BLOQUEADO - trade CANCELADO");
+      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (qualidade)", state);
+      UpdateQ_NOP(state);
+      return;
+   }
+   
+   // ✅ OPCIONAL: Reduzir lote para estados RUINS (BAD)
+   // Se o estado for classificado como RUIM, podemos optar por não operar
+   // ou reduzir o lote. Por padrão, apenas bloqueamos estados BLOCKED.
+   // Estados BAD ainda podem operar mas com lote reduzido via GetStateQualityScore
+   
    if(UseRealVolumeFilter)
    {
       bool volumeOk = CheckRealVolume();
@@ -4182,7 +4280,7 @@ void ExecuteAction(int action, int state)
    
    if(EnableSmartLot)
    {
-      quality = GetStateQuality(state);
+      quality = GetStateQualityScore(state);
       
       // 🔍 DEBUG SMART LOT: Log detalhado para diagnóstico
       int visits = (state >= 0 && state < ArraySize(g_stateVisits)) ? g_stateVisits[state] : 0;
@@ -4362,7 +4460,7 @@ void ExecuteAction(int action, int state)
    string commentType = "NORMAL";
    
    // quality já foi declarada anteriormente na linha 4169
-   quality = GetStateQuality(state);
+   quality = GetStateQualityScore(state);
    
    // ✅ FIX BUG #12: Validar quality após GetStateQuality
    if(quality != quality) quality = 0.0; // NaN check
@@ -4486,9 +4584,11 @@ double ComputeRewardFromTrade(double profit)
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO GetStateQuality - VERSÃO MELHORADA
+// ✅✅✅ FUNÇÃO GetStateQualityScore - Cálculo numérico de qualidade
 // ======================================================================
-double GetStateQuality(int state)
+// Retorna um score numérico (-2.0 a 2.0) para uso em multiplicadores de lote
+// Esta função mantém a lógica original baseada em Q-values e win rate
+double GetStateQualityScore(int state)
 {
    if(state < 0 || state >= NUM_STATES) return 0.0;
    if(ArraySize(g_stateVisits) <= state) return 0.0;
@@ -4530,6 +4630,207 @@ double GetStateQuality(int state)
    if(quality < -2.0) quality = -2.0;
    
    return quality;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🎯 FUNÇÃO GetStateQuality - Classificação por categorias
+// ══════════════════════════════════════════════════════════════════════
+// Retorna a categoria de qualidade de um estado (BLOCKED/BAD/NEUTRAL/GOOD/ELITE)
+// 
+// FLUXO DE CLASSIFICAÇÃO:
+// 1. Se estado bloqueado E sistema de bloqueio ativo → STATE_QUALITY_BLOCKED
+// 2. Se visitas < MinVisitsForQualityDecision → STATE_QUALITY_NEUTRAL (dados insuficientes)
+// 3. Com base no win rate:
+//    - >= EliteWinRateThreshold (70%) → STATE_QUALITY_ELITE
+//    - >= GoodWinRateThreshold (55%) → STATE_QUALITY_GOOD
+//    - >= BadWinRateThreshold (35%) → STATE_QUALITY_NEUTRAL
+//    - < BadWinRateThreshold (35%) → STATE_QUALITY_BAD
+//
+// IMPORTANTE: Estados bloqueados são SEMPRE classificados como BLOCKED,
+// independentemente do número de visitas, garantindo que apareçam nas estatísticas
+ENUM_STATE_QUALITY GetStateQuality(int state)
+{
+   // Validações básicas
+   if(state < 0 || state >= NUM_STATES) return STATE_QUALITY_NEUTRAL;
+   if(ArraySize(g_stateVisits) <= state) return STATE_QUALITY_NEUTRAL;
+   
+   // ✅ PRIORIDADE 1: Verificar bloqueio ANTES de qualquer outra condição
+   // Estados bloqueados são SEMPRE classificados como BLOCKED, mesmo com poucas visitas
+   if(EnableUnifiedBlockingSystem && g_stateBlocked[state])
+   {
+      return STATE_QUALITY_BLOCKED;
+   }
+   
+   // ✅ PRIORIDADE 2: Verificar se há visitas suficientes para classificação
+   // Estados não bloqueados com poucas visitas são considerados NEUTRAL
+   int visits = g_stateVisits[state];
+   if(visits < MinVisitsForQualityDecision)
+   {
+      return STATE_QUALITY_NEUTRAL;
+   }
+   
+   // ✅ PRIORIDADE 3: Classificar com base no win rate
+   double winRate = CalculateWinRate(state);
+   
+   if(winRate >= EliteWinRateThreshold)
+   {
+      return STATE_QUALITY_ELITE;  // >= 70%
+   }
+   else if(winRate >= GoodWinRateThreshold)
+   {
+      return STATE_QUALITY_GOOD;   // >= 55%
+   }
+   else if(winRate >= BadWinRateThreshold)
+   {
+      return STATE_QUALITY_NEUTRAL; // >= 35%
+   }
+   else
+   {
+      return STATE_QUALITY_BAD;     // < 35%
+   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Obter nome da categoria de qualidade
+// ══════════════════════════════════════════════════════════════════════
+string GetStateQualityName(ENUM_STATE_QUALITY quality)
+{
+   switch(quality)
+   {
+      case STATE_QUALITY_ELITE:    return "ELITE";
+      case STATE_QUALITY_GOOD:     return "BOM";
+      case STATE_QUALITY_NEUTRAL:  return "NEUTRO";
+      case STATE_QUALITY_BAD:      return "RUIM";
+      case STATE_QUALITY_BLOCKED:  return "BLOQUEADO";
+      default:                     return "DESCONHECIDO";
+   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Atualizar contadores de qualidade de estados
+// ══════════════════════════════════════════════════════════════════════
+// Conta quantos estados existem em cada categoria de qualidade
+// Esta função deve ser chamada periodicamente para atualizar o HUD
+void UpdateQualityCounts()
+{
+   g_eliteStatesCount = 0;
+   g_goodStatesCount = 0;
+   g_neutralStatesCount = 0;
+   g_badStatesCount = 0;
+   g_blockedStatesCount = 0;
+   
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      ENUM_STATE_QUALITY quality = GetStateQuality(i);
+      
+      switch(quality)
+      {
+         case STATE_QUALITY_ELITE:
+            g_eliteStatesCount++;
+            break;
+         case STATE_QUALITY_GOOD:
+            g_goodStatesCount++;
+            break;
+         case STATE_QUALITY_NEUTRAL:
+            g_neutralStatesCount++;
+            break;
+         case STATE_QUALITY_BAD:
+            g_badStatesCount++;
+            break;
+         case STATE_QUALITY_BLOCKED:
+            g_blockedStatesCount++;
+            break;
+      }
+   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Atualizar ranking de melhores e piores estados
+// ══════════════════════════════════════════════════════════════════════
+// Identifica os TOP 10 melhores e piores estados baseado em desempenho
+void UpdateStateRankings()
+{
+   // Array temporário para armazenar todos os estados elegíveis
+   StateRankInfo allStates[];
+   int validCount = 0;
+   
+   ArrayResize(allStates, NUM_STATES);
+   
+   // Coletar todos os estados com visitas suficientes
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] >= MinVisitsForQualityDecision)
+      {
+         allStates[validCount].state = i;
+         allStates[validCount].winRate = CalculateWinRate(i);
+         allStates[validCount].visits = g_stateVisits[i];
+         allStates[validCount].profit = (ArraySize(g_stateAvgProfit) > i) ? g_stateAvgProfit[i] * g_stateVisits[i] : 0.0;
+         allStates[validCount].quality = GetStateQuality(i);
+         validCount++;
+      }
+      // Incluir estados bloqueados mesmo com poucas visitas
+      else if(g_stateBlocked[i] && g_stateVisits[i] > 0)
+      {
+         allStates[validCount].state = i;
+         allStates[validCount].winRate = CalculateWinRate(i);
+         allStates[validCount].visits = g_stateVisits[i];
+         allStates[validCount].profit = (ArraySize(g_stateAvgProfit) > i) ? g_stateAvgProfit[i] * g_stateVisits[i] : 0.0;
+         allStates[validCount].quality = STATE_QUALITY_BLOCKED;
+         validCount++;
+      }
+   }
+   
+   if(validCount == 0) return;
+   
+   // Ordenar por win rate (decrescente) para encontrar os melhores
+   for(int i = 0; i < validCount - 1; i++)
+   {
+      for(int j = i + 1; j < validCount; j++)
+      {
+         if(allStates[j].winRate > allStates[i].winRate)
+         {
+            StateRankInfo temp = allStates[i];
+            allStates[i] = allStates[j];
+            allStates[j] = temp;
+         }
+      }
+   }
+   
+   // Copiar TOP 10 melhores
+   int bestCount = MathMin(10, validCount);
+   for(int i = 0; i < bestCount; i++)
+   {
+      g_bestStates[i] = allStates[i];
+   }
+   // Zerar slots vazios
+   for(int i = bestCount; i < 10; i++)
+   {
+      g_bestStates[i].state = -1;
+      g_bestStates[i].visits = 0;
+   }
+   
+   // Inverter ordem para pegar os piores
+   for(int i = 0; i < validCount / 2; i++)
+   {
+      StateRankInfo temp = allStates[i];
+      allStates[i] = allStates[validCount - 1 - i];
+      allStates[validCount - 1 - i] = temp;
+   }
+   
+   // Copiar TOP 10 piores
+   int worstCount = MathMin(10, validCount);
+   for(int i = 0; i < worstCount; i++)
+   {
+      g_worstStates[i] = allStates[i];
+   }
+   // Zerar slots vazios
+   for(int i = worstCount; i < 10; i++)
+   {
+      g_worstStates[i].state = -1;
+      g_worstStates[i].visits = 0;
+   }
+   
+   g_lastRankingUpdate = TimeCurrent();
 }
 
 // ======================================================================
@@ -5559,7 +5860,7 @@ double CalculateStateAverageProfit(int state)
    if(state < 0 || state >= NUM_STATES) return 0.0;
    if(g_stateVisits[state] < 5) return 0.0;
    
-   double quality = GetStateQuality(state);
+   double quality = GetStateQualityScore(state);
    
    double estimatedProfit = quality * 100.0;
    
@@ -6103,6 +6404,86 @@ bool ExportMonthlyReport()
    return true;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Exportar melhores e piores estados para arquivo
+// ══════════════════════════════════════════════════════════════════════
+void ExportBestAndWorstStates(int fileHandle)
+{
+   if(fileHandle == INVALID_HANDLE) return;
+   
+   // Atualizar rankings se necessário
+   datetime currentTime = TimeCurrent();
+   if(currentTime - g_lastRankingUpdate > g_rankingUpdateIntervalMinutes * 60 || g_lastRankingUpdate == 0)
+   {
+      UpdateStateRankings();
+   }
+   
+   FileWrite(fileHandle, "");
+   FileWrite(fileHandle, "🏆═══════════════════════════════════════════════════════════════");
+   FileWrite(fileHandle, "   RANKING DE ESTADOS - TOP 10 MELHORES E PIORES");
+   FileWrite(fileHandle, "═══════════════════════════════════════════════════════════════");
+   FileWrite(fileHandle, "");
+   
+   // ✅ TOP 10 MELHORES ESTADOS
+   FileWrite(fileHandle, "🥇 TOP 10 MELHORES ESTADOS (ELITE/BONS):");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   FileWrite(fileHandle, "Estado | Win Rate | Visitas | Lucro Total | Qualidade");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   
+   int bestCount = 0;
+   for(int i = 0; i < 10; i++)
+   {
+      if(g_bestStates[i].visits == 0) break;
+      
+      string qualityName = GetStateQualityName(g_bestStates[i].quality);
+      string line = StringFormat("%6d | %7.2f%% | %7d | %11.2f | %s",
+                                 g_bestStates[i].state,
+                                 g_bestStates[i].winRate * 100.0,
+                                 g_bestStates[i].visits,
+                                 g_bestStates[i].profit,
+                                 qualityName);
+      FileWrite(fileHandle, line);
+      bestCount++;
+   }
+   
+   if(bestCount == 0)
+   {
+      FileWrite(fileHandle, "   (Nenhum estado com dados suficientes)");
+   }
+   
+   FileWrite(fileHandle, "");
+   
+   // ✅ TOP 10 PIORES ESTADOS (RUINS/BLOQUEADOS)
+   FileWrite(fileHandle, "🔴 TOP 10 PIORES ESTADOS (RUINS/BLOQUEADOS):");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   FileWrite(fileHandle, "Estado | Win Rate | Visitas | Lucro Total | Qualidade");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   
+   int worstCount = 0;
+   for(int i = 0; i < 10; i++)
+   {
+      if(g_worstStates[i].visits == 0) break;
+      
+      string qualityName = GetStateQualityName(g_worstStates[i].quality);
+      string line = StringFormat("%6d | %7.2f%% | %7d | %11.2f | %s",
+                                 g_worstStates[i].state,
+                                 g_worstStates[i].winRate * 100.0,
+                                 g_worstStates[i].visits,
+                                 g_worstStates[i].profit,
+                                 qualityName);
+      FileWrite(fileHandle, line);
+      worstCount++;
+   }
+   
+   if(worstCount == 0)
+   {
+      FileWrite(fileHandle, "   (Nenhum estado com dados suficientes)");
+   }
+   
+   FileWrite(fileHandle, "");
+   FileWrite(fileHandle, "═══════════════════════════════════════════════════════════════");
+}
+
 // ======================================================================
 // ✅✅✅ FUNÇÃO: CRIAR RELATÓRIO RESUMIDO DIÁRIO
 // ======================================================================
@@ -6150,6 +6531,10 @@ void CreateDailySummaryReport()
    FileWrite(file_handle, "4. ✅ Regras de bloqueio mais agressivas");
    FileWrite(file_handle, "5. ✅ Debug de estados travados implementado");
    FileWrite(file_handle, "");
+   
+   // ✅ NOVO: Exportar ranking de melhores e piores estados
+   ExportBestAndWorstStates(file_handle);
+   
    FileWrite(file_handle, "================================================================");
    FileWrite(file_handle, "FIM DO RELATÓRIO - SISTEMA SUPER CORRIGIDO v307F");
    FileWrite(file_handle, "================================================================");
