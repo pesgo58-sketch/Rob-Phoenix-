@@ -12,6 +12,71 @@
 #property link      ""
 #property version   "3.07"
 
+// ══════════════════════════════════════════════════════════════════════
+// 📖 DOCUMENTAÇÃO DO SISTEMA DE BLOQUEIO E QUALIDADE DE ESTADOS
+// ══════════════════════════════════════════════════════════════════════
+//
+// FLUXO COMPLETO DE FUNCIONAMENTO:
+// ─────────────────────────────────────────────────────────────────────
+//
+// 1️⃣ CÁLCULO DO ESTADO (CalculateState)
+//    - O robô analisa indicadores técnicos (MA, RSI, ADX, BB, Volume, etc.)
+//    - Discretiza valores em bins para criar um número de estado (0-575)
+//    - Este estado representa a "situação de mercado" atual
+//
+// 2️⃣ VERIFICAÇÃO DE BLOQUEIO (IsStateBlocked)
+//    - Antes de qualquer ação, verifica se o estado está bloqueado
+//    - Estados bloqueados = estados com histórico de má performance
+//    - Sistema unificado gerencia bloqueio/desbloqueio automaticamente
+//
+// 3️⃣ CLASSIFICAÇÃO DE QUALIDADE (GetStateQuality)
+//    - Cada estado recebe uma classificação de qualidade:
+//      • BLOQUEADO: Estado marcado como bloqueado pelo sistema
+//      • RUIM: Win rate < 35% (com visitas suficientes)
+//      • NEUTRO: Win rate entre 35-55% ou dados insuficientes
+//      • BOM: Win rate entre 55-70%
+//      • ELITE: Win rate >= 70%
+//    - IMPORTANTE: Estados bloqueados são SEMPRE classificados como BLOQUEADO,
+//      independente do número de visitas
+//
+// 4️⃣ CÁLCULO DE SCORE NUMÉRICO (GetStateQualityScore)
+//    - Retorna valor numérico (-2.0 a 2.0) baseado em Q-values e win rate
+//    - Usado para calcular multiplicadores de lote (Smart Lot)
+//    - Quanto maior o score, maior o lote utilizado
+//
+// 5️⃣ DECISÃO DE TRADE (ExecuteAction)
+//    - Verifica se estado está bloqueado → se sim, cancela trade
+//    - Verifica qualidade do estado → se BLOQUEADO, cancela trade
+//    - Calcula lote baseado no score de qualidade
+//    - Executa ordem se todas as validações passarem
+//
+// 6️⃣ APRENDIZADO (UpdateQ)
+//    - Após fechamento do trade, atualiza:
+//      • Q-values (aprendizado por reforço)
+//      • Estatísticas do estado (visitas, wins, losses)
+//      • Win rate do estado
+//    - Sistema de bloqueio avalia se estado deve ser bloqueado/desbloqueado
+//
+// 7️⃣ HUD E RELATÓRIOS
+//    - HUD mostra em tempo real:
+//      • Estados bloqueados e percentual
+//      • Distribuição de qualidade (ELITE/BOM/NEUTRO/RUIM/BLOQ)
+//    - Relatórios diários incluem:
+//      • TOP 10 melhores estados (ELITE/BONS)
+//      • TOP 10 piores estados (RUINS/BLOQUEADOS)
+//
+// PARÂMETROS CONFIGURÁVEIS:
+// ─────────────────────────────────────────────────────────────────────
+// • MinVisitsForQualityDecision: Visitas mínimas para classificar (padrão: 30)
+// • EliteWinRateThreshold: Win rate para ELITE (padrão: 70%)
+// • GoodWinRateThreshold: Win rate para BOM (padrão: 55%)
+// • BadWinRateThreshold: Win rate abaixo = RUIM (padrão: 35%)
+// • MinVisitsForBlockDecision: Visitas mínimas para bloquear (padrão: 30)
+// • BlockLossRateThreshold: Taxa de perda para bloquear (padrão: 80%)
+// • UnblockWinRateThreshold: Taxa de vitória para desbloquear (padrão: 55%)
+//
+// ══════════════════════════════════════════════════════════════════════
+
 // ====
 // Includes essenciais
 // ====
@@ -236,6 +301,7 @@ input double StateBlockThreshold      = 0.20;         // Win rate mínimo para N
 input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
 input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input bool   EnableBlockingDebugLogs  = false;        // Habilitar logs detalhados de bloqueio
 
 input group "──── 🎯 CLASSIFICAÇÃO DE QUALIDADE ────";
 input int    MinVisitsForQualityDecision = 30;        // Visitas mín. para classificar qualidade
@@ -588,12 +654,14 @@ void DebugStuckStatesEnhanced()
    // ✅ CORREÇÃO AUTOMÁTICA
    if(wronglyBlocked > 0)
    {
-      Print("🔥🔥🔥 APLICANDO CORREÇÃO AUTOMÁTICA...");
-      
-      // ❌ REMOVIDO - Desbloqueio deve ser feito APENAS por:
+      // ❌ CORREÇÃO AUTOMÁTICA DESABILITADA
+      // Desbloqueio deve ser feito APENAS por:
       // 1. AutoUnblockGoodStates() com critérios rigorosos (55% win rate, 30 visitas)
       // 2. TestBlockedStatesPeriodically() após 30 dias com reteste gradual
       // Desbloquear aqui com 30% e 5 visitas é MUITO permissivo e causa desbloqueios prematuros
+      
+      Print("⚠️ ", wronglyBlocked, " estados potencialmente bloqueados de forma prematura");
+      Print("   (Desbloqueio automático desabilitado - use AutoUnblockGoodStates)");
       
       // for(int state = 0; state < NUM_STATES; state++)
       // {
@@ -608,8 +676,6 @@ void DebugStuckStatesEnhanced()
       //       }
       //    }
       // }
-      
-      Print("✅✅✅ ", wronglyBlocked, " estados desbloqueados automaticamente");
    }
    
    Print("=== FIM DEBUG ===");
@@ -874,7 +940,10 @@ void BlockState(int state)
     
     if(visits < MinVisitsForBlockDecision)
     {
-        Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
+        if(EnableBlockingDebugLogs)
+        {
+            Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
+        }
         return;
     }
     
@@ -895,20 +964,26 @@ void BlockState(int state)
             g_stateBlockTime[state] = TimeCurrent();
         }
         
-        Print("⛔ ESTADO BLOQUEADO CORRETAMENTE: ", state, 
-              " | Visitas REAIS: ", visits, 
-              " | Perdas REAIS: ", losses, 
-              " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
-              " | Bloqueios totais: ", g_stateBlockCount[state]);
+        if(EnableBlockingDebugLogs)
+        {
+            Print("⛔ ESTADO BLOQUEADO: ", state, 
+                  " | Visitas: ", visits, 
+                  " | Perdas: ", losses, 
+                  " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
+                  " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
+                  " | Bloqueios totais: ", g_stateBlockCount[state]);
+        }
         
         g_memoryDirty = true;
         InvalidateHUDCache();
     }
     else
     {
-        Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
-              DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
+        if(EnableBlockingDebugLogs)
+        {
+            Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
+                  DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
+        }
     }
 }
 
@@ -928,11 +1003,14 @@ void UnblockState(int state)
         g_stateBlocked[state] = false;
         g_stateLastUnblockTime[state] = TimeCurrent();
         
-        Print("✅ ESTADO DESBLOQUEADO: ", state, 
-              " | Visitas: ", g_stateVisits[state], 
-              " | Vitórias: ", g_stateWins[state],
-              " | Perdas: ", g_stateLosses[state],
-              " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
+        if(EnableBlockingDebugLogs)
+        {
+            Print("✅ ESTADO DESBLOQUEADO: ", state, 
+                  " | Visitas: ", g_stateVisits[state], 
+                  " | Vitórias: ", g_stateWins[state],
+                  " | Perdas: ", g_stateLosses[state],
+                  " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
+        }
         
         g_memoryDirty = true;
         InvalidateHUDCache();
