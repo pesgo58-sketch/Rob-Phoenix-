@@ -300,8 +300,11 @@ input int HUD_Y_Volume        = 162;   // Offset Y: Volume
 input int HUD_Y_Exploration   = 180;   // Offset Y: Taxa de Exploração
 input int HUD_Y_Trades        = 198;   // Offset Y: Trades Hoje
 input int HUD_Y_TotalTrades   = 216;   // Offset Y: Total de Trades
-input int HUD_Y_Quality1      = 234;   // Offset Y: Qualidade Linha 1
-input int HUD_Y_Quality2      = 252;   // Offset Y: Qualidade Linha 2
+input int HUD_Y_CandleTimer   = 234;   // Offset Y: Relógio de Vela
+input int HUD_Y_WinRate       = 252;   // Offset Y: Win Rate
+input int HUD_Y_Accuracy      = 270;   // Offset Y: Vitórias/Derrotas
+input int HUD_Y_Quality1      = 288;   // Offset Y: Qualidade Linha 1
+input int HUD_Y_Quality2      = 306;   // Offset Y: Qualidade Linha 2
 
 input group "──── 🎨 HUD - CORES ────";
 input color  HUD_TitleColor           = clrLime;      // Cor título
@@ -4214,7 +4217,7 @@ void CreateHUDObjects()
    {
       ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_CandleTimer);
       ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_COLOR, clrAqua);
       ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_CandleTimer", OBJPROP_FONT, "Arial");
@@ -4222,14 +4225,13 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_CandleTimer", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_CandleTimer", OBJPROP_TEXT, "Tempo de vela: 00:00");
       hudObjects[hudObjectCount++] = "HUD_CandleTimer";
-      currentY += lineHeight;
    }
    
    if(ObjectCreate(0, "HUD_WinRate", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_WinRate", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_WinRate", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_WinRate", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_WinRate);
       ObjectSetInteger(0, "HUD_WinRate", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_WinRate", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_WinRate", OBJPROP_FONT, "Arial");
@@ -4237,14 +4239,13 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_WinRate", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_WinRate", OBJPROP_TEXT, "Win Rate: 0.0%");
       hudObjects[hudObjectCount++] = "HUD_WinRate";
-      currentY += lineHeight;
    }
    
    if(ObjectCreate(0, "HUD_Accuracy", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Accuracy);
       ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_Accuracy", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Accuracy", OBJPROP_FONT, "Arial");
