@@ -245,6 +245,7 @@ input double LotMultiplierElite           = 1.5;      // Multiplicador de lote p
 input double LotMultiplierGood            = 1.0;      // Multiplicador de lote para BOM
 input double LotMultiplierNeutral         = 0.5;      // Multiplicador de lote para NEUTRO
 input double LotMultiplierBad             = 0.0;      // 0.0 = não opera estados RUINS
+input double LotMultiplierUnknown         = 0.3;      // Multiplicador para estados UNKNOWN (exploração)
 input bool   AllowTradesOnNeutralStates   = true;     // Permitir operar em estados Neutros?
 input bool   AllowTradesOnBadStates       = false;    // Permitir operar em estados Ruins? (recomendado: false)
 input bool   LogStateQualityDecisions     = true;     // Logs detalhados de qualidade de estado
@@ -1911,8 +1912,10 @@ double GetLotMultiplierForQuality(ENUM_STATE_QUALITY quality)
 
       case STATE_QUALITY_UNKNOWN:
       default:
-         // Estados sem dados suficientes: mais conservador
-         return 0.0; // não operar UNKNOWN
+         // ✅ FIX: Permitir exploração de estados novos com lote reduzido
+         // ANTES: return 0.0 bloqueava descoberta de novos estados
+         // AGORA: Usa LotMultiplierUnknown para exploração controlada
+         return LotMultiplierUnknown; // Permite descoberta (padrão: 30% do lote)
    }
 }
 
