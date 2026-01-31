@@ -2413,6 +2413,14 @@ bool LoadBrain()
    return result;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⚠️ FUNÇÃO UTILITÁRIA: ResetQTable
+// ══════════════════════════════════════════════════════════════════════
+// Função para resetar completamente a Q-table e todos os arrays de estado
+// ATENÇÃO: Esta função NÃO é chamada automaticamente. 
+//          Deve ser chamada manualmente apenas em casos específicos de debug
+//          ou quando se deseja começar o aprendizado do zero.
+// ══════════════════════════════════════════════════════════════════════
 void ResetQTable()
 {
    int sz = NUM_STATES * NUM_ACTIONS;
@@ -7283,6 +7291,29 @@ int OnInit()
       ArrayInitialize(g_stateWasBlockedBefore, false);
       ArrayInitialize(g_stateBlockTime, 0);
       ArrayInitialize(g_stateBlockCount, 0);
+      
+      // ✅ BUG FIX: Inicializar arrays de estatísticas derivadas
+      ArrayInitialize(g_stateProfitSum, 0.0);
+      ArrayInitialize(g_stateProfitSqSum, 0.0);
+      ArrayInitialize(g_stateWinRate, 0.0);
+      ArrayInitialize(g_stateAvgProfit, 0.0);
+      
+      // ✅ BUG FIX: Inicializar arrays de ranking de estados
+      for(int i = 0; i < 10; i++)
+      {
+         g_bestStates[i].state = -1;
+         g_bestStates[i].visits = 0;
+         g_bestStates[i].winRate = 0.0;
+         g_bestStates[i].profit = 0.0;
+         g_bestStates[i].quality = STATE_QUALITY_NEUTRAL;
+         
+         g_worstStates[i].state = -1;
+         g_worstStates[i].visits = 0;
+         g_worstStates[i].winRate = 0.0;
+         g_worstStates[i].profit = 0.0;
+         g_worstStates[i].quality = STATE_QUALITY_NEUTRAL;
+      }
+      
       g_activeStatesCount = 0;
       
       // ✅ SEMPRE usa taxa configurada - SEM forçar mínimo
