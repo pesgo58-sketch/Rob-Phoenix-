@@ -282,6 +282,28 @@ input int    HUD_X                    = 10;           // Posição X
 input int    HUD_Y                    = 20;           // Posição Y
 input int    HUD_UpdateMS             = 500;          // Intervalo atualização (ms)
 input int    HUDLineSpacing           = 18;           // ✅ Espaçamento entre linhas (pixels)
+
+// ──────────────────────────────────────────────────────────────
+// 🎨 HUD - POSIÇÕES PERSONALIZADAS (Offset Y individual)
+// ──────────────────────────────────────────────────────────────
+input group "──── 🎨 HUD - POSIÇÕES Y INDIVIDUAIS ────";
+input int HUD_Y_Title         = 0;     // Offset Y: Título
+input int HUD_Y_Divider       = 18;    // Offset Y: Divisor
+input int HUD_Y_States        = 36;    // Offset Y: Estados
+input int HUD_Y_Progress      = 54;    // Offset Y: Barra de Progresso
+input int HUD_Y_Blocked       = 72;    // Offset Y: Estados Bloqueados
+input int HUD_Y_Decay         = 90;    // Offset Y: Informação de Decay
+input int HUD_Y_Direction     = 108;   // Offset Y: Direção do Trade
+input int HUD_Y_Positions     = 126;   // Offset Y: Posições Ativas
+input int HUD_Y_Status        = 144;   // Offset Y: Status
+input int HUD_Y_Volume        = 162;   // Offset Y: Volume
+input int HUD_Y_Exploration   = 180;   // Offset Y: Taxa de Exploração
+input int HUD_Y_Trades        = 198;   // Offset Y: Trades Hoje
+input int HUD_Y_TotalTrades   = 216;   // Offset Y: Total de Trades
+input int HUD_Y_Quality1      = 234;   // Offset Y: Qualidade Linha 1
+input int HUD_Y_Quality2      = 252;   // Offset Y: Qualidade Linha 2
+
+input group "──── 🎨 HUD - CORES ────";
 input color  HUD_TitleColor           = clrLime;      // Cor título
 input color  HUD_TextColor            = clrWhite;     // Cor texto
 input color  HUD_WarningColor         = clrOrange;    // Cor aviso
@@ -3990,17 +4012,14 @@ void CreateHUDObjects()
 {
    if(!ShowHUD || hudObjectCount > 0) return;
    
-   // ✅ Usar HUDLineSpacing configurável ao invés de hardcoded
-   int lineHeight = HUDLineSpacing;
-   int currentY = HUD_Y;
+   Print("🛠️ Criando objetos do HUD com posições customizáveis...");
    
-   Print("🛠️ Criando objetos do HUD...");
-   
+   // ✅ TÍTULO - Usa HUD_Y_Title
    if(ObjectCreate(0, "HUD_Title", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Title", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Title", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Title", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Title", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Title);
       ObjectSetInteger(0, "HUD_Title", OBJPROP_COLOR, HUD_TitleColor);
       ObjectSetInteger(0, "HUD_Title", OBJPROP_FONTSIZE, 11);
       ObjectSetString(0, "HUD_Title", OBJPROP_FONT, "Arial");
@@ -4008,14 +4027,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Title", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Title", OBJPROP_TEXT, "PHOENIX TRADER v307F SUPER CORRIGIDO");
       hudObjects[hudObjectCount++] = "HUD_Title";
-      currentY += lineHeight;
    }
    
+   // ✅ DIVIDER - Usa HUD_Y_Divider
    if(ObjectCreate(0, "HUD_Divider", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Divider", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Divider", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Divider", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Divider", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Divider);
       ObjectSetInteger(0, "HUD_Divider", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_Divider", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Divider", OBJPROP_FONT, "Arial");
@@ -4023,14 +4042,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Divider", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Divider", OBJPROP_TEXT, "══════════════════════════════════════════");
       hudObjects[hudObjectCount++] = "HUD_Divider";
-      currentY += lineHeight;
    }
    
+   // ✅ STATES - Usa HUD_Y_States
    if(ObjectCreate(0, "HUD_States", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_States", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_States", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_States", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_States", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_States);
       ObjectSetInteger(0, "HUD_States", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_States", OBJPROP_FONTSIZE, 10);
       ObjectSetString(0, "HUD_States", OBJPROP_FONT, "Arial");
@@ -4038,14 +4057,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_States", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_States", OBJPROP_TEXT, "Estados: 0/" + IntegerToString(NUM_STATES));
       hudObjects[hudObjectCount++] = "HUD_States";
-      currentY += lineHeight;
    }
    
+   // ✅ PROGRESS - Usa HUD_Y_Progress
    if(ObjectCreate(0, "HUD_Progress", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Progress", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Progress", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Progress", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Progress", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Progress);
       ObjectSetInteger(0, "HUD_Progress", OBJPROP_COLOR, HUD_SuccessColor);
       ObjectSetInteger(0, "HUD_Progress", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Progress", OBJPROP_FONT, "Arial");
@@ -4053,14 +4072,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Progress", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Progress", OBJPROP_TEXT, "   [░░░░░░░░░░░░░░░░░░░░] (0.0%)");
       hudObjects[hudObjectCount++] = "HUD_Progress";
-      currentY += lineHeight;
    }
    
+   // ✅ BLOCKED - Usa HUD_Y_Blocked
    if(ObjectCreate(0, "HUD_Blocked", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Blocked", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Blocked", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Blocked);
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Blocked", OBJPROP_FONT, "Arial");
@@ -4068,14 +4087,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Blocked", OBJPROP_TEXT, "   Bloqueados: 0 (0.0%)");
       hudObjects[hudObjectCount++] = "HUD_Blocked";
-      currentY += lineHeight + 5;
    }
    
+   // ✅ DECAY INFO - Usa HUD_Y_Decay
    if(ObjectCreate(0, "HUD_DecayInfo", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Decay);
       ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_COLOR, clrYellow);
       ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_DecayInfo", OBJPROP_FONT, "Arial");
@@ -4083,14 +4102,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_DecayInfo", OBJPROP_TEXT, "   Decay: Ativo | Ciclos: 0");
       hudObjects[hudObjectCount++] = "HUD_DecayInfo";
-      currentY += lineHeight;
    }
    
+   // ✅ DIRECTION - Usa HUD_Y_Direction
    if(ObjectCreate(0, "HUD_Direction", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Direction", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Direction", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Direction", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Direction", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Direction);
       ObjectSetInteger(0, "HUD_Direction", OBJPROP_COLOR, clrGray);
       ObjectSetInteger(0, "HUD_Direction", OBJPROP_FONTSIZE, 10);
       ObjectSetString(0, "HUD_Direction", OBJPROP_FONT, "Arial");
@@ -4098,14 +4117,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Direction", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Direction", OBJPROP_TEXT, "Direção: ● NEUTRO");
       hudObjects[hudObjectCount++] = "HUD_Direction";
-      currentY += lineHeight;
    }
    
+   // ✅ POSITIONS - Usa HUD_Y_Positions
    if(ObjectCreate(0, "HUD_Positions", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Positions", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Positions", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Positions", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Positions", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Positions);
       ObjectSetInteger(0, "HUD_Positions", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_Positions", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Positions", OBJPROP_FONT, "Arial");
@@ -4113,14 +4132,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Positions", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Positions", OBJPROP_TEXT, "   Posições ativas: 0");
       hudObjects[hudObjectCount++] = "HUD_Positions";
-      currentY += lineHeight + 5;
    }
    
+   // ✅ STATUS - Usa HUD_Y_Status
    if(ObjectCreate(0, "HUD_Status", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Status", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Status", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Status", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Status", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Status);
       ObjectSetInteger(0, "HUD_Status", OBJPROP_COLOR, HUD_WarningColor);
       ObjectSetInteger(0, "HUD_Status", OBJPROP_FONTSIZE, 10);
       ObjectSetString(0, "HUD_Status", OBJPROP_FONT, "Arial");
@@ -4128,14 +4147,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Status", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Status", OBJPROP_TEXT, "STATUS: Inicializando...");
       hudObjects[hudObjectCount++] = "HUD_Status";
-      currentY += lineHeight;
    }
    
+   // ✅ VOLUME - Usa HUD_Y_Volume
    if(ObjectCreate(0, "HUD_Volume", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Volume", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Volume", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Volume", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Volume", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Volume);
       ObjectSetInteger(0, "HUD_Volume", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_Volume", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Volume", OBJPROP_FONT, "Arial");
@@ -4143,14 +4162,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Volume", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Volume", OBJPROP_TEXT, "Volume: NORMAL (1.0x)");
       hudObjects[hudObjectCount++] = "HUD_Volume";
-      currentY += lineHeight - 5;
    }
    
+   // ✅ EXPLORATION - Usa HUD_Y_Exploration
    if(ObjectCreate(0, "HUD_Exploration", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Exploration", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Exploration", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Exploration", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Exploration", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Exploration);
       ObjectSetInteger(0, "HUD_Exploration", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_Exploration", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Exploration", OBJPROP_FONT, "Arial");
@@ -4158,14 +4177,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Exploration", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Exploration", OBJPROP_TEXT, "Exploração: 50%");
       hudObjects[hudObjectCount++] = "HUD_Exploration";
-      currentY += lineHeight - 5;
    }
    
+   // ✅ TRADES - Usa HUD_Y_Trades
    if(ObjectCreate(0, "HUD_Trades", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_Trades", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_Trades", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_Trades", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Trades", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Trades);
       ObjectSetInteger(0, "HUD_Trades", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_Trades", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_Trades", OBJPROP_FONT, "Arial");
@@ -4173,14 +4192,14 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Trades", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Trades", OBJPROP_TEXT, "Trades hoje: 0/30");
       hudObjects[hudObjectCount++] = "HUD_Trades";
-      currentY += lineHeight;
    }
    
+   // ✅ TOTAL TRADES - Usa HUD_Y_TotalTrades
    if(ObjectCreate(0, "HUD_TotalTrades", OBJ_LABEL, 0, 0, 0))
    {
       ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_CORNER, CORNER_LEFT_UPPER);
       ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_TotalTrades);
       ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_COLOR, HUD_TextColor);
       ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_FONTSIZE, 9);
       ObjectSetString(0, "HUD_TotalTrades", OBJPROP_FONT, "Arial");
@@ -4188,7 +4207,6 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_TotalTrades", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_TotalTrades", OBJPROP_TEXT, "Total de Trades: 0");
       hudObjects[hudObjectCount++] = "HUD_TotalTrades";
-      currentY += lineHeight;
    }
    
    // ✅ RELÓGIO DE VELA
@@ -4393,26 +4411,37 @@ void UpdateHUDLight()
       string qualityLine2 = StringFormat("             RUINS=%d | BLOQUEADOS=%d",
                                         totalBad, totalBlocked);
       
-      // Criar objetos se não existirem
+      // ✅ Criar objetos se não existirem - POSIÇÕES CUSTOMIZÁVEIS
       if(ObjectFind(0, "HUD_Quality1") < 0)
       {
          ObjectCreate(0, "HUD_Quality1", OBJ_LABEL, 0, 0, 0);
          ObjectSetInteger(0, "HUD_Quality1", OBJPROP_CORNER, CORNER_LEFT_UPPER);
          ObjectSetInteger(0, "HUD_Quality1", OBJPROP_XDISTANCE, HUD_X);
-         ObjectSetInteger(0, "HUD_Quality1", OBJPROP_YDISTANCE, HUD_Y + 80);
+         ObjectSetInteger(0, "HUD_Quality1", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Quality1);
          ObjectSetInteger(0, "HUD_Quality1", OBJPROP_FONTSIZE, 8);
          ObjectSetInteger(0, "HUD_Quality1", OBJPROP_COLOR, HUD_TextColor);
          hudObjectCount++;
       }
+      else
+      {
+         // Atualizar posição se objeto já existe
+         ObjectSetInteger(0, "HUD_Quality1", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Quality1);
+      }
+      
       if(ObjectFind(0, "HUD_Quality2") < 0)
       {
          ObjectCreate(0, "HUD_Quality2", OBJ_LABEL, 0, 0, 0);
          ObjectSetInteger(0, "HUD_Quality2", OBJPROP_CORNER, CORNER_LEFT_UPPER);
          ObjectSetInteger(0, "HUD_Quality2", OBJPROP_XDISTANCE, HUD_X);
-         ObjectSetInteger(0, "HUD_Quality2", OBJPROP_YDISTANCE, HUD_Y + 95);
+         ObjectSetInteger(0, "HUD_Quality2", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Quality2);
          ObjectSetInteger(0, "HUD_Quality2", OBJPROP_FONTSIZE, 8);
          ObjectSetInteger(0, "HUD_Quality2", OBJPROP_COLOR, HUD_TextColor);
          hudObjectCount++;
+      }
+      else
+      {
+         // Atualizar posição se objeto já existe
+         ObjectSetInteger(0, "HUD_Quality2", OBJPROP_YDISTANCE, HUD_Y + HUD_Y_Quality2);
       }
       
       ObjectSetString(0, "HUD_Quality1", OBJPROP_TEXT, qualityLine1);
