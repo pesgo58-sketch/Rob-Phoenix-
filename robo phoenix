@@ -5224,7 +5224,7 @@ void ExecuteAction(int action, int state)
    
    if(EnableSmartLot)
    {
-      quality = GetStateQuality(state);
+      quality = GetStateQualityScore(state);  // ✅ FIX: Usar versão numérica
       
       // 🔍 DEBUG SMART LOT: Log detalhado para diagnóstico
       int visits = (state >= 0 && state < ArraySize(g_stateVisits)) ? g_stateVisits[state] : 0;
@@ -5397,7 +5397,7 @@ void ExecuteAction(int action, int state)
    string commentType = "NORMAL";
    
    // quality já foi declarada anteriormente na linha 4169
-   quality = GetStateQuality(state);
+   quality = GetStateQualityScore(state);  // ✅ FIX: Usar versão numérica
    
    // ✅ FIX BUG #12: Validar quality após GetStateQuality
    if(quality != quality) quality = 0.0; // NaN check
@@ -5521,9 +5521,11 @@ double ComputeRewardFromTrade(double profit)
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO GetStateQuality - VERSÃO MELHORADA
+// ✅ FUNÇÃO GetStateQualityScore - Versão numérica para cálculos
+// (Renomeada de GetStateQuality antiga para evitar conflitos)
+// Retorna um score numérico de qualidade do estado para Smart Lot
 // ======================================================================
-double GetStateQuality(int state)
+double GetStateQualityScore(int state)
 {
    if(state < 0 || state >= NUM_STATES) return 0.0;
    if(ArraySize(g_stateVisits) <= state) return 0.0;
@@ -6726,7 +6728,7 @@ double CalculateStateAverageProfit(int state)
    if(state < 0 || state >= NUM_STATES) return 0.0;
    if(g_stateVisits[state] < 5) return 0.0;
    
-   double quality = GetStateQuality(state);
+   double quality = GetStateQualityScore(state);  // ✅ FIX: Usar versão numérica
    
    double estimatedProfit = quality * 100.0;
    
