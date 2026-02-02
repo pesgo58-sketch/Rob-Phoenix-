@@ -283,6 +283,7 @@ input group "──── 🧪 PESQUISA AUTO RSI+ATR+MACD ────";
 input bool   EnableRSIAtrMacdParamSearch       = false;  // Habilitar pesquisa automática
 input int    TradesPerRSIAtrMacdConfig        = 300;     // Trades por configuração
 input bool   UseBestRSIAtrMacdConfigAfterTest = true;    // Usar melhor config após teste
+input bool   UseSimplifiedSignalLogic         = false;   // Usar lógica simplificada RSI+MACD
 
 // ──────────────────────────────────────────────────────────────────────
 // 💾 6. MEMÓRIA E PERSISTÊNCIA
@@ -4337,6 +4338,42 @@ int ChooseAction(int state)
       return 0;
    }
    
+   // ✅ NOVO: Usar lógica simplificada RSI+MACD se habilitada
+   if(UseSimplifiedSignalLogic)
+   {
+      int simplifiedSignal = GetSimplifiedSignal();
+      
+      // Ainda verificar bloqueio de estado
+      if(IsStateBlocked(state))
+      {
+         Print("⛔ Estado ", state, " bloqueado - ignorando sinal simplificado");
+         g_statusMessage = StringFormat("⛔ Estado %d bloqueado", state);
+         return 0;
+      }
+      
+      // Verificar qualidade do estado se tiver visitas suficientes
+      if(g_stateVisits[state] >= MinVisitsForQualityDecision)
+      {
+         ENUM_STATE_QUALITY quality = GetStateQuality(state);
+         if(quality == STATE_QUALITY_BLOCKED)
+         {
+            Print("⛔ Estado ", state, " com qualidade BLOCKED - ignorando sinal");
+            return 0;
+         }
+      }
+      
+      if(simplifiedSignal == 1)
+         g_statusMessage = "📈 SINAL SIMPLIFICADO: BUY (RSI+MACD)";
+      else if(simplifiedSignal == 2)
+         g_statusMessage = "📉 SINAL SIMPLIFICADO: SELL (RSI+MACD)";
+      else
+         g_statusMessage = "⏸️ SINAL SIMPLIFICADO: NOP (sem sinal claro)";
+      
+      Print("🎯 Sinal simplificado: ", (simplifiedSignal==0?"NOP":(simplifiedSignal==1?"BUY":"SELL")));
+      return simplifiedSignal;
+   }
+   
+   // ✅ Continuar com lógica Q-learning padrão se não usar sinal simplificado
    if(IsStateBlocked(state))
    {
       Print("⛔ Estado ", state, " bloqueado pelo sistema corrigido");
@@ -5508,6 +5545,50 @@ double CalculateSLByPoints(bool isBuy, double entryPrice)
 {
    if(!UseFixedSL) return 0.0;
    
+   // ✅ NOVO: Se usar lógica simplificada, calcular SL baseado em ATR
+   if(UseSimplifiedSignalLogic)
+   {
+      // Obter parâmetros atuais (podem vir da pesquisa automática)
+      int    currentATRPeriod  = ATRPeriod;
+      double currentATRStopMult = ATR_StopMult;
+      
+      if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+      {
+         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
+         currentATRPeriod  = cfg.atrPeriod;
+         currentATRStopMult = cfg.atrStopMult;
+      }
+      else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
+      {
+         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex];
+         currentATRPeriod  = cfg.atrPeriod;
+         currentATRStopMult = cfg.atrStopMult;
+      }
+      
+      double atr[1];
+      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1)
+      {
+         Print("❌ Erro ao copiar ATR para SL");
+         return 0.0;
+      }
+      
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double slDistance = currentATRStopMult * atr[0];
+      
+      double slPrice = 0.0;
+      if(isBuy)
+         slPrice = entryPrice - slDistance;
+      else
+         slPrice = entryPrice + slDistance;
+      
+      Print("✅ SL ATR-based: ", (isBuy?"BUY":"SELL"), " | ATR=", DoubleToString(atr[0], 5),
+            " | Mult=", currentATRStopMult, " | Distance=", DoubleToString(slDistance, 5),
+            " | SL=", DoubleToString(slPrice, 5));
+      
+      return slPrice;
+   }
+   
+   // Lógica original baseada em pontos fixos
    int slPoints = FixedSL_Points;
    if(slPoints <= 0) return 0.0;
    
@@ -5534,6 +5615,51 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
 {
    if(!UseFixedTP) return 0.0;
    
+   // ✅ NOVO: Se usar lógica simplificada, calcular TP baseado em ATR
+   if(UseSimplifiedSignalLogic)
+   {
+      // Obter parâmetros atuais (podem vir da pesquisa automática)
+      int    currentATRPeriod  = ATRPeriod;
+      double currentATRStopMult = ATR_StopMult;
+      
+      if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+      {
+         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
+         currentATRPeriod  = cfg.atrPeriod;
+         currentATRStopMult = cfg.atrStopMult;
+      }
+      else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
+      {
+         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex];
+         currentATRPeriod  = cfg.atrPeriod;
+         currentATRStopMult = cfg.atrStopMult;
+      }
+      
+      double atr[1];
+      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1)
+      {
+         Print("❌ Erro ao copiar ATR para TP");
+         return 0.0;
+      }
+      
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      // TP pode ser mesmo multiplicador ou maior (ex: 2x ou 3x do SL)
+      double tpDistance = currentATRStopMult * atr[0];
+      
+      double tpPrice = 0.0;
+      if(isBuy)
+         tpPrice = entryPrice + tpDistance;
+      else
+         tpPrice = entryPrice - tpDistance;
+      
+      Print("✅ TP ATR-based: ", (isBuy?"BUY":"SELL"), " | ATR=", DoubleToString(atr[0], 5),
+            " | Mult=", currentATRStopMult, " | Distance=", DoubleToString(tpDistance, 5),
+            " | TP=", DoubleToString(tpPrice, 5));
+      
+      return tpPrice;
+   }
+   
+   // Lógica original baseada em pontos fixos
    int tpPoints = FixedTP_Points;
    if(tpPoints <= 0) return 0.0;
    
