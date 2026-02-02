@@ -261,10 +261,10 @@ double LearningRate                   = 0.03;         // Taxa de aprendizado (fi
 
 input group "──── 🎲 EXPLORAÇÃO ────";
 input bool   EnableAdaptiveExploration = false;       // Habilitar ajuste automático de exploração
-input double InitialExplorationRate   = 0.40;         // Taxa inicial de exploração (40%)
-input double MinExplorationRate       = 0.20;         // Taxa mínima de exploração (20%)
+input double InitialExplorationRate   = 0.25;         // Taxa inicial de exploração (25% - REDUZIDO para mais trades)
+input double MinExplorationRate       = 0.10;         // Taxa mínima de exploração (10% - REDUZIDO)
 input double ExplorationDecay         = 0.999;        // Decay da exploração (0.1% por vitória)
-input int    MinStateVisitsToTrade    = 2;            // Visitas mínimas para operar
+input int    MinStateVisitsToTrade    = 1;            // Visitas mínimas para operar (1 - permite trade imediato)
 
 input group "──── 🔄 SISTEMA HÍBRIDO ────";
 input bool   EnablePyramidingLearning = true;         // Aprendizado de piramidação
@@ -309,7 +309,7 @@ input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão 
 input bool   EnableBlockingDebugLogs  = false;        // Habilitar logs detalhados de bloqueio
 
 input group "──── 🎯 CLASSIFICAÇÃO DE QUALIDADE ────";
-input int    MinVisitsForQualityDecision = 30;        // Visitas mín. para classificar qualidade
+input int    MinVisitsForQualityDecision = 15;        // Visitas mín. para classificar qualidade (REDUZIDO para 15)
 input double EliteWinRateThreshold    = 0.70;         // Win rate para ELITE (70%)
 input double GoodWinRateThreshold     = 0.55;         // Win rate para BOM (55%)
 input double BadWinRateThreshold      = 0.35;         // Win rate abaixo = RUIM (35%)
@@ -4391,10 +4391,10 @@ int ChooseAction(int state)
       }
    }
    
-   // ⚠️ CORREÇÃO: REDUZIR EXPLORAÇÃO DRAMATICAMENTE
+   // ⚠️ CORREÇÃO: EXPLORAÇÃO BALANCEADA PARA ESTADOS NOVOS
    if(g_stateVisits[state] < MinStateVisitsToTrade)
    {
-      double eps = 0.8; // 80% de exploração para estados novos
+      double eps = 0.5; // 50% de exploração para estados novos (REDUZIDO de 80% para mais trades)
       
       if(((double)MathRand() / 32767.0) < eps) 
       {
@@ -4405,7 +4405,7 @@ int ChooseAction(int state)
       }
       else
       {
-         Print("🤔 Estado novo, mas escolhendo NOP (20% chance)");
+         Print("🤔 Estado novo, mas escolhendo NOP (50% chance)");
          return 0;
       }
    }
@@ -4445,19 +4445,19 @@ int ChooseAction(int state)
    
    // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
    double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)  // ✅ REDUZIDO: 15% ao invés de 30%
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)  // ✅ REDUZIDO: 10% ao invés de 15% (apenas estados PÉSSIMOS)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (estado muito ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
       g_statusMessage = "NOP (estado muito ruim)";
    }
-   else if(nopQ > best * 5.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 5x melhor ao invés de 1.5x
+   else if(nopQ > best * 8.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 8x melhor ao invés de 5x (favorecer trades)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (superioridade: ", nopQ, " vs ", best, ")");
       g_statusMessage = "NOP (melhor opção)";
    }
-   else if(best <= -50.0)  // ✅ REDUZIDO: -50 ao invés de -20 (ações precisam estar MUITO ruins)
+   else if(best <= -50.0)  // ✅ MANTIDO: -50 (ações precisam estar MUITO ruins)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (ações de trade muito ruins: ", best, ")");
@@ -7666,8 +7666,9 @@ int OnInit()
    
    // ✅ CONFIGURAÇÕES APLICADAS:
    Print("⚙️ Configurações aplicadas:");
-   Print("   • Exploration Rate: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
-   Print("   • MinVisitsToTrade: 2");
+   Print("   • Exploration Rate: ", DoubleToString(g_currentExplorationRate * 100, 1), "% (REDUZIDO para mais trades)");
+   Print("   • MinVisitsToTrade: ", MinStateVisitsToTrade, " (permite trade imediato)");
+   Print("   • MinVisitsForQualityDecision: ", MinVisitsForQualityDecision, " (classificação mais rápida)");
    Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
    Print("   • MinStatesBeforeReset: 150 (previne resets e decay prematuros)");
