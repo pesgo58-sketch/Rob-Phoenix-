@@ -277,6 +277,8 @@ input bool   EnableRSIAtrMacdParamSearch       = false;  // Habilitar pesquisa a
 input int    TradesPerRSIAtrMacdConfig        = 300;     // Trades por configuração
 input bool   UseBestRSIAtrMacdConfigAfterTest = true;    // Usar melhor config após teste
 input bool   UseSimplifiedSignalLogic         = false;   // Usar lógica simplificada RSI+MACD
+input bool   EnableParamSearchReport          = true;    // Gerar relatório de testes
+input int    ParamSearchReportIntervalTrades  = 50;      // Intervalo relatório (trades)
 
 // ──────────────────────────────────────────────────────────────────────
 // 💾 6. MEMÓRIA E PERSISTÊNCIA
@@ -6280,6 +6282,15 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].totalProfit  += net_profit;
       g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].totalTrades  += 1;
       g_tradesInCurrentRSIAtrMacdConfig++;
+      
+      // ✅ Gerar relatório a cada X trades
+      if(EnableParamSearchReport && ParamSearchReportIntervalTrades > 0)
+      {
+         if(g_totalTrades % ParamSearchReportIntervalTrades == 0)
+         {
+            ExportParamSearchReport();
+         }
+      }
 
       if(g_tradesInCurrentRSIAtrMacdConfig >= TradesPerRSIAtrMacdConfig)
       {
@@ -6326,10 +6337,16 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                   " | Signal=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSignal,
                   " | LucroTotal=", DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalProfit, 2),
                   " | Trades=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalTrades);
+            
+            // ✅ Gerar relatório final quando pesquisa concluir
+            ExportParamSearchReport();
          }
          else
          {
             Print("🧪 Mudando para próxima config RSI+ATR+MACD. Index=", g_currentRSIAtrMacdConfigIndex);
+            
+            // ✅ Gerar relatório ao mudar de config
+            ExportParamSearchReport();
          }
       }
    }
@@ -6830,6 +6847,192 @@ void ExportBestAndWorstStates(int fileHandle)
    
    FileWrite(fileHandle, "");
    FileWrite(fileHandle, "═══════════════════════════════════════════════════════════════");
+}
+
+// ======================================================================
+// ✅ NOVA FUNÇÃO: EXPORTAR RELATÓRIO DE PESQUISA DE PARÂMETROS
+// ======================================================================
+void ExportParamSearchReport()
+{
+   if(!EnableRSIAtrMacdParamSearch) return;
+   if(!EnableParamSearchReport) return;
+   
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_ParamSearch_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
+   
+   if(!CreateDirectoryForFile(filename)) return;
+   
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(file_handle == INVALID_HANDLE)
+   {
+      Print("❌ Erro ao criar relatório de pesquisa: ", filename);
+      return;
+   }
+   
+   // Cabeçalho
+   FileWrite(file_handle, "╔══════════════════════════════════════════════════════════════════════╗");
+   FileWrite(file_handle, "║     RELATÓRIO DE PESQUISA AUTOMÁTICA DE PARÂMETROS                   ║");
+   FileWrite(file_handle, "║     RSI + MACD + ATR - Phoenix Trader                                ║");
+   FileWrite(file_handle, "╚══════════════════════════════════════════════════════════════════════╝");
+   FileWrite(file_handle, "");
+   FileWrite(file_handle, "📅 Data/Hora: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+   FileWrite(file_handle, "📊 Símbolo: " + _Symbol);
+   FileWrite(file_handle, "⏱️ Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
+   FileWrite(file_handle, "");
+   
+   // Status geral
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "📌 STATUS GERAL DA PESQUISA");
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "");
+   
+   string statusText = g_rsiAtrMacdSearchCompleted ? "✅ CONCLUÍDA" : "🔄 EM ANDAMENTO";
+   FileWrite(file_handle, "Status: " + statusText);
+   
+   if(!g_rsiAtrMacdSearchCompleted)
+   {
+      FileWrite(file_handle, "Config Atual: #" + IntegerToString(g_currentRSIAtrMacdConfigIndex));
+      int tradesRestantes = TradesPerRSIAtrMacdConfig - g_tradesInCurrentRSIAtrMacdConfig;
+      double progressoPct = ((double)g_tradesInCurrentRSIAtrMacdConfig / TradesPerRSIAtrMacdConfig) * 100.0;
+      FileWrite(file_handle, "Progresso Config Atual: " + 
+                IntegerToString(g_tradesInCurrentRSIAtrMacdConfig) + "/" + 
+                IntegerToString(TradesPerRSIAtrMacdConfig) + " trades (" +
+                DoubleToString(progressoPct, 1) + "%)");
+      FileWrite(file_handle, "Trades Restantes: " + IntegerToString(tradesRestantes));
+      
+      int totalProgress = 0;
+      for(int i = 0; i < MAX_RSIAtrMacd_CONFIGS; i++)
+      {
+         totalProgress += g_RSIAtrMacdConfigs[i].totalTrades;
+      }
+      int totalTrades = MAX_RSIAtrMacd_CONFIGS * TradesPerRSIAtrMacdConfig;
+      double totalPct = ((double)totalProgress / totalTrades) * 100.0;
+      FileWrite(file_handle, "Progresso Total: " + IntegerToString(totalProgress) + "/" + 
+                IntegerToString(totalTrades) + " trades (" + 
+                DoubleToString(totalPct, 1) + "%)");
+   }
+   else
+   {
+      FileWrite(file_handle, "🏆 Melhor Config: #" + IntegerToString(g_bestRSIAtrMacdConfigIndex));
+      FileWrite(file_handle, "Usando Melhor Config: " + (UseBestRSIAtrMacdConfigAfterTest ? "SIM" : "NÃO"));
+   }
+   
+   FileWrite(file_handle, "");
+   
+   // Tabela de configurações
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "📊 DETALHES DE TODAS AS CONFIGURAÇÕES");
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "");
+   
+   // Cabeçalho da tabela
+   FileWrite(file_handle, "┌────────┬───────────────────────────────────────────────────────────────────┐");
+   FileWrite(file_handle, "│ Config │ Parâmetros e Resultados                                           │");
+   FileWrite(file_handle, "├────────┼───────────────────────────────────────────────────────────────────┤");
+   
+   for(int i = 0; i < MAX_RSIAtrMacd_CONFIGS; i++)
+   {
+      string configName = "";
+      if(i == 0) configName = "CLÁSSICA";
+      else if(i == 1) configName = "RÁPIDA";
+      else if(i == 2) configName = "LENTA";
+      else if(i == 3) configName = "SOLTO";
+      
+      string statusIcon = "";
+      if(g_rsiAtrMacdSearchCompleted)
+      {
+         statusIcon = (i == g_bestRSIAtrMacdConfigIndex) ? "🏆" : "  ";
+      }
+      else
+      {
+         if(i < g_currentRSIAtrMacdConfigIndex)
+            statusIcon = "✅";
+         else if(i == g_currentRSIAtrMacdConfigIndex)
+            statusIcon = "🔄";
+         else
+            statusIcon = "⏳";
+      }
+      
+      FileWrite(file_handle, "│ " + statusIcon + " #" + IntegerToString(i) + "   │ " + configName + 
+                StringFormat(" (RSI: %.0f/%.0f | ATR: %d×%.1f | MACD: %d/%d/%d)",
+                             g_RSIAtrMacdConfigs[i].rsiOverbought,
+                             g_RSIAtrMacdConfigs[i].rsiOversold,
+                             g_RSIAtrMacdConfigs[i].atrPeriod,
+                             g_RSIAtrMacdConfigs[i].atrStopMult,
+                             g_RSIAtrMacdConfigs[i].macdFast,
+                             g_RSIAtrMacdConfigs[i].macdSlow,
+                             g_RSIAtrMacdConfigs[i].macdSignal) + 
+                StringFormat("%*s│", 
+                             70 - StringLen(configName) - 50, ""));
+      
+      double avgProfit = 0.0;
+      if(g_RSIAtrMacdConfigs[i].totalTrades > 0)
+         avgProfit = g_RSIAtrMacdConfigs[i].totalProfit / (double)g_RSIAtrMacdConfigs[i].totalTrades;
+      
+      string tradesStr = StringFormat("      Trades: %d/%d", 
+                                      g_RSIAtrMacdConfigs[i].totalTrades,
+                                      TradesPerRSIAtrMacdConfig);
+      FileWrite(file_handle, "│        │ " + tradesStr + 
+                StringFormat("%*s│", 70 - StringLen(tradesStr) - 1, ""));
+      
+      string profitStr = StringFormat("      Lucro Total: %.2f", 
+                                     g_RSIAtrMacdConfigs[i].totalProfit);
+      FileWrite(file_handle, "│        │ " + profitStr + 
+                StringFormat("%*s│", 70 - StringLen(profitStr) - 1, ""));
+      
+      string avgStr = StringFormat("      Lucro Médio/Trade: %.2f", avgProfit);
+      FileWrite(file_handle, "│        │ " + avgStr + 
+                StringFormat("%*s│", 70 - StringLen(avgStr) - 1, ""));
+      
+      if(i < MAX_RSIAtrMacd_CONFIGS - 1)
+         FileWrite(file_handle, "├────────┼───────────────────────────────────────────────────────────────────┤");
+   }
+   
+   FileWrite(file_handle, "└────────┴───────────────────────────────────────────────────────────────────┘");
+   FileWrite(file_handle, "");
+   
+   // Legenda
+   FileWrite(file_handle, "Legenda: 🏆 Melhor | ✅ Concluído | 🔄 Testando | ⏳ Aguardando");
+   FileWrite(file_handle, "");
+   
+   // Resultado final (se concluído)
+   if(g_rsiAtrMacdSearchCompleted)
+   {
+      FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      FileWrite(file_handle, "🏆 RESULTADO FINAL - MELHOR CONFIGURAÇÃO");
+      FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      FileWrite(file_handle, "");
+      FileWrite(file_handle, "Config Vencedora: #" + IntegerToString(g_bestRSIAtrMacdConfigIndex));
+      FileWrite(file_handle, "");
+      FileWrite(file_handle, "📊 Parâmetros Ótimos:");
+      FileWrite(file_handle, "   RSI Overbought: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOverbought, 0));
+      FileWrite(file_handle, "   RSI Oversold: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOversold, 0));
+      FileWrite(file_handle, "   ATR Period: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod));
+      FileWrite(file_handle, "   ATR Stop Multiplier: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult, 1));
+      FileWrite(file_handle, "   MACD Fast: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdFast));
+      FileWrite(file_handle, "   MACD Slow: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSlow));
+      FileWrite(file_handle, "   MACD Signal: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSignal));
+      FileWrite(file_handle, "");
+      FileWrite(file_handle, "💰 Performance:");
+      FileWrite(file_handle, "   Trades Realizados: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalTrades));
+      FileWrite(file_handle, "   Lucro Total: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalProfit, 2));
+      double bestAvg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalProfit / 
+                       (double)g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalTrades;
+      FileWrite(file_handle, "   Lucro Médio/Trade: " + DoubleToString(bestAvg, 2));
+      FileWrite(file_handle, "");
+   }
+   
+   // Rodapé
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "Relatório gerado automaticamente pelo Phoenix Trader v" + 
+             DoubleToString(3.08, 2));
+   FileWrite(file_handle, "Próxima atualização em " + IntegerToString(ParamSearchReportIntervalTrades) + 
+             " trades ou quando pesquisa finalizar");
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   
+   FileClose(file_handle);
+   
+   Print("📊 Relatório de pesquisa de parâmetros atualizado: ", filename);
 }
 
 // ======================================================================
