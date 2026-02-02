@@ -4241,22 +4241,20 @@ int GetSimplifiedSignal()
    // Se pesquisa automática estiver ativa, usar config atual
    if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
    {
-      RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
-      currentRSIOverbought = cfg.rsiOverbought;
-      currentRSIOversold   = cfg.rsiOversold;
-      currentMACDFast      = cfg.macdFast;
-      currentMACDSlow      = cfg.macdSlow;
-      currentMACDSignal    = cfg.macdSignal;
+      currentRSIOverbought = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].rsiOverbought;
+      currentRSIOversold   = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].rsiOversold;
+      currentMACDFast      = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].macdFast;
+      currentMACDSlow      = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].macdSlow;
+      currentMACDSignal    = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].macdSignal;
    }
    else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
    {
       // Usar melhor config encontrada
-      RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex];
-      currentRSIOverbought = cfg.rsiOverbought;
-      currentRSIOversold   = cfg.rsiOversold;
-      currentMACDFast      = cfg.macdFast;
-      currentMACDSlow      = cfg.macdSlow;
-      currentMACDSignal    = cfg.macdSignal;
+      currentRSIOverbought = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOverbought;
+      currentRSIOversold   = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOversold;
+      currentMACDFast      = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdFast;
+      currentMACDSlow      = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSlow;
+      currentMACDSignal    = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSignal;
    }
    
    // Obter valores dos indicadores
@@ -5554,15 +5552,13 @@ double CalculateSLByPoints(bool isBuy, double entryPrice)
       
       if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
       {
-         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
-         currentATRPeriod  = cfg.atrPeriod;
-         currentATRStopMult = cfg.atrStopMult;
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrStopMult;
       }
       else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
       {
-         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex];
-         currentATRPeriod  = cfg.atrPeriod;
-         currentATRStopMult = cfg.atrStopMult;
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult;
       }
       
       double atr[1];
@@ -5624,15 +5620,13 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
       
       if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
       {
-         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
-         currentATRPeriod  = cfg.atrPeriod;
-         currentATRStopMult = cfg.atrStopMult;
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrStopMult;
       }
       else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
       {
-         RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex];
-         currentATRPeriod  = cfg.atrPeriod;
-         currentATRStopMult = cfg.atrStopMult;
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult;
       }
       
       double atr[1];
@@ -6430,9 +6424,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    // ✅ NOVO: Atualizar pesquisa automática de parâmetros RSI+ATR+MACD
    if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
    {
-      RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
-      cfg.totalProfit  += net_profit;
-      cfg.totalTrades  += 1;
+      g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].totalProfit  += net_profit;
+      g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].totalTrades  += 1;
       g_tradesInCurrentRSIAtrMacdConfig++;
 
       if(g_tradesInCurrentRSIAtrMacdConfig >= TradesPerRSIAtrMacdConfig)
