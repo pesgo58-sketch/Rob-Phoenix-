@@ -1,16 +1,15 @@
 //+------------------------------------------------------------------+
-//|                         Phoenix_Trader_v307_FIXED_CORRIGIDO.mq5  |
-//|          CONTAGEM CORRIGIDA + DECAY FUNCIONAL + EXPLORAÇÃO LIMITADA |
+//|                         Phoenix_Trader_SIMPLIFIED.mq5            |
+//|          SISTEMA SIMPLIFICADO - SEM ADX E BB                     |
+//|          APENAS RSI, MACD, ATR, MA, VOLUME                       |
 //|                  COM SISTEMA DE MEMÓRIA OTIMIZADA COMPLETA       |
 //|                      SISTEMA DE BLOQUEIO UNIFICADO              |
-//|                             ESTADOS VARIADOS v307F_ESTADOS       |
 //|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
-//|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
-#property version   "3.07"
+#property version   "3.08"
 
 // ══════════════════════════════════════════════════════════════════════
 // 📖 DOCUMENTAÇÃO DO SISTEMA DE BLOQUEIO E QUALIDADE DE ESTADOS
@@ -20,8 +19,9 @@
 // ─────────────────────────────────────────────────────────────────────
 //
 // 1️⃣ CÁLCULO DO ESTADO (CalculateState)
-//    - O robô analisa indicadores técnicos (MA, RSI, ADX, BB, Volume, etc.)
-//    - Discretiza valores em bins para criar um número de estado (0-575)
+//    - O robô analisa indicadores técnicos (MA, RSI, Volume, etc.)
+//    - ✅ SIMPLIFICADO: Removidos ADX e Bollinger Bands
+//    - Discretiza valores em bins para criar um número de estado (0-95)
 //    - Este estado representa a "situação de mercado" atual
 //
 // 2️⃣ VERIFICAÇÃO DE BLOQUEIO (IsStateBlocked)
@@ -106,14 +106,16 @@ CHistoryOrderInfo historyOrderInfo;
 // Reduzindo para um número gerenciável de estados
 #define BINS_MA_DIST   3      // Reduzido de 6 para 3
 #define BINS_RSI       4      // Reduzido de 6 para 4  
-#define BINS_ADX       2      // Mantido 2
-#define BINS_BBPOS     3      // Reduzido de 6 para 3
+// ✅ REMOVIDO: BINS_ADX (indicador ADX removido)
+// ✅ REMOVIDO: BINS_BBPOS (indicador BB removido)
 #define BINS_VOLATILITY 2     // Mantido 2
 #define BINS_VOLUME    2      // Reduzido de 3 para 2
 #define BINS_TIME      2      // Reduzido de 4 para 2
 
-// Cálculo do número total de estados - DEVE SER 576
-#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_ADX * BINS_BBPOS * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
+// Cálculo do número total de estados - SIMPLIFICADO (sem ADX e BB)
+// Antes: 3 * 4 * 2 * 3 * 2 * 2 * 2 = 576 estados
+// Agora: 3 * 4 * 2 * 2 * 2 = 96 estados
+#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
 
 #define NUM_ACTIONS 3  // 0:NOP, 1:Buy, 2:Sell
 
@@ -121,11 +123,6 @@ CHistoryOrderInfo historyOrderInfo;
 // ✅ CONSTANTES CRÍTICAS - APRENDIZADO CORRIGIDO
 // ============================================================
 const int MIN_VISITS_FOR_BLOCK = 30;
-
-// ✅ CONSTANTE PARA BOLLINGER BANDS
-// Quando a banda tem range zero (inválida), usar 0.5 (meio da banda)
-// como valor neutro, indicando que o preço está no centro
-const double BB_NEUTRAL_POSITION = 0.5;
 
 // ══════════════════════════════════════════════════════════════════════
 // 🎯 ENUM: CLASSIFICAÇÃO DE QUALIDADE DE ESTADOS
@@ -179,8 +176,7 @@ input group "──── 📊 INDICADORES PRINCIPAIS ────";
 input int    MAPeriod                 = 200;          // Período da Média Móvel
 input ENUM_MA_METHOD  MAMethod        = MODE_EMA;     // Tipo da Média Móvel
 input int    RSIPeriod                = 20;           // Período do RSI
-input int    BBPeriod                 = 24;           // Período das Bandas de Bollinger
-input double BBDeviation              = 2.2;          // Desvio das Bandas de Bollinger
+// ✅ REMOVIDO: BBPeriod e BBDeviation (indicador BB removido)
 input int    ATRPeriod                = 18;           // Período do ATR
 
 input group "──── 🎯 INDICADORES SIMPLIFICADOS (RSI+MACD+ATR) ────";
@@ -193,11 +189,8 @@ input group "──── ✅ VALIDAÇÕES DE INDICADORES (LEGACY) ────"
 input bool   UseRSIValidation         = true;         // Usar validação por RSI
 input double RSI_Overbought           = 75.0;         // RSI sobrecomprado
 input double RSI_Oversold             = 25.0;         // RSI sobrevendido
-input bool   UseBBValidation          = false;        // Usar validação por BB (DESATIVADO)
-input double BB_UpperThreshold        = 0.7;          // Threshold superior BB
-input double BB_LowerThreshold        = 0.3;          // Threshold inferior BB
-input bool   UseADXValidation         = false;        // Usar validação por ADX (DESATIVADO)
-input double MinADXStrength           = 20.0;         // Força mínima do ADX
+// ✅ REMOVIDO: UseBBValidation, BB thresholds (indicador BB removido)
+// ✅ REMOVIDO: UseADXValidation, MinADXStrength (indicador ADX removido)
 input bool   UseTrendValidation       = false;        // Usar validação de tendência (DESATIVADO)
 input double MinDistanceFromMA        = 0.3;          // Distância mínima da MA
 
@@ -482,10 +475,10 @@ datetime g_lastUnblockTestTime = 0; // Tempo do último teste de desbloqueio
 // 📈 3. INDICADORES TÉCNICOS
 // ──────────────────────────────────────────────────────────────────────
 string g_currentSymbol;
-int g_adxHandle  = INVALID_HANDLE;
+// ✅ REMOVIDO: g_adxHandle (indicador ADX removido)
 int g_maHandle   = INVALID_HANDLE;
 int g_rsiHandle  = INVALID_HANDLE;
-int g_bbHandle   = INVALID_HANDLE;
+// ✅ REMOVIDO: g_bbHandle (indicador BB removido)
 int g_atrHandle  = INVALID_HANDLE;
 int g_macdHandle = INVALID_HANDLE;  // ✅ MACD handle para sistema simplificado
 
@@ -2339,8 +2332,9 @@ bool LoadBrainFromFile(string filename)
 
 string BrainKey()
 {
-   return StringFormat("B%dx%dx%dx%dx%dx%dx%d_A%d",
-      BINS_MA_DIST,BINS_RSI,BINS_ADX,BINS_BBPOS,BINS_VOLATILITY,BINS_VOLUME,BINS_TIME,NUM_ACTIONS);
+   // ✅ SIMPLIFICADO: Removidos BINS_ADX e BINS_BBPOS (indicadores removidos)
+   return StringFormat("B%dx%dx%dx%dx%d_A%d",
+      BINS_MA_DIST,BINS_RSI,BINS_VOLATILITY,BINS_VOLUME,BINS_TIME,NUM_ACTIONS);
 }
 
 string GetBrainFileName()
@@ -5147,20 +5141,9 @@ int GetMADistanceBucket(double maDistance)
    else return 2;                        // Acima da MA
 }
 
-// ✅ Função para calcular bucket ADX
-int GetADXBucket(double adxValue)
-{
-   if(adxValue < 20) return 0;           // Tendência fraca
-   else return 1;                        // Tendência forte
-}
+// ✅ REMOVIDO: GetADXBucket() (indicador ADX removido)
 
-// ✅ Função para calcular bucket Bollinger Bands
-int GetBBBucket(double bbPosition)
-{
-   if(bbPosition < 0.3) return 0;        // Próximo da banda inferior
-   else if(bbPosition < 0.7) return 1;   // No meio
-   else return 2;                        // Próximo da banda superior
-}
+// ✅ REMOVIDO: GetBBBucket() (indicador BB removido)
 
 // ✅ Função para calcular bucket volatilidade
 int GetVolatilityBucket(double atrCurrent, double atrPrevious)
@@ -5197,12 +5180,10 @@ int GetTimeBucket()
 // ======================================================================
 int GetCurrentState()
 {
-   double ma[], rsi[], adx[], bb_upper[], bb_lower[], atr[];
+   // ✅ SIMPLIFICADO: Removidos arrays adx[], bb_upper[], bb_lower[] (indicadores removidos)
+   double ma[], rsi[], atr[];
    ArraySetAsSeries(ma, true);
    ArraySetAsSeries(rsi, true);
-   ArraySetAsSeries(adx, true);
-   ArraySetAsSeries(bb_upper, true);
-   ArraySetAsSeries(bb_lower, true);
    ArraySetAsSeries(atr, true);
    
    if(CopyBuffer(g_maHandle, 0, 0, 1, ma) < 1) 
@@ -5215,21 +5196,8 @@ int GetCurrentState()
       Print("❌ Erro ao copiar RSI");
       return -1;
    }
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) 
-   {
-      Print("❌ Erro ao copiar ADX");
-      return -1;
-   }
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) 
-   {
-      Print("❌ Erro ao copiar BB Upper");
-      return -1;
-   }
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) 
-   {
-      Print("❌ Erro ao copiar BB Lower");
-      return -1;
-   }
+   // ✅ REMOVIDO: CopyBuffer para ADX (indicador removido)
+   // ✅ REMOVIDO: CopyBuffer para BB Upper e Lower (indicador removido)
    if(CopyBuffer(g_atrHandle, 0, 0, 2, atr) < 2) 
    {
       Print("❌ Erro ao copiar ATR");
@@ -5251,39 +5219,30 @@ int GetCurrentState()
    else
       maDistance = SafeDivide(price - ma[0], point * 10, 0.0);
    
-   // ✅ Cálculo da posição nas Bollinger Bands
-   double bbPosition = 0;
-   double bbRange = bb_upper[0] - bb_lower[0];
-   if(bbRange > 0)
-      bbPosition = SafeDivide(price - bb_lower[0], bbRange, BB_NEUTRAL_POSITION);
-   else
-      bbPosition = BB_NEUTRAL_POSITION;  // Usar posição neutra se range inválido
+   // ✅ REMOVIDO: Cálculo da posição nas Bollinger Bands (indicador removido)
    
-   // ✅ Calcular buckets otimizados
+   // ✅ Calcular buckets otimizados (SEM ADX e BB)
    int maBucket = GetMADistanceBucket(maDistance);
    int rsiBucket = GetRSIBucket(rsi[0]);
-   int adxBucket = GetADXBucket(adx[0]);
-   int bbBucket = GetBBBucket(bbPosition);
+   // ✅ REMOVIDO: adxBucket (indicador ADX removido)
+   // ✅ REMOVIDO: bbBucket (indicador BB removido)
    int volBucket = GetVolatilityBucket(atr[0], atr[1]);
    int volumeBucket = GetVolumeBucket();
    int timeBucket = GetTimeBucket();
    
-   // ✅ Proteção contra overflow
+   // ✅ Proteção contra overflow (SEM ADX e BB)
    maBucket = (int)MathMod(maBucket, BINS_MA_DIST);
    rsiBucket = (int)MathMod(rsiBucket, BINS_RSI);
-   adxBucket = (int)MathMod(adxBucket, BINS_ADX);
-   bbBucket = (int)MathMod(bbBucket, BINS_BBPOS);
    volBucket = (int)MathMod(volBucket, BINS_VOLATILITY);
    volumeBucket = (int)MathMod(volumeBucket, BINS_VOLUME);
    timeBucket = (int)MathMod(timeBucket, BINS_TIME);
    
-   // ✅ CORREÇÃO: Método correto - multiplicar na ordem inversa
+   // ✅ SIMPLIFICADO: Cálculo de estado sem ADX e BB
+   // Nova fórmula: state = (((time * VOLUME + volume) * VOLATILITY + vol) * RSI + rsi) * MA_DIST + ma
    int state_idx = 0;
    
-   // Método correto - multiplicar na ordem inversa
-   state_idx = (((((timeBucket * BINS_VOLUME + volumeBucket) * BINS_VOLATILITY + volBucket) * 
-                  BINS_BBPOS + bbBucket) * BINS_ADX + adxBucket) * 
-                  BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket;
+   state_idx = (((timeBucket * BINS_VOLUME + volumeBucket) * BINS_VOLATILITY + volBucket) * 
+                 BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket;
    
    // ✅ VERIFICAÇÃO DE SEGURANÇA
    if(state_idx < 0) state_idx = 0;
@@ -5293,13 +5252,13 @@ int GetCurrentState()
       state_idx = state_idx % NUM_STATES; // Forçar dentro dos limites
    }
    
-   // ✅ DEBUG para verificar cálculo
+   // ✅ DEBUG para verificar cálculo (SEM ADX e BB)
    static int debugCounter = 0;
    if(debugCounter++ % 100 == 0)
    {
       Print("DEBUG Estado: idx=", state_idx, 
-            " | ma=", maBucket, " rsi=", rsiBucket, " adx=", adxBucket,
-            " bb=", bbBucket, " vol=", volBucket, " volM=", volumeBucket, " time=", timeBucket);
+            " | ma=", maBucket, " rsi=", rsiBucket,
+            " vol=", volBucket, " volM=", volumeBucket, " time=", timeBucket);
    }
    
    // ✅ PROTEÇÃO CONTRA ESTADO CONGELADO
@@ -5336,9 +5295,9 @@ int GetCurrentState()
    if((state_idx != lastLoggedState && (currentTime - lastLogTime) > 300) || 
       g_totalTrades % 50 == 0)
    {
-      PrintFormat("📊 Estado calculado: %d | RSI=%.1f(%d) | MA_dist=%.2f(%d) | ADX=%.1f(%d) | BB=%.2f(%d) | Vol=%d | Time=%d",
-                  state_idx, rsi[0], rsiBucket, maDistance, maBucket, adx[0], adxBucket, 
-                  bbPosition, bbBucket, volBucket, timeBucket);
+      PrintFormat("📊 Estado calculado: %d | RSI=%.1f(%d) | MA_dist=%.2f(%d) | Vol=%d | VolM=%d | Time=%d",
+                  state_idx, rsi[0], rsiBucket, maDistance, maBucket, 
+                  volBucket, volumeBucket, timeBucket);
       lastLoggedState = state_idx;
       lastLogTime = currentTime;
    }
@@ -5848,107 +5807,9 @@ bool ValidateWithRSI(bool isBuy)
    }
 }
 
-bool ValidateWithBollingerBands(bool isBuy)
-{
-   if(!UseBBValidation) return true;
-   
-   double bb_upper[], bb_lower[];
-   ArraySetAsSeries(bb_upper, true);
-   ArraySetAsSeries(bb_lower, true);
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) return false;
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) return false;
-   
-   double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   double bb_range = bb_upper[0] - bb_lower[0];
-   
-   if(bb_range <= 0) return false;
-   
-   double bb_position = SafeDivide(price - bb_lower[0], bb_range, BB_NEUTRAL_POSITION);
-   
-   if(isBuy)
-   {
-      if(bb_position <= 0.7)
-      {
-         if(bb_position <= BB_LowerThreshold)
-         {
-            Print("✅ BB EXCELENTE para BUY: posição ", DoubleToString(bb_position*100, 1), "% (próximo da banda inferior)");
-         }
-         else if(bb_position <= 0.5)
-         {
-            Print("✅ BB BOM para BUY: posição ", DoubleToString(bb_position*100, 1), "% (faixa inferior)");
-         }
-         else
-         {
-            Print("✅ BB ACEITÁVEL para BUY: posição ", DoubleToString(bb_position*100, 1), "% (metade inferior)");
-         }
-         return true;
-      }
-      else if(bb_position <= 0.9)
-      {
-         Print("⚠️ BB NEUTRO para BUY: posição ", DoubleToString(bb_position*100, 1), "% (cuidado)");
-         return true;
-      }
-      else
-      {
-         Print("❌ BB muito alto para BUY: posição ", DoubleToString(bb_position*100, 1), "% (acima de 90%)");
-         return false;
-      }
-   }
-   else
-   {
-      if(bb_position >= 0.3)
-      {
-         if(bb_position >= BB_UpperThreshold)
-         {
-            Print("✅ BB EXCELENTE para SELL: posição ", DoubleToString(bb_position*100, 1), "% (próximo da banda superior)");
-         }
-         else if(bb_position >= 0.5)
-         {
-            Print("✅ BB BOM para SELL: posição ", DoubleToString(bb_position*100, 1), "% (faixa superior)");
-         }
-         else
-         {
-            Print("✅ BB ACEITÁVEL para SELL: posição ", DoubleToString(bb_position*100, 1), "% (metade superior)");
-         }
-         return true;
-      }
-      else if(bb_position >= 0.1)
-      {
-         Print("⚠️ BB NEUTRO para SELL: posição ", DoubleToString(bb_position*100, 1), "% (cuidado)");
-         return true;
-      }
-      else
-      {
-         Print("❌ BB muito baixo para SELL: posição ", DoubleToString(bb_position*100, 1), "% (abaixo de 10%)");
-         return false;
-      }
-   }
-}
+// ✅ REMOVIDO: ValidateWithBollingerBands() (indicador BB removido)
 
-bool ValidateWithADX()
-{
-   if(!UseADXValidation) return true;
-   
-   double adx[];
-   ArraySetAsSeries(adx, true);
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) return false;
-   
-   if(adx[0] >= MinADXStrength)
-   {
-      Print("✅ ADX válido: ", DoubleToString(adx[0], 1), " (força suficiente)");
-      return true;
-   }
-   else if(adx[0] >= 15)
-   {
-      Print("⚠️ ADX moderado aceito: ", DoubleToString(adx[0], 1), " (abaixo do ideal, mas aceitável)");
-      return true;
-   }
-   else
-   {
-      Print("❌ ADX muito fraco: ", DoubleToString(adx[0], 1), " (mínimo aceitável: 15)");
-      return false;
-   }
-}
+// ✅ REMOVIDO: ValidateWithADX() (indicador ADX removido)
 
 bool ValidateWithTrend(bool isBuy)
 {
@@ -6046,17 +5907,9 @@ bool ValidateAllIndicators(bool isBuy)
       return false;
    }
    
-   if(!ValidateWithBollingerBands(isBuy))
-   {
-      Print("❌ VALIDAÇÃO FALHOU: Bollinger Bands");
-      return false;
-   }
+   // ✅ REMOVIDO: ValidateWithBollingerBands (indicador BB removido)
    
-   if(!ValidateWithADX())
-   {
-      Print("❌ VALIDAÇÃO FALHOU: ADX");
-      return false;
-   }
+   // ✅ REMOVIDO: ValidateWithADX (indicador ADX removido)
    
    if(!ValidateWithTrend(isBuy))
    {
@@ -7587,14 +7440,13 @@ int OnInit()
    MathSrand((int)GetTickCount64());
 
    g_maHandle      = iMA(_Symbol, _Period, MAPeriod, 0, MAMethod, PRICE_CLOSE);
-   g_adxHandle     = iADX(_Symbol, _Period, 20);
+   // ✅ REMOVIDO: g_adxHandle (indicador ADX removido)
    g_rsiHandle     = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
-   g_bbHandle      = iBands(_Symbol, _Period, BBPeriod, 0, BBDeviation, PRICE_CLOSE);
+   // ✅ REMOVIDO: g_bbHandle (indicador BB removido)
    g_atrHandle     = iATR(_Symbol, _Period, ATRPeriod);
    g_macdHandle    = iMACD(_Symbol, _Period, MACD_Fast, MACD_Slow, MACD_Signal, PRICE_CLOSE);
 
-   if(g_maHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
-      g_rsiHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
+   if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
       g_atrHandle == INVALID_HANDLE || g_macdHandle == INVALID_HANDLE)
    {
       Print("❌ Falha ao criar indicadores");
@@ -7798,19 +7650,19 @@ int OnInit()
       if(CloseOppositeOnNewSignal) CloseAllPositions();
    }
 
-   Print("🔥🔥🔥 INICIALIZANDO SISTEMA SUPER CORRIGIDO...");
+   Print("🔥🔥🔥 INICIALIZANDO SISTEMA SIMPLIFICADO...");
    Print("🔥🔥🔥 CONFIGURAÇÃO DE ESTADOS:");
    Print("🔥🔥🔥 Bins por indicador:");
    Print("🔥🔥🔥 MA Distance: ", BINS_MA_DIST);
    Print("🔥🔥🔥 RSI: ", BINS_RSI);
-   Print("🔥🔥🔥 ADX: ", BINS_ADX);
-   Print("🔥🔥🔥 BB Position: ", BINS_BBPOS);
+   // ✅ REMOVIDO: ADX (indicador removido)
+   // ✅ REMOVIDO: BB Position (indicador removido)
    Print("🔥🔥🔥 Volatilidade: ", BINS_VOLATILITY);
    Print("🔥🔥🔥 Volume: ", BINS_VOLUME);
    Print("🔥🔥🔥 Tempo: ", BINS_TIME);
-   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×3×2×2×2 = 576)");
+   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×2×2 = 96) - SIMPLIFICADO SEM ADX/BB");
    Print("🔥🔥🔥 MEMÓRIA MÁXIMA: ", MaxMemoryStates, " estados ativos");
-   Print("🔥🔥🔥 SISTEMA SUPER CORRIGIDO: ATIVADO");
+   Print("🔥🔥🔥 SISTEMA SIMPLIFICADO: ATIVADO (SEM ADX E BB)");
    
    // ✅ CONFIGURAÇÕES APLICADAS:
    Print("⚙️ Configurações aplicadas:");
@@ -7935,9 +7787,9 @@ void OnDeinit(const int reason)
    Print("💾 Processo de salvamento concluído");
    
    IndicatorRelease(g_maHandle);
-   IndicatorRelease(g_adxHandle);
+   // ✅ REMOVIDO: IndicatorRelease(g_adxHandle) (indicador ADX removido)
    IndicatorRelease(g_rsiHandle);
-   IndicatorRelease(g_bbHandle);
+   // ✅ REMOVIDO: IndicatorRelease(g_bbHandle) (indicador BB removido)
    IndicatorRelease(g_atrHandle);
    IndicatorRelease(g_macdHandle);
 
