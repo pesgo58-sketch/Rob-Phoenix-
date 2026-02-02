@@ -183,16 +183,22 @@ input int    BBPeriod                 = 24;           // Período das Bandas de 
 input double BBDeviation              = 2.2;          // Desvio das Bandas de Bollinger
 input int    ATRPeriod                = 18;           // Período do ATR
 
-input group "──── ✅ VALIDAÇÕES DE INDICADORES ────";
+input group "──── 🎯 INDICADORES SIMPLIFICADOS (RSI+MACD+ATR) ────";
+input int    MACD_Fast                = 12;           // MACD Fast EMA
+input int    MACD_Slow                = 26;           // MACD Slow EMA  
+input int    MACD_Signal              = 9;            // MACD Signal line
+input double ATR_StopMult             = 2.0;          // Multiplicador ATR para Stop/TP
+
+input group "──── ✅ VALIDAÇÕES DE INDICADORES (LEGACY) ────";
 input bool   UseRSIValidation         = true;         // Usar validação por RSI
 input double RSI_Overbought           = 75.0;         // RSI sobrecomprado
 input double RSI_Oversold             = 25.0;         // RSI sobrevendido
-input bool   UseBBValidation          = true;         // Usar validação por BB
+input bool   UseBBValidation          = false;        // Usar validação por BB (DESATIVADO)
 input double BB_UpperThreshold        = 0.7;          // Threshold superior BB
 input double BB_LowerThreshold        = 0.3;          // Threshold inferior BB
-input bool   UseADXValidation         = true;         // Usar validação por ADX
+input bool   UseADXValidation         = false;        // Usar validação por ADX (DESATIVADO)
 input double MinADXStrength           = 20.0;         // Força mínima do ADX
-input bool   UseTrendValidation       = true;         // Usar validação de tendência
+input bool   UseTrendValidation       = false;        // Usar validação de tendência (DESATIVADO)
 input double MinDistanceFromMA        = 0.3;          // Distância mínima da MA
 
 input group "──── 📊 FILTRO DE VOLUME ────";
@@ -272,6 +278,11 @@ input bool   EnablePyramidingLearning = true;         // Aprendizado de piramida
 input int    PyramidLearningBonus     = 10;           // Bônus aprendizado pirâmide
 input double PyramidBlockingMultiplier = 1.5;         // Multiplicador bloqueio pirâmide
 input int    MinPyramidVisitsForBlock = 50;           // Visitas mín. para bloquear pirâmide
+
+input group "──── 🧪 PESQUISA AUTO RSI+ATR+MACD ────";
+input bool   EnableRSIAtrMacdParamSearch       = false;  // Habilitar pesquisa automática
+input int    TradesPerRSIAtrMacdConfig        = 300;     // Trades por configuração
+input bool   UseBestRSIAtrMacdConfigAfterTest = true;    // Usar melhor config após teste
 
 // ──────────────────────────────────────────────────────────────────────
 // 💾 6. MEMÓRIA E PERSISTÊNCIA
@@ -402,6 +413,33 @@ int g_neutralStatesCount = 0;
 int g_badStatesCount = 0;
 int g_blockedStatesCount = 0;
 
+// ──────────────────────────────────────────────────────────────────────
+// 🧪 PESQUISA AUTOMÁTICA DE PARÂMETROS RSI+ATR+MACD
+// ──────────────────────────────────────────────────────────────────────
+#define MAX_RSIAtrMacd_CONFIGS 4
+
+struct RSIAtrMacdConfig
+{
+   double rsiOverbought;
+   double rsiOversold;
+   
+   int    atrPeriod;
+   double atrStopMult;
+   
+   int    macdFast;
+   int    macdSlow;
+   int    macdSignal;
+   
+   double totalProfit;
+   int    totalTrades;
+};
+
+RSIAtrMacdConfig g_RSIAtrMacdConfigs[MAX_RSIAtrMacd_CONFIGS];
+int  g_currentRSIAtrMacdConfigIndex    = 0;
+int  g_tradesInCurrentRSIAtrMacdConfig = 0;
+bool g_rsiAtrMacdSearchCompleted       = false;
+int  g_bestRSIAtrMacdConfigIndex       = 0;
+
 // Aprendizado - Controle
 bool g_learningInitialized = false;
 double g_currentExplorationRate = 0.0;
@@ -443,11 +481,12 @@ datetime g_lastUnblockTestTime = 0; // Tempo do último teste de desbloqueio
 // 📈 3. INDICADORES TÉCNICOS
 // ──────────────────────────────────────────────────────────────────────
 string g_currentSymbol;
-int g_adxHandle = INVALID_HANDLE;
-int g_maHandle  = INVALID_HANDLE;
-int g_rsiHandle = INVALID_HANDLE;
-int g_bbHandle  = INVALID_HANDLE;
-int g_atrHandle = INVALID_HANDLE;
+int g_adxHandle  = INVALID_HANDLE;
+int g_maHandle   = INVALID_HANDLE;
+int g_rsiHandle  = INVALID_HANDLE;
+int g_bbHandle   = INVALID_HANDLE;
+int g_atrHandle  = INVALID_HANDLE;
+int g_macdHandle = INVALID_HANDLE;  // ✅ MACD handle para sistema simplificado
 
 // ──────────────────────────────────────────────────────────────────────
 // 💰 4. CONTROLE DE TRADES E POSIÇÕES
@@ -4183,6 +4222,84 @@ void UpdateQ(int state, int action, double reward)
    // ✅ Correções periódicas removidas (FixStuckStatesProblem desabilitada)
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🎯 FUNÇÃO: Obter sinal simplificado usando apenas RSI + MACD
+// ══════════════════════════════════════════════════════════════════════
+// Retorna: 0=NOP, 1=BUY, 2=SELL
+// Usa apenas RSI para zona e MACD para direção/confirmação
+int GetSimplifiedSignal()
+{
+   // Obter parâmetros atuais (podem vir da pesquisa automática ou inputs)
+   int    currentRSIPeriod      = RSIPeriod;
+   double currentRSIOverbought  = RSI_Overbought;
+   double currentRSIOversold    = RSI_Oversold;
+   int    currentMACDFast       = MACD_Fast;
+   int    currentMACDSlow       = MACD_Slow;
+   int    currentMACDSignal     = MACD_Signal;
+   
+   // Se pesquisa automática estiver ativa, usar config atual
+   if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+   {
+      RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
+      currentRSIOverbought = cfg.rsiOverbought;
+      currentRSIOversold   = cfg.rsiOversold;
+      currentMACDFast      = cfg.macdFast;
+      currentMACDSlow      = cfg.macdSlow;
+      currentMACDSignal    = cfg.macdSignal;
+   }
+   else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
+   {
+      // Usar melhor config encontrada
+      RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex];
+      currentRSIOverbought = cfg.rsiOverbought;
+      currentRSIOversold   = cfg.rsiOversold;
+      currentMACDFast      = cfg.macdFast;
+      currentMACDSlow      = cfg.macdSlow;
+      currentMACDSignal    = cfg.macdSignal;
+   }
+   
+   // Obter valores dos indicadores
+   double rsi[1];
+   double macdMain[1];
+   double macdSignal[1];
+   
+   if(CopyBuffer(g_rsiHandle, 0, 0, 1, rsi) < 1)
+   {
+      Print("❌ Erro ao copiar RSI");
+      return 0; // NOP
+   }
+   
+   if(CopyBuffer(g_macdHandle, 0, 0, 1, macdMain) < 1)
+   {
+      Print("❌ Erro ao copiar MACD Main");
+      return 0; // NOP
+   }
+   
+   if(CopyBuffer(g_macdHandle, 1, 0, 1, macdSignal) < 1)
+   {
+      Print("❌ Erro ao copiar MACD Signal");
+      return 0; // NOP
+   }
+   
+   // Lógica simplificada de sinal
+   bool rsiBuyZone   = (rsi[0] < currentRSIOversold);
+   bool rsiSellZone  = (rsi[0] > currentRSIOverbought);
+   bool macdBuyBias  = (macdMain[0] > macdSignal[0]);
+   bool macdSellBias = (macdMain[0] < macdSignal[0]);
+   
+   // Decisão final
+   if(rsiBuyZone && macdBuyBias)
+   {
+      return 1; // BUY
+   }
+   else if(rsiSellZone && macdSellBias)
+   {
+      return 2; // SELL
+   }
+   
+   return 0; // NOP - sem sinal claro
+}
+
 // ======================================================================
 // ✅✅✅ FUNÇÃO CORRIGIDA: UpdateQ_NOP (NÃO CONTA COMO PERDA)
 // ======================================================================
@@ -5996,6 +6113,63 @@ void InitializeLearningSystem()
    Print("🧠 Sistema de aprendizado inteligente inicializado (memória otimizada com decay)");
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🧪 FUNÇÃO: Inicializar configurações de pesquisa automática RSI+ATR+MACD
+// ══════════════════════════════════════════════════════════════════════
+void InitRSIAtrMacdConfigs()
+{
+   // Config 0 - base (padrões clássicos)
+   g_RSIAtrMacdConfigs[0].rsiOverbought = 70;
+   g_RSIAtrMacdConfigs[0].rsiOversold   = 30;
+   g_RSIAtrMacdConfigs[0].atrPeriod     = 14;
+   g_RSIAtrMacdConfigs[0].atrStopMult   = 2.0;
+   g_RSIAtrMacdConfigs[0].macdFast      = 12;
+   g_RSIAtrMacdConfigs[0].macdSlow      = 26;
+   g_RSIAtrMacdConfigs[0].macdSignal    = 9;
+   g_RSIAtrMacdConfigs[0].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[0].totalTrades   = 0;
+
+   // Config 1 - mais rápida (sinais mais frequentes)
+   g_RSIAtrMacdConfigs[1].rsiOverbought = 68;
+   g_RSIAtrMacdConfigs[1].rsiOversold   = 32;
+   g_RSIAtrMacdConfigs[1].atrPeriod     = 14;
+   g_RSIAtrMacdConfigs[1].atrStopMult   = 1.8;
+   g_RSIAtrMacdConfigs[1].macdFast      = 8;
+   g_RSIAtrMacdConfigs[1].macdSlow      = 21;
+   g_RSIAtrMacdConfigs[1].macdSignal    = 5;
+   g_RSIAtrMacdConfigs[1].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[1].totalTrades   = 0;
+
+   // Config 2 - mais lenta (sinais mais seletivos, stops maiores)
+   g_RSIAtrMacdConfigs[2].rsiOverbought = 72;
+   g_RSIAtrMacdConfigs[2].rsiOversold   = 28;
+   g_RSIAtrMacdConfigs[2].atrPeriod     = 20;
+   g_RSIAtrMacdConfigs[2].atrStopMult   = 2.5;
+   g_RSIAtrMacdConfigs[2].macdFast      = 16;
+   g_RSIAtrMacdConfigs[2].macdSlow      = 32;
+   g_RSIAtrMacdConfigs[2].macdSignal    = 9;
+   g_RSIAtrMacdConfigs[2].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[2].totalTrades   = 0;
+
+   // Config 3 - RSI mais solto (permite mais entradas)
+   g_RSIAtrMacdConfigs[3].rsiOverbought = 65;
+   g_RSIAtrMacdConfigs[3].rsiOversold   = 35;
+   g_RSIAtrMacdConfigs[3].atrPeriod     = 10;
+   g_RSIAtrMacdConfigs[3].atrStopMult   = 2.2;
+   g_RSIAtrMacdConfigs[3].macdFast      = 10;
+   g_RSIAtrMacdConfigs[3].macdSlow      = 24;
+   g_RSIAtrMacdConfigs[3].macdSignal    = 7;
+   g_RSIAtrMacdConfigs[3].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[3].totalTrades   = 0;
+
+   g_currentRSIAtrMacdConfigIndex    = 0;
+   g_tradesInCurrentRSIAtrMacdConfig = 0;
+   g_rsiAtrMacdSearchCompleted       = false;
+   g_bestRSIAtrMacdConfigIndex       = 0;
+   
+   Print("🧪 Configurações de pesquisa RSI+ATR+MACD inicializadas (4 configs)");
+}
+
 double CalculateStateAverageProfit(int state)
 {
    if(state < 0 || state >= NUM_STATES) return 0.0;
@@ -6126,6 +6300,67 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    
    // ✅ NOVO: Atualizar estatísticas mensais
    UpdateMonthlyStats(net_profit);
+   
+   // ✅ NOVO: Atualizar pesquisa automática de parâmetros RSI+ATR+MACD
+   if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+   {
+      RSIAtrMacdConfig &cfg = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex];
+      cfg.totalProfit  += net_profit;
+      cfg.totalTrades  += 1;
+      g_tradesInCurrentRSIAtrMacdConfig++;
+
+      if(g_tradesInCurrentRSIAtrMacdConfig >= TradesPerRSIAtrMacdConfig)
+      {
+         g_currentRSIAtrMacdConfigIndex++;
+         g_tradesInCurrentRSIAtrMacdConfig = 0;
+
+         if(g_currentRSIAtrMacdConfigIndex >= MAX_RSIAtrMacd_CONFIGS)
+         {
+            g_currentRSIAtrMacdConfigIndex = 0;
+            g_rsiAtrMacdSearchCompleted    = true;
+
+            double bestScore = -DBL_MAX;
+            int    bestIndex = 0;
+
+            for(int i = 0; i < MAX_RSIAtrMacd_CONFIGS; i++)
+            {
+               double avgProfitPerTrade = 0.0;
+               if(g_RSIAtrMacdConfigs[i].totalTrades > 0)
+                  avgProfitPerTrade = g_RSIAtrMacdConfigs[i].totalProfit /
+                                      (double)g_RSIAtrMacdConfigs[i].totalTrades;
+
+               double score = avgProfitPerTrade; // pode trocar critério depois
+
+               if(score > bestScore)
+               {
+                  bestScore = score;
+                  bestIndex = i;
+               }
+            }
+
+            g_bestRSIAtrMacdConfigIndex = bestIndex;
+
+            if(UseBestRSIAtrMacdConfigAfterTest)
+               g_currentRSIAtrMacdConfigIndex = g_bestRSIAtrMacdConfigIndex;
+
+            Print("🧪 Pesquisa RSI+ATR+MACD concluída. Melhor config index=",
+                  g_bestRSIAtrMacdConfigIndex,
+                  " | RSI OB=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOverbought,
+                  " | RSI OS=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOversold,
+                  " | ATRPeriod=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod,
+                  " | ATRMult=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult,
+                  " | MACD Fast=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdFast,
+                  " | Slow=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSlow,
+                  " | Signal=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSignal,
+                  " | LucroTotal=", DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalProfit, 2),
+                  " | Trades=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalTrades);
+         }
+         else
+         {
+            Print("🧪 Mudando para próxima config RSI+ATR+MACD. Index=", g_currentRSIAtrMacdConfigIndex);
+         }
+      }
+   }
    
    // ⚠️ DIAGNÓSTICO DETALHADO
    Print("DIAGNÓSTICO DETALHADO:");
@@ -7237,14 +7472,18 @@ int OnInit()
    g_rsiHandle     = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
    g_bbHandle      = iBands(_Symbol, _Period, BBPeriod, 0, BBDeviation, PRICE_CLOSE);
    g_atrHandle     = iATR(_Symbol, _Period, ATRPeriod);
+   g_macdHandle    = iMACD(_Symbol, _Period, MACD_Fast, MACD_Slow, MACD_Signal, PRICE_CLOSE);
 
    if(g_maHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
       g_rsiHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
-      g_atrHandle == INVALID_HANDLE)
+      g_atrHandle == INVALID_HANDLE || g_macdHandle == INVALID_HANDLE)
    {
       Print("❌ Falha ao criar indicadores");
       return INIT_FAILED;
    }
+   
+   // ✅ Inicializar configurações de pesquisa automática RSI+ATR+MACD
+   InitRSIAtrMacdConfigs();
 
    // ✅ CORREÇÃO CRÍTICA V2: Força reload completo SEMPRE
    // Evita perda de memória ao mudar data/período no testador
@@ -7581,6 +7820,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(g_rsiHandle);
    IndicatorRelease(g_bbHandle);
    IndicatorRelease(g_atrHandle);
+   IndicatorRelease(g_macdHandle);
 
    RemoveHUD();
 }
