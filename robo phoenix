@@ -2089,6 +2089,26 @@ bool SaveBrainToFile(string filename)
    FileWriteArray(h, g_stateLastBlockTime);
    FileWriteArray(h, g_stateLastUnblockTime);
 
+   // ✅ BUG FIX: Salvar arrays de ranking de estados (TOP 10 melhores e piores)
+   // Isso preserva o ranking entre reinícios do EA
+   FileWriteLong(h, (long)g_lastRankingUpdate);
+   for(int i = 0; i < 10; i++)
+   {
+      FileWriteInteger(h, g_bestStates[i].state);
+      FileWriteDouble(h, g_bestStates[i].winRate);
+      FileWriteInteger(h, g_bestStates[i].visits);
+      FileWriteDouble(h, g_bestStates[i].profit);
+      FileWriteInteger(h, (int)g_bestStates[i].quality);
+   }
+   for(int i = 0; i < 10; i++)
+   {
+      FileWriteInteger(h, g_worstStates[i].state);
+      FileWriteDouble(h, g_worstStates[i].winRate);
+      FileWriteInteger(h, g_worstStates[i].visits);
+      FileWriteDouble(h, g_worstStates[i].profit);
+      FileWriteInteger(h, (int)g_worstStates[i].quality);
+   }
+
    FileClose(h);
    return true;
 }
@@ -2237,6 +2257,26 @@ bool LoadBrainFromFile(string filename)
    FileReadArray(h, g_stateLastBlockTime, 0, NUM_STATES);
    FileReadArray(h, g_stateLastUnblockTime, 0, NUM_STATES);
    
+   // ✅ BUG FIX: Carregar arrays de ranking de estados (TOP 10 melhores e piores)
+   // Isso restaura o ranking entre reinícios do EA
+   g_lastRankingUpdate = (datetime)FileReadLong(h);
+   for(int i = 0; i < 10; i++)
+   {
+      g_bestStates[i].state = FileReadInteger(h);
+      g_bestStates[i].winRate = FileReadDouble(h);
+      g_bestStates[i].visits = FileReadInteger(h);
+      g_bestStates[i].profit = FileReadDouble(h);
+      g_bestStates[i].quality = (ENUM_STATE_QUALITY)FileReadInteger(h);
+   }
+   for(int i = 0; i < 10; i++)
+   {
+      g_worstStates[i].state = FileReadInteger(h);
+      g_worstStates[i].winRate = FileReadDouble(h);
+      g_worstStates[i].visits = FileReadInteger(h);
+      g_worstStates[i].profit = FileReadDouble(h);
+      g_worstStates[i].quality = (ENUM_STATE_QUALITY)FileReadInteger(h);
+   }
+   
    FileClose(h);
    
    Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
@@ -2244,7 +2284,11 @@ bool LoadBrainFromFile(string filename)
    Print("📊 Ciclos de decay: ", g_totalDecayCycles);
    Print("📊 Estados resetados: ", g_totalBadStateResets);
    Print("📊 Total de trades: ", g_totalTrades, " (Wins: ", g_totalWins, ", Losses: ", g_totalLosses, ")");
+   Print("💰 Lucro Total carregado: ", DoubleToString(g_sumProfit, 2));
    Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+   Print("🏆 Ranking carregado: ", (g_lastRankingUpdate > 0 ? "SIM" : "NÃO"), 
+         " | Melhores: ", g_bestStates[0].visits, " visitas",
+         " | Piores: ", g_worstStates[0].visits, " visitas");
    
    return true;
 }
@@ -2417,9 +2461,19 @@ bool LoadBrain()
 // ⚠️ FUNÇÃO UTILITÁRIA: ResetQTable
 // ══════════════════════════════════════════════════════════════════════
 // Função para resetar completamente a Q-table e todos os arrays de estado
-// ATENÇÃO: Esta função NÃO é chamada automaticamente. 
-//          Deve ser chamada manualmente apenas em casos específicos de debug
-//          ou quando se deseja começar o aprendizado do zero.
+// 
+// ⚠️⚠️⚠️ ATENÇÃO CRÍTICA ⚠️⚠️⚠️
+// Esta função NÃO é chamada automaticamente. 
+// Chamar esta função irá:
+//   - APAGAR TODO O APRENDIZADO (Q-values, visitas, wins, losses)
+//   - ZERAR O LUCRO TOTAL (g_sumProfit = 0)
+//   - RESETAR TODOS OS CONTADORES DE TRADE
+//   - PERDER TODO O RANKING DE ESTADOS
+// 
+// Deve ser chamada manualmente APENAS em casos específicos:
+//   - Debug/desenvolvimento
+//   - Quando se deseja começar o aprendizado do ZERO
+//   - NUNCA deve ser chamada durante operação normal
 // ══════════════════════════════════════════════════════════════════════
 void ResetQTable()
 {
@@ -2461,6 +2515,7 @@ void ResetQTable()
    
    g_learningInitialized = true;
    g_totalTrades = g_totalWins = g_totalLosses = 0;
+   // ⚠️ ATENÇÃO: Linha abaixo ZERA o lucro total
    g_sumProfit = 0.0;
    
    g_totalStatesDiscovered = 0;
