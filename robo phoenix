@@ -307,9 +307,10 @@ input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
-input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
+input double BlockLossRateThreshold   = 0.60;         // Taxa perda para bloquear (REDUZIDO de 0.80 → 0.60)
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input int    MinVisitsForBlockDecision    = 10;       // Visitas mín. decisão bloqueio (REDUZIDO de 30 → 10)
+input bool   AggressiveLearningMode       = false;         // Modo aprendizado agressivo (MinVisits=5, LossRate=50%)
 input bool   EnableBlockingDebugLogs  = false;        // Habilitar logs detalhados de bloqueio
 
 input group "──── 🎯 CLASSIFICAÇÃO DE QUALIDADE ────";
@@ -1063,20 +1064,27 @@ bool ShouldBlockState(int state)
     int losses = g_stateLosses[state];
     int wins = g_stateWins[state];
     
-    if(visits < MinVisitsForBlockDecision) 
+    // ✅ MODO AGRESSIVO: Bloqueio mais rápido e rigoroso
+    int minVisits = AggressiveLearningMode ? 5 : MinVisitsForBlockDecision;
+    double lossThreshold = AggressiveLearningMode ? 0.50 : BlockLossRateThreshold;
+    
+    if(visits < minVisits) 
     {
         // 🔍 DEBUG: Estado sem visitas suficientes (log reduzido)
-        // Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não bloqueia)");
+        // Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", minVisits, " → SEM DADOS SUFICIENTES (não bloqueia)");
         return false;
     }
     
     double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     double winRate = SafeDivide((double)wins, (double)visits, 0.0);
     
-    // Critério 1: Taxa de perda muito alta
-    bool highLossRate = (lossRate >= BlockLossRateThreshold);
+    // ✅ CRITÉRIO 1: Taxa de perda muito alta
+    bool highLossRate = (lossRate >= lossThreshold);
     
-    // Critério 2: Sharpe Ratio muito baixo (se habilitado)
+    // ✅ CRITÉRIO 2: Win rate muito baixa (novo critério adicional)
+    bool lowWinRate = (winRate < 0.35); // Bloqueia se win rate < 35%
+    
+    // ✅ CRITÉRIO 3: Sharpe Ratio muito baixo (se habilitado)
     bool lowSharpe = false;
     double sharpe = 0.0;
     if(EnableSharpeFilter)
@@ -1090,7 +1098,7 @@ bool ShouldBlockState(int state)
     }
     
     // 🔍 DEBUG: Log detalhado apenas quando bloqueio vai acontecer
-    bool shouldBlock = (highLossRate || lowSharpe);
+    bool shouldBlock = (highLossRate || lowWinRate || lowSharpe);
     if(shouldBlock)
     {
         Print("🚫 BLOQUEANDO Estado ", state, 
@@ -1099,13 +1107,15 @@ bool ShouldBlockState(int state)
               " | Losses=", losses,
               " | WinRate=", DoubleToString(winRate*100, 1), "%",
               " | LossRate=", DoubleToString(lossRate*100, 1), "%",
-              " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+              " | LossRateTH=", DoubleToString(lossThreshold*100, 1), "%",
               " | Sharpe=", DoubleToString(sharpe, 2),
               " | HighLoss?=", highLossRate,
-              " | LowSharpe?=", lowSharpe);
+              " | LowWinRate?=", lowWinRate,
+              " | LowSharpe?=", lowSharpe,
+              " | AggressiveMode=", AggressiveLearningMode);
     }
     
-    // Bloquear se OU taxa de perda alta OU Sharpe muito baixo
+    // ✅ Bloquear se OU taxa de perda alta OU win rate baixa OU Sharpe muito baixo
     return shouldBlock;
 }
 
@@ -1120,10 +1130,16 @@ bool ShouldUnblockState(int state)
     int wins = g_stateWins[state];
     int losses = g_stateLosses[state];
     
-    if(visits < MinVisitsForBlockDecision) 
+    // ✅ MODO AGRESSIVO: Requer mais dados para desbloquear
+    int minVisits = AggressiveLearningMode ? 10 : MinVisitsForBlockDecision;
+    
+    if(visits < minVisits) 
     {
         // 🔍 DEBUG: Estado bloqueado sem visitas suficientes para desbloquear
-        Print("🔓 UNBLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não desbloqueia)");
+        if(EnableBlockingDebugLogs)
+        {
+            Print("🔓 UNBLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", minVisits, " → SEM DADOS SUFICIENTES (não desbloqueia)");
+        }
         return false;
     }
     
@@ -1152,18 +1168,22 @@ bool ShouldUnblockState(int state)
     
     // 🔍 DEBUG: Log detalhado de avaliação de desbloqueio
     bool shouldUnblock = (goodWinRate && goodSharpe);
-    Print("🔓 UNBLOCK DEBUG: State=", state, 
-          " | Visits=", visits,
-          " | Wins=", wins,
-          " | Losses=", losses,
-          " | WinRate=", DoubleToString(winRate*100, 1), "%",
-          " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
-          " | Sharpe=", DoubleToString(sharpe, 2),
-          " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
-          " | EnableSharpe=", EnableSharpeFilter,
-          " | GoodWR?=", goodWinRate,
-          " | GoodSharpe?=", goodSharpe,
-          " → SHOULD UNBLOCK=", shouldUnblock);
+    if(EnableBlockingDebugLogs || shouldUnblock)
+    {
+        Print("🔓 UNBLOCK DEBUG: State=", state, 
+              " | Visits=", visits,
+              " | Wins=", wins,
+              " | Losses=", losses,
+              " | WinRate=", DoubleToString(winRate*100, 1), "%",
+              " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
+              " | Sharpe=", DoubleToString(sharpe, 2),
+              " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
+              " | EnableSharpe=", EnableSharpeFilter,
+              " | GoodWR?=", goodWinRate,
+              " | GoodSharpe?=", goodSharpe,
+              " | AggressiveMode=", AggressiveLearningMode,
+              " → SHOULD UNBLOCK=", shouldUnblock);
+    }
     
     // Desbloquear apenas se AMBOS win rate E Sharpe forem bons
     return shouldUnblock;
@@ -1243,6 +1263,67 @@ void EvaluateAllActiveStates()
       Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados, ", unblocked, " desbloqueados");
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
     }
+}
+
+// ✅ NOVA FUNÇÃO: Log de progresso de aprendizagem
+void LogLearningProgress()
+{
+   static int lastLogTrade = 0;
+   static datetime lastLogTime = 0;
+   
+   // Log a cada 100 trades OU a cada 1 hora
+   bool shouldLog = false;
+   if(g_totalTrades > 0 && g_totalTrades % 100 == 0 && g_totalTrades != lastLogTrade)
+   {
+      shouldLog = true;
+      lastLogTrade = g_totalTrades;
+   }
+   else if(TimeCurrent() - lastLogTime >= 3600) // 1 hora
+   {
+      shouldLog = true;
+      lastLogTime = TimeCurrent();
+   }
+   
+   if(!shouldLog) return;
+   
+   int totalBlocked = CountBlockedStates();
+   int totalActive = g_activeStatesCount;
+   
+   // Contar distribuição de qualidade
+   int elite = 0, good = 0, neutral = 0, bad = 0, blocked = 0;
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] > 0)
+      {
+         ENUM_STATE_QUALITY q = GetStateQuality(i);
+         switch(q)
+         {
+            case STATE_QUALITY_ELITE:    elite++; break;
+            case STATE_QUALITY_GOOD:     good++; break;
+            case STATE_QUALITY_NEUTRAL:  neutral++; break;
+            case STATE_QUALITY_BAD:      bad++; break;
+            case STATE_QUALITY_BLOCKED:  blocked++; break;
+         }
+      }
+   }
+   
+   double globalWinRate = SafeDivide((double)g_totalWins, (double)(g_totalWins + g_totalLosses), 0.0);
+   
+   Print("═══════════════════════════════════════════════════════");
+   Print("🧠 PROGRESSO DE APRENDIZAGEM - Trade #", g_totalTrades);
+   Print("═══════════════════════════════════════════════════════");
+   Print("📊 Win Rate Global: ", DoubleToString(globalWinRate * 100, 1), "% (", g_totalWins, "W / ", g_totalLosses, "L)");
+   Print("📊 Estados Ativos: ", totalActive, " de ", NUM_STATES, " possíveis");
+   Print("📊 Estados Bloqueados: ", totalBlocked, " (", DoubleToString((double)totalBlocked/NUM_STATES*100, 1), "%)");
+   Print("📊 Qualidade - ELITE:", elite, " | GOOD:", good, " | NEUTRAL:", neutral, " | BAD:", bad, " | BLOCKED:", blocked);
+   Print("💰 Lucro Total: ", DoubleToString(g_sumProfit, 2));
+   
+   if(AggressiveLearningMode)
+   {
+      Print("⚡ MODO AGRESSIVO ATIVO - MinVisits=5, LossThreshold=50%");
+   }
+   
+   Print("═══════════════════════════════════════════════════════");
 }
 
 // ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
@@ -1342,6 +1423,9 @@ void TestBlockedStatesPeriodically()
             " estado desbloqueado para coleta gradual de novas amostras");
       InvalidateHUDCache();
    }
+   
+   // ✅ NOVO: Log de progresso de aprendizagem (a cada 100 trades)
+   LogLearningProgress();
 }
 
 // ======================================================================
