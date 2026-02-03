@@ -2959,6 +2959,128 @@ void DebugBlockedStates()
    }
 }
 
+//+------------------------------------------------------------------+
+//| 📊 Análise detalhada de distribuição de estados                  |
+//+------------------------------------------------------------------+
+void LogStateDistributionAnalysis()
+{
+   Print("═══════════════════════════════════════════════════════");
+   Print("📊 ANÁLISE DE DISTRIBUIÇÃO DE ESTADOS");
+   Print("═══════════════════════════════════════════════════════");
+   
+   int visitedCount = 0;
+   int blockedCount = 0;
+   
+   // Contadores por bucket
+   int maBuckets[3] = {0, 0, 0};
+   int rsiBuckets[4] = {0, 0, 0, 0};
+   int volBuckets[2] = {0, 0};
+   int volumeBuckets[2] = {0, 0};
+   int timeBuckets[2] = {0, 0};
+   
+   for(int state = 0; state < NUM_STATES; state++)
+   {
+      if(g_stateVisits[state] > 0)
+      {
+         visitedCount++;
+         
+         // Decompor estado em componentes (ordem inversa do cálculo)
+         int temp = state;
+         int ma = temp % BINS_MA_DIST;
+         temp /= BINS_MA_DIST;
+         int rsi = temp % BINS_RSI;
+         temp /= BINS_RSI;
+         int vol = temp % BINS_VOLATILITY;
+         temp /= BINS_VOLATILITY;
+         int volume = temp % BINS_VOLUME;
+         temp /= BINS_VOLUME;
+         int time = temp % BINS_TIME;
+         
+         maBuckets[ma]++;
+         rsiBuckets[rsi]++;
+         volBuckets[vol]++;
+         volumeBuckets[volume]++;
+         timeBuckets[time]++;
+      }
+      
+      if(g_stateBlocked[state])
+         blockedCount++;
+   }
+   
+   double visitedPct = (visitedCount * 100.0) / NUM_STATES;
+   double unvisitedPct = ((NUM_STATES - visitedCount) * 100.0) / NUM_STATES;
+   
+   PrintFormat("Total de estados possíveis: %d", NUM_STATES);
+   PrintFormat("Estados visitados: %d (%.1f%%)", visitedCount, visitedPct);
+   PrintFormat("Estados com 0 visitas: %d (%.1f%%)", NUM_STATES - visitedCount, unvisitedPct);
+   PrintFormat("Estados bloqueados: %d", blockedCount);
+   Print("");
+   Print("📌 Distribuição por componente:");
+   Print("");
+   
+   Print("MA Distance (3 buckets):");
+   PrintFormat("  Bucket 0 (perto): %d estados", maBuckets[0]);
+   PrintFormat("  Bucket 1 (médio): %d estados", maBuckets[1]);
+   PrintFormat("  Bucket 2 (longe): %d estados", maBuckets[2]);
+   Print("");
+   
+   Print("RSI (4 buckets):");
+   PrintFormat("  Bucket 0 (<30): %d estados", rsiBuckets[0]);
+   PrintFormat("  Bucket 1 (30-50): %d estados", rsiBuckets[1]);
+   PrintFormat("  Bucket 2 (50-70): %d estados", rsiBuckets[2]);
+   PrintFormat("  Bucket 3 (>70): %d estados", rsiBuckets[3]);
+   Print("");
+   
+   Print("Volatilidade (2 buckets):");
+   PrintFormat("  Bucket 0 (baixa): %d estados", volBuckets[0]);
+   PrintFormat("  Bucket 1 (alta): %d estados", volBuckets[1]);
+   Print("");
+   
+   Print("Volume (2 buckets):");
+   PrintFormat("  Bucket 0 (baixo): %d estados", volumeBuckets[0]);
+   PrintFormat("  Bucket 1 (alto): %d estados", volumeBuckets[1]);
+   Print("");
+   
+   Print("Hora do dia (2 buckets):");
+   PrintFormat("  Bucket 0 (8-17h): %d estados", timeBuckets[0]);
+   PrintFormat("  Bucket 1 (outras): %d estados", timeBuckets[1]);
+   Print("");
+   
+   // Listar alguns estados nunca visitados
+   Print("⚠️ ESTADOS NUNCA VISITADOS (primeiros 20):");
+   int shown = 0;
+   for(int state = 0; state < NUM_STATES && shown < 20; state++)
+   {
+      if(g_stateVisits[state] == 0)
+      {
+         int temp = state;
+         int ma = temp % BINS_MA_DIST;
+         temp /= BINS_MA_DIST;
+         int rsi = temp % BINS_RSI;
+         temp /= BINS_RSI;
+         int vol = temp % BINS_VOLATILITY;
+         temp /= BINS_VOLATILITY;
+         int volume = temp % BINS_VOLUME;
+         temp /= BINS_VOLUME;
+         int time = temp % BINS_TIME;
+         
+         PrintFormat("Estado %d: MA=%d RSI=%d VOL=%d VOLUME=%d TIME=%d (0 visitas)", 
+                    state, ma, rsi, vol, volume, time);
+         shown++;
+      }
+   }
+   
+   Print("═══════════════════════════════════════════════════════");
+   
+   // Alertas
+   if(visitedCount < NUM_STATES / 3 && g_totalTrades > 500)
+   {
+      Print("⚠️⚠️⚠️ ALERTA: Apenas ", visitedCount, " estados visitados em ", g_totalTrades, " trades!");
+      Print("   Isso é menos de 33% do espaço de estados.");
+      Print("   Considere: aumentar exploração inicial, revisar buckets, ou desbloquear estados periodicamente");
+   }
+}
+
 // ======================================================================
 // ✅✅✅ FUNÇÃO: DEBUG DE CONTAGEM DE TRADES (VERSÃO MELHORADA)
 // ======================================================================
@@ -7282,6 +7404,23 @@ void CreateDailySummaryReport()
    // ✅ NOVO: Exportar ranking de melhores e piores estados
    ExportBestAndWorstStates(file_handle);
    
+   FileWrite(file_handle, "");
+   FileWrite(file_handle, "📊 ANÁLISE DE DISTRIBUIÇÃO DE ESTADOS");
+   FileWrite(file_handle, "----------------------------------------");
+   
+   // Contar estados visitados
+   int visitedCount = 0;
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] > 0) visitedCount++;
+   }
+   double visitedPct = (visitedCount * 100.0) / NUM_STATES;
+   
+   FileWrite(file_handle, "Estados visitados: " + IntegerToString(visitedCount) + "/" + 
+            IntegerToString(NUM_STATES) + " (" + DoubleToString(visitedPct, 1) + "%)");
+   FileWrite(file_handle, "(Ver log do terminal para análise detalhada)");
+   FileWrite(file_handle, "");
+   
    FileWrite(file_handle, "================================================================");
    FileWrite(file_handle, "FIM DO RELATÓRIO - SISTEMA SUPER CORRIGIDO v307F");
    FileWrite(file_handle, "================================================================");
@@ -7289,6 +7428,9 @@ void CreateDailySummaryReport()
    FileClose(file_handle);
    
    Print("📋 Relatório diário criado: ", filename);
+   
+   // ✅ NOVO: Exibir análise de distribuição de estados no terminal
+   LogStateDistributionAnalysis();
 }
 
 // ======================================================================
@@ -7435,6 +7577,40 @@ void OnTick()
       // ✅ DEBUG PERIÓDICO MELHORADO
       static int debugCounter = 0;
       debugCounter++;
+      
+      // ✅ NOVO: Taxa de exploração adaptativa baseada no progresso
+      static int lastExplorationAdjust = 0;
+      if(g_totalTrades > 0 && (g_totalTrades % 200 == 0 || debugCounter - lastExplorationAdjust > 200))
+      {
+         double newRate = g_currentExplorationRate;
+         string phase = "";
+         
+         if(g_totalTrades <= 200)
+         {
+            // Fase 1: Exploração alta inicial
+            newRate = 0.40; // 40%
+            phase = "Fase 1: Exploração inicial";
+         }
+         else if(g_totalTrades <= 1000)
+         {
+            // Fase 2: Aprendizado balanceado
+            newRate = 0.25; // 25%
+            phase = "Fase 2: Aprendizado";
+         }
+         else
+         {
+            // Fase 3: Convergência
+            newRate = 0.15; // 15%
+            phase = "Fase 3: Convergência";
+         }
+         
+         if(MathAbs(newRate - g_currentExplorationRate) > 0.01)
+         {
+            g_currentExplorationRate = newRate;
+            Print("⚙️ Taxa de exploração ajustada: ", DoubleToString(newRate*100, 1), "% (", phase, ")");
+            lastExplorationAdjust = debugCounter;
+         }
+      }
       
       if(debugCounter % 50 == 0)
       {
