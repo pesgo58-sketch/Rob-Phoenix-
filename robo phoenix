@@ -262,9 +262,10 @@ input bool   EnableDynamicReward      = false;        // Reward dinâmica por es
 double LearningRate                   = 0.03;         // Taxa de aprendizado (fixo)
 
 input group "──── 🎲 EXPLORAÇÃO ────";
+input bool   DisableExploration       = false;        // Desabilitar exploração completamente (usar apenas Q-learning)
 input bool   EnableAdaptiveExploration = false;       // Habilitar ajuste automático de exploração
 input double InitialExplorationRate   = 0.25;         // Taxa inicial de exploração (25% - REDUZIDO para mais trades)
-input double MinExplorationRate       = 0.10;         // Taxa mínima de exploração (10% - REDUZIDO)
+input double MinExplorationRate       = 0.0;          // Taxa mínima de exploração (pode ser 0% para convergir a zero)
 input double ExplorationDecay         = 0.999;        // Decay da exploração (0.1% por vitória)
 input int    MinStateVisitsToTrade    = 1;            // Visitas mínimas para operar (1 - permite trade imediato)
 
@@ -2484,7 +2485,24 @@ bool LoadBrainFromFile(string filename)
    Print("📊 Estados resetados: ", g_totalBadStateResets);
    Print("📊 Total de trades: ", g_totalTrades, " (Wins: ", g_totalWins, ", Losses: ", g_totalLosses, ")");
    Print("💰 Lucro Total carregado: ", DoubleToString(g_sumProfit, 2));
-   Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+   
+   // Verificar se exploração está desabilitada
+   if(DisableExploration)
+   {
+      g_currentExplorationRate = 0.0;
+      Print("🚫 EXPLORAÇÃO DESABILITADA - Modo exploitation only");
+      Print("   Robô usará APENAS Q-learning (sem ações aleatórias)");
+      Print("📊 Taxa de exploração: 0.0% (EXPLOITATION ONLY)");
+   }
+   else
+   {
+      Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+      if(MinExplorationRate == 0.0)
+      {
+         Print("   ⚙️ Sistema adaptativo convergirá para 0% (exploitation only)");
+      }
+   }
+   
    Print("🏆 Ranking carregado: ", (g_lastRankingUpdate > 0 ? "SIM" : "NÃO"), 
          " | Melhores: ", g_bestStates[0].visits, " visitas",
          " | Piores: ", g_worstStates[0].visits, " visitas");
@@ -7579,36 +7597,58 @@ void OnTick()
       debugCounter++;
       
       // ✅ NOVO: Taxa de exploração adaptativa baseada no progresso
-      static int lastExplorationAdjust = 0;
-      if(g_totalTrades > 0 && (g_totalTrades % 200 == 0 || debugCounter - lastExplorationAdjust > 200))
+      // 🎲 SISTEMA DE EXPLORAÇÃO ADAPTATIVA
+      // Verifica se exploração está desabilitada
+      if(DisableExploration)
       {
-         double newRate = g_currentExplorationRate;
-         string phase = "";
-         
-         if(g_totalTrades <= 200)
+         // Exploração = 0% (modo exploitation only)
+         if(g_currentExplorationRate > 0.0)
          {
-            // Fase 1: Exploração alta inicial
-            newRate = 0.40; // 40%
-            phase = "Fase 1: Exploração inicial";
+            g_currentExplorationRate = 0.0;
+            Print("⚙️ Taxa de exploração: 0.0% (EXPLOITATION ONLY - apenas Q-learning)");
          }
-         else if(g_totalTrades <= 1000)
+      }
+      else
+      {
+         // Sistema adaptativo por fases
+         static int lastExplorationAdjust = 0;
+         if(g_totalTrades > 0 && (g_totalTrades % 200 == 0 || debugCounter - lastExplorationAdjust > 200))
          {
-            // Fase 2: Aprendizado balanceado
-            newRate = 0.25; // 25%
-            phase = "Fase 2: Aprendizado";
-         }
-         else
-         {
-            // Fase 3: Convergência
-            newRate = 0.15; // 15%
-            phase = "Fase 3: Convergência";
-         }
-         
-         if(MathAbs(newRate - g_currentExplorationRate) > 0.01)
-         {
-            g_currentExplorationRate = newRate;
-            Print("⚙️ Taxa de exploração ajustada: ", DoubleToString(newRate*100, 1), "% (", phase, ")");
-            lastExplorationAdjust = debugCounter;
+            double newRate = g_currentExplorationRate;
+            string phase = "";
+            
+            if(g_totalTrades <= 200)
+            {
+               // Fase 1: Exploração alta inicial
+               newRate = 0.40; // 40%
+               phase = "Fase 1: Exploração inicial";
+            }
+            else if(g_totalTrades <= 1000)
+            {
+               // Fase 2: Aprendizado balanceado
+               newRate = 0.25; // 25%
+               phase = "Fase 2: Aprendizado";
+            }
+            else
+            {
+               // Fase 3: Convergência para MinExplorationRate
+               newRate = MinExplorationRate;
+               if(MinExplorationRate == 0.0)
+                  phase = "Fase 3: Convergência (EXPLOITATION ONLY)";
+               else
+                  phase = "Fase 3: Convergência";
+            }
+            
+            if(MathAbs(newRate - g_currentExplorationRate) > 0.01)
+            {
+               g_currentExplorationRate = newRate;
+               Print("⚙️ Taxa de exploração ajustada: ", DoubleToString(newRate*100, 1), "% (", phase, ")");
+               if(newRate == 0.0)
+               {
+                  Print("   ✅ Exploração = 0% - Usando apenas Q-learning (exploitation only)");
+               }
+               lastExplorationAdjust = debugCounter;
+            }
          }
       }
       
