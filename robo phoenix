@@ -216,8 +216,10 @@ input int    TrailingStopPoints       = 20000;        // Trailing stop em pontos
 input int    TrailingStepPoints       = 5000;         // Passo do trailing em pontos
 input int    TrailingStartPoints      = 10000;        // Início do trailing em pontos
 // ❌ ATR trailing REMOVIDO - sistema usa APENAS pontos fixos
-input bool   UseBreakevenStop         = false;        // Usar breakeven
-input int    BreakevenTriggerPoints   = 15000;        // Trigger do breakeven em pontos
+input bool   UseBreakevenStop         = false;        // Usar breakeven (0 a 0)
+input int    BreakevenTriggerPoints   = 5000;         // Trigger do breakeven em pontos (REDUZIDO: ativa cedo)
+input int    BreakevenAddPoints       = 0;            // Pontos adicionais no breakeven (0 = puro)
+input bool   BreakevenBeforeTrailing  = true;         // Força breakeven ANTES do trailing
 input bool   TrailBothSLandTP         = false;        // Trailing em SL e TP
 
 // ──────────────────────────────────────────────────────────────────────
@@ -3975,26 +3977,46 @@ void ManageDynamicTrailingStop()
       double newSL = currentSL;
       double newTP = currentTP;
       
+      // ✅ PRIORIDADE 1: BREAKEVEN (ativa primeiro para proteger o trade)
       if(UseBreakevenStop && !g_trailingBreakevenActivated[trailIndex] && 
          MathAbs(currentProfit) >= BreakevenTriggerPoints)
       {
+         // ✅ Breakeven configurável: pode ser puro (0 a 0) ou com margem
          double breakevenPrice = entryPrice;
          
-         if(isBuy) breakevenPrice += point * 10;
-         else breakevenPrice -= point * 10;
+         // Adiciona margem de segurança se configurado (padrão: 0 = breakeven puro)
+         if(BreakevenAddPoints > 0)
+         {
+            if(isBuy) breakevenPrice += point * BreakevenAddPoints;
+            else breakevenPrice -= point * BreakevenAddPoints;
+         }
          
+         // Verifica se já moveu o suficiente para ativar breakeven
          if((isBuy && currentPrice > breakevenPrice) || 
             (!isBuy && currentPrice < breakevenPrice))
          {
             newSL = breakevenPrice;
             g_trailingBreakevenActivated[trailIndex] = true;
             shouldAdjust = true;
+            
+            double breakevenPips = SafeDivide(MathAbs(newSL - entryPrice), point, 0.0);
             Print("💰 BREAKEVEN ativado para posição #", ticket, 
-                  " | SL ajustado para: ", newSL);
+                  " | SL ajustado para: ", newSL,
+                  " (entrada ", (BreakevenAddPoints > 0 ? "+" : ""), 
+                  BreakevenAddPoints, " pontos = ", breakevenPips, " pontos)");
          }
       }
       
-      if(MathAbs(currentProfit) >= TrailingStartPoints)
+      // ✅ PRIORIDADE 2: TRAILING STOP (só ativa depois do breakeven se BreakevenBeforeTrailing = true)
+      bool canStartTrailing = true;
+      
+      // Se BreakevenBeforeTrailing está ativo, só permite trailing após breakeven ser ativado
+      if(BreakevenBeforeTrailing && UseBreakevenStop && !g_trailingBreakevenActivated[trailIndex])
+      {
+         canStartTrailing = false;
+      }
+      
+      if(canStartTrailing && MathAbs(currentProfit) >= TrailingStartPoints)
       {
          // ✅ SEMPRE usa trailing fixo em pontos configurados
          double trailingDistancePoints = TrailingStopPoints;
@@ -4068,7 +4090,10 @@ void ManageDynamicTrailingStop()
                double tpPoints = SafeDivide(MathAbs(newTP - entryPrice), point, 0.0);
                
                // ✅ Trailing sempre usa pontos fixos
+               string breakevenStatus = g_trailingBreakevenActivated[trailIndex] ? 
+                  " (após BREAKEVEN)" : "";
                Print("📈 TRAILING STOP (Fixo) ajustado para posição #", ticket,
+                     breakevenStatus,
                      " | Novo SL: ", newSL, " (", slPoints, " pontos)",
                      " | Novo TP: ", newTP, " (", tpPoints, " pontos)",
                      " | Lucro atual: ", currentProfit, " pontos");
