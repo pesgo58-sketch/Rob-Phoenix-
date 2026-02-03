@@ -1220,9 +1220,29 @@ void EvaluateAndUpdateBlockState(int state)
     bool shouldBeBlocked = ShouldBlockState(state);
     bool currentlyBlocked = g_stateBlocked[state];
     
+    // 🚨 DIAGNÓSTICO DETALHADO: Por que estado não foi bloqueado?
+    if(!shouldBeBlocked && !currentlyBlocked && EnableBlockingDebugLogs)
+    {
+        double winRate = CalculateWinRate(state);
+        double lossRate = SafeDivide(g_stateLosses[state], g_stateVisits[state], 0.0);
+        
+        Print("🔍 DIAGNÓSTICO: Estado ", state, " NÃO bloqueado");
+        Print("   Visitas: ", g_stateVisits[state], " (min: ", MinVisitsForBlockDecision, ")");
+        Print("   Win rate: ", DoubleToString(winRate*100,1), "% (precisa <35% para bloquear)");
+        Print("   Loss rate: ", DoubleToString(lossRate*100,1), "% (precisa >", DoubleToString(BlockLossRateThreshold*100,1), "% para bloquear)");
+        Print("   Vitórias: ", g_stateWins[state], " | Perdas: ", g_stateLosses[state]);
+    }
+    
     if(shouldBeBlocked && !currentlyBlocked)
     {
         BlockState(state);
+        
+        // 🚨 LOG DETALHADO quando bloqueia
+        double winRate = CalculateWinRate(state);
+        double lossRate = SafeDivide(g_stateLosses[state], g_stateVisits[state], 0.0);
+        Print("🚨 ESTADO BLOQUEADO: ", state);
+        Print("   Razão: Win rate ", DoubleToString(winRate*100,1), "% | Loss rate ", DoubleToString(lossRate*100,1), "%");
+        Print("   Histórico: ", g_stateWins[state], "W / ", g_stateLosses[state], "L / ", g_stateVisits[state], " visitas");
     }
     else if(!shouldBeBlocked && currentlyBlocked)
     {
@@ -4314,25 +4334,17 @@ void UpdateQ(int state, int action, double reward)
    // ✅ FIX BUG #1: REMOVIDO - Contadores agora só incrementam em OnTradeTransaction
    // Evita dupla contagem (aqui + OnTradeTransaction)
    
-   // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
-   if(EnableUnifiedBlockingSystem && g_stateVisits[state] >= MinVisitsForBlockDecision)
-   {
-      double winRate = CalculateWinRate(state);
-      
-      // Só bloquear se realmente for muito ruim - SEM verificação adicional de visitas
-      if(winRate < 0.25)
-      {
-         g_stateBlocked[state] = true;
-         Print("⛔ Estado ", state, " bloqueado - Win rate muito baixa: ", 
-               DoubleToString(winRate*100,1), "%");
-      }
-      else if(g_stateBlocked[state] && winRate >= 0.40)
-      {
-         g_stateBlocked[state] = false;
-         Print("✅ Estado ", state, " desbloqueado - Win rate melhorou: ", 
-               DoubleToString(winRate*100,1), "%");
-      }
-   }
+   // 🚨 FIX CRÍTICO: REMOVIDA toda lógica de bloqueio/desbloqueio de UpdateQ
+   // MOTIVO: UpdateQ é responsável APENAS por atualizar Q-values (aprendizado)
+   // BLOQUEIO/DESBLOQUEIO = responsabilidade de EvaluateAndUpdateBlockState()
+   // PROBLEMA ANTERIOR: UpdateQ desbloqueava estados ignorando EnableAutoUnblocking
+   // e criava conflito com lógica principal de bloqueio
+   
+   // ⚠️ LÓGICA DE BLOQUEIO REMOVIDA DAQUI - Ver EvaluateAndUpdateBlockState()
+   // Bloqueio agora acontece APENAS em:
+   // 1. OnTradeTransaction → EvaluateAndUpdateBlockState (após cada trade)
+   // 2. EvaluateAllActiveStates (avaliação periódica)
+   // 3. Ambos respeitam EnableAutoUnblocking
    
    g_memoryDirty = true;
    
@@ -4633,6 +4645,14 @@ int ChooseAction(int state)
          " | Visitas: ", g_stateVisits[state],
          " | Win Rate: ", DoubleToString(winRate*100,1), "%");
    
+   // 🚨 VERIFICAÇÃO CRÍTICA: Alertar se Q-values parecem não estar sendo usados
+   if(g_stateVisits[state] >= 20 && MathAbs(best) < 0.01 && MathAbs(nopQ) < 0.01)
+   {
+      Print("⚠️⚠️⚠️ ALERTA: Estado ", state, " com 20+ visitas mas Q-values próximos de zero!");
+      Print("   Isso indica que UpdateQ pode não estar sendo chamado ou rewards são muito pequenos");
+      Print("   Q[BUY]: ", g_Q[state*NUM_ACTIONS+1], " | Q[SELL]: ", g_Q[state*NUM_ACTIONS+2], " | Q[NOP]: ", nopQ);
+   }
+   
    return bestA;
 }
 
@@ -4650,6 +4670,10 @@ void ExecuteAction(int action, int state)
    Print("Estado: ", state, " | Visitas REAIS: ", g_stateVisits[state], 
          " | Perdas REAIS: ", g_stateLosses[state],
          " | Vitórias REAIS: ", g_stateWins[state]);
+   
+   // 🚨 VERIFICAÇÃO CRÍTICA: Registrar estado na abertura
+   // Isso permite verificar se o mesmo estado é usado no fechamento
+   Print("📝 Estado na ABERTURA: ", state);
    
    if(IsStateBlocked(state))
    {
