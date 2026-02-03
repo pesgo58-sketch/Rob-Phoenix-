@@ -725,6 +725,16 @@ void DebugStuckStatesEnhanced()
 // ======================================================================
 void UnblockGoodStates()
 {
+   // 🚨 FIX: Respeitar EnableAutoUnblocking
+   if(!EnableAutoUnblocking)
+   {
+      if(EnableBlockingDebugLogs)
+      {
+         Print("🚫 UnblockGoodStates DESABILITADO (EnableAutoUnblocking=false)");
+      }
+      return;
+   }
+   
    if(!EnableIntelligentReset) return;
    
    // ✅ PROTEÇÃO: Só desbloquear após ter base sólida de estados aprendidos
@@ -864,6 +874,16 @@ void ApplyStateDecay()
 // ======================================================================
 void UnblockGoodStatesAutomatic()
 {
+   // 🚨 FIX: Respeitar EnableAutoUnblocking
+   if(!EnableAutoUnblocking)
+   {
+      if(EnableBlockingDebugLogs)
+      {
+         Print("🚫 UnblockGoodStatesAutomatic DESABILITADO (EnableAutoUnblocking=false)");
+      }
+      return;
+   }
+   
    if(!EnableIntelligentReset) return;
    
    // Verificar se temos estados suficientes antes de permitir desbloqueios
@@ -7489,30 +7509,24 @@ void OnTick()
                
                if(!stateInActiveList)
                {
-                  // Estado novo mas exploração = 0% → NÃO usar este estado
+                  // 🚨 FIX BUG: Atualizar Q-value de NOP antes de retornar
+                  // Estado novo mas exploração = 0% → NÃO usar este estado, mas registrar decisão
                   g_statusMessage = StringFormat("⏸️ Estado %d desconhecido (exploração 0%%)", s);
-                  return;  // ✅ BLOQUEIA uso de estados novos
+                  UpdateQ_NOP(s);  // ✅ CORREÇÃO: Registra NOP no Q-learning
+                  return;
                }
             }
             
             // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
             if(IsStateBlocked(s))
             {
-               double winRate = CalculateWinRate(s);
+               // 🚨 FIX BUG CRÍTICO: Remover auto-desbloqueio que ignorava EnableAutoUnblocking
+               // Auto-desbloqueio agora acontece APENAS em EvaluateAndUpdateBlockState()
+               // que respeita corretamente a configuração EnableAutoUnblocking
                
-               // Auto-desbloqueio se performance melhorou
-               if(winRate >= 0.35 && g_stateVisits[s] >= 5)
-               {
-                  g_stateBlocked[s] = false;
-                  Print("🔄 AUTO-DESBLOQUEIO Estado ", s, 
-                        " | Win Rate: ", DoubleToString(winRate*100,1), "%");
-               }
-               else
-               {
-                  g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
-                  UpdateQ_NOP(s);
-                  return;
-               }
+               g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
+               UpdateQ_NOP(s);
+               return;
             }
             
             int a = ChooseAction(s);
