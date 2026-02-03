@@ -306,6 +306,7 @@ input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
+input bool   EnableAutoUnblocking     = false;        // 🆕 Habilitar desbloqueio automático de estados (SEPARADO do bloqueio)
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
 input double BlockLossRateThreshold   = 0.60;         // Taxa perda para bloquear (REDUZIDO de 0.80 → 0.60)
 input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
@@ -1025,10 +1026,21 @@ void BlockState(int state)
     }
 }
 
-// ✅✅✅ 2️⃣ FUNÇÃO UNIFICADA PARA DESBLOQUEAR ESTADO (CORRIGIDA)
+// ✅✅✅ 2️⃣ FUNÇÃO UNIFICADA PARA DESBLOQUEAR ESTADO (CORRIGIDA COM VERIFICAÇÃO)
 void UnblockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return;
+    
+    // 🚫 VERIFICAÇÃO CRÍTICA: Só desbloqueia se EnableAutoUnblocking = true
+    if(!EnableAutoUnblocking)
+    {
+        if(EnableBlockingDebugLogs)
+        {
+            Print("🚫 DESBLOQUEIO BLOQUEADO para estado ", state, 
+                  " (EnableAutoUnblocking=false). Estado permanece bloqueado.");
+        }
+        return;
+    }
 
     if(g_stateLastUnblockTime[state] > 0 && TimeCurrent() - g_stateLastUnblockTime[state] < 3600)
     {
@@ -1214,9 +1226,14 @@ void EvaluateAndUpdateBlockState(int state)
     }
     else if(!shouldBeBlocked && currentlyBlocked)
     {
-        if(ShouldUnblockState(state))
+        // 🆕 VERIFICAÇÃO: Só tenta desbloquear se EnableAutoUnblocking = true
+        if(EnableAutoUnblocking && ShouldUnblockState(state))
         {
             UnblockState(state);
+        }
+        else if(!EnableAutoUnblocking && ShouldUnblockState(state) && EnableBlockingDebugLogs)
+        {
+            Print("🚫 Estado ", state, " qualifica para desbloqueio mas EnableAutoUnblocking=false");
         }
     }
 }
@@ -1235,6 +1252,7 @@ void EvaluateAllActiveStates()
     
     int blocked = 0;
     int unblocked = 0;
+    int unblockAttemptsFailed = 0;  // 🆕 Contador de tentativas de desbloqueio impedidas
     
     for(int i = 0; i < g_activeStatesCount; i++)
     {
@@ -1250,17 +1268,26 @@ void EvaluateAllActiveStates()
         }
         else if(!shouldBeBlocked && currentlyBlocked)
         {
-            if(ShouldUnblockState(state))
+            // 🆕 VERIFICAÇÃO: Só tenta desbloquear se EnableAutoUnblocking = true
+            if(EnableAutoUnblocking && ShouldUnblockState(state))
             {
                 UnblockState(state);
                 unblocked++;
             }
+            else if(!EnableAutoUnblocking && ShouldUnblockState(state))
+            {
+                unblockAttemptsFailed++;
+            }
         }
     }
     
-    if(blocked > 0 || unblocked > 0)
+    if(blocked > 0 || unblocked > 0 || unblockAttemptsFailed > 0)
     {
       Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados, ", unblocked, " desbloqueados");
+      if(unblockAttemptsFailed > 0)
+      {
+         Print("🚫 ", unblockAttemptsFailed, " estados NÃO foram desbloqueados (EnableAutoUnblocking=false)");
+      }
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
     }
 }
@@ -1327,8 +1354,19 @@ void LogLearningProgress()
 }
 
 // ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
+// ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
 void AutoUnblockGoodStates()
 {
+    // 🆕 VERIFICAÇÃO: Só executa se EnableAutoUnblocking = true
+    if(!EnableAutoUnblocking)
+    {
+        if(EnableBlockingDebugLogs)
+        {
+            Print("🚫 AutoUnblockGoodStates DESABILITADO (EnableAutoUnblocking=false)");
+        }
+        return;
+    }
+    
     int unblocked = 0;
     
     for(int state = 0; state < NUM_STATES; state++)
@@ -2846,9 +2884,14 @@ void DebugBlockedStates()
                PrintFormat("❌❌❌ ERRO GRAVE: Estado %d BLOQUEADO mas tem WIN RATE ALTA: %.1f%% | Visitas: %d", 
                      state, winRate*100, g_stateVisits[state]);
                
-               if(EnableUnifiedBlockingSystem)
+               // 🆕 VERIFICAÇÃO: Só desbloqueia se EnableAutoUnblocking = true
+               if(EnableUnifiedBlockingSystem && EnableAutoUnblocking)
                {
                   UnblockState(state);
+               }
+               else if(EnableUnifiedBlockingSystem && !EnableAutoUnblocking)
+               {
+                  Print("🚫 Estado ", state, " NÃO foi desbloqueado (EnableAutoUnblocking=false)");
                }
             }
             else if(lossRate >= BlockLossRateThreshold && g_stateVisits[state] >= MinVisitsForBlockDecision)
@@ -7984,6 +8027,23 @@ int OnInit()
    Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
    Print("   • MinStatesBeforeReset: 150 (previne resets e decay prematuros)");
+   
+   // 🆕 AVISO SOBRE DESBLOQUEIO AUTOMÁTICO
+   if(EnableUnifiedBlockingSystem)
+   {
+      if(EnableAutoUnblocking)
+      {
+         Print("✅ Desbloqueio automático: ATIVADO");
+         Print("   • Estados bloqueados podem ser desbloqueados se melhorarem (win rate > ", 
+               DoubleToString(UnblockWinRateThreshold*100, 0), "%)");
+      }
+      else
+      {
+         Print("🚫 Desbloqueio automático: DESATIVADO");
+         Print("   ⚠️ ATENÇÃO: Estados bloqueados permanecerão PERMANENTEMENTE bloqueados!");
+         Print("   ⚠️ Nenhum estado será desbloqueado automaticamente, mesmo se melhorar.");
+      }
+   }
    
    if(EnableUnifiedBlockingSystem)
    {
