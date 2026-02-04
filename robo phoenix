@@ -433,6 +433,9 @@ double g_averageQValue = 0.0;
 double g_maxQValue = 0.0;
 double g_minQValue = 0.0;
 
+// ✅ NOVO: Taxa de exploração atual (pode ser modificada em runtime)
+double g_currentExplorationRate = 0.20;  // Inicializada com valor padrão, será setada no OnInit()
+
 // Aprendizado - Proteção contra estados congelados
 static int g_lastCalculatedState = -1;
 static int g_sameStateCount = 0;
@@ -583,6 +586,7 @@ datetime g_lastTextExportTime = 0;
 int g_textExportCount = 0;
 datetime g_lastPeriodicSaveTime = 0;  // ✅ NOVO: Controle de salvamento periódico
 int g_periodicSaveCount = 0;          // ✅ NOVO: Contador de saves periódicos
+datetime g_lastResetDate = 0;         // ✅ NOVO: Data do último reset diário
 
 // ──────────────────────────────────────────────────────────────────────
 // 📅 RELATÓRIO MENSAL/ANUAL DE LUCROS
@@ -1473,7 +1477,6 @@ void LoadState()
    Print("📊 Total vitórias REAIS: ", ArraySum(g_stateWins));
    Print("📊 Estados bloqueados: ", CountBlockedStates());
 }
-}
 
 int ArraySum(const int &array[])
 {
@@ -1510,7 +1513,7 @@ void AddActiveState(int state)
    
    // ✅ NOVO: Se exploração = 0%, NÃO adicionar novos estados
    // Com 0% exploração, usar APENAS estados já conhecidos
-   if(ExplorationRate <= 0.0)
+   if(g_currentExplorationRate <= 0.0)
    {
       // Estado novo mas exploração = 0% → NÃO adicionar
       // Sistema deve usar SOMENTE estados já na lista ativa
@@ -1704,7 +1707,7 @@ bool SaveBrainToFile(string filename)
       }
    }
    
-   FileWriteDouble(h, ExplorationRate);
+   FileWriteDouble(h, g_currentExplorationRate);
    FileWriteInteger(h, (int)g_tradesToday);
    FileWriteInteger(h, (int)g_consecutiveLosses);
    FileWriteInteger(h, (int)g_totalTrades);
@@ -1858,7 +1861,7 @@ bool LoadBrainFromFile(string filename)
       }
    }
    
-   ExplorationRate = FileReadDouble(h);
+   g_currentExplorationRate = FileReadDouble(h);
    g_tradesToday = FileReadInteger(h);
    g_consecutiveLosses = FileReadInteger(h);
    g_totalTrades = FileReadInteger(h);
@@ -1935,14 +1938,14 @@ bool LoadBrainFromFile(string filename)
    // Verificar se exploração está desabilitada
    if(DisableExploration)
    {
-      ExplorationRate = 0.0;
+      g_currentExplorationRate = 0.0;
       Print("🚫 EXPLORAÇÃO DESABILITADA - Modo exploitation only");
       Print("   Robô usará APENAS Q-learning (sem ações aleatórias)");
       Print("📊 Taxa de exploração: 0.0% (EXPLOITATION ONLY)");
    }
    else
    {
-      Print("📊 Taxa de exploração: ", DoubleToString(ExplorationRate * 100, 1), "% (FIXED)");
+      Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "% (FIXED)");
    }
    
    Print("🏆 Ranking carregado: ", (g_lastRankingUpdate > 0 ? "SIM" : "NÃO"), 
@@ -3817,7 +3820,7 @@ int ChooseAction(int state)
    }
    
    // Para estados conhecidos, usar taxa de exploração normal
-   double eps = ExplorationRate;
+   double eps = g_currentExplorationRate;
    
    // ⚠️ CAP REMOVIDO - Permitir exploração natural sem limite artificial
    // (Cap de 70% após 100 trades removido para permitir descoberta adequada de estados)
@@ -6696,7 +6699,7 @@ void OnTick()
          else
          {
             // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
-            if(ExplorationRate <= 0.0)
+            if(g_currentExplorationRate <= 0.0)
             {
                bool stateInActiveList = false;
                for(int i = 0; i < g_activeStatesCount; i++)
@@ -7215,6 +7218,9 @@ int OnInit()
    g_lastBarProcessed = 0;
    g_lastExportTime = 0;
    g_exportCount = 0;
+   
+   // ✅ Inicializar taxa de exploração atual
+   g_currentExplorationRate = ExplorationRate;
    g_currentDirection = 0;
    g_positionsCount = 0;
 
