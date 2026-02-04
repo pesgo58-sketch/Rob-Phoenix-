@@ -108,12 +108,12 @@ CHistoryOrderInfo historyOrderInfo;
 // ✅ REMOVIDO: BINS_ADX (indicador ADX removido)
 // ✅ REMOVIDO: BINS_BBPOS (indicador BB removido)
 #define BINS_VOLATILITY 2     // Mantido 2
-#define BINS_VOLUME    2      // Reduzido de 3 para 2
-#define BINS_TIME      2      // Reduzido de 4 para 2
+#define BINS_VOLUME    3      // ✅ AUMENTADO: 2 → 3 (baixo, médio, alto)
+#define BINS_TIME      4      // ✅ AUMENTADO: 2 → 4 (madrugada, manhã, tarde, noite)
 
-// Cálculo do número total de estados - SIMPLIFICADO (sem ADX e BB)
-// Antes: 3 * 4 * 2 * 3 * 2 * 2 * 2 = 576 estados
-// Agora: 3 * 4 * 2 * 2 * 2 = 96 estados
+// Cálculo do número total de estados - AUMENTADO para 288
+// Antes: 3 * 4 * 2 * 2 * 2 = 96 estados
+// Agora: 3 * 4 * 2 * 3 * 4 = 288 estados ✅
 #define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
 
 #define NUM_ACTIONS 3  // 0:NOP, 1:Buy, 2:Sell
@@ -4572,16 +4572,17 @@ int GetVolatilityBucket(double atrCurrent, double atrPrevious)
    else return 1;                        // Volatilidade estável/aumentando
 }
 
-// ✅ Função para calcular bucket volume
+// ✅ Função para calcular bucket volume (3 níveis)
 int GetVolumeBucket()
 {
-   if(!UseRealVolumeFilter) return 1;    // Volume normal (default)
+   if(!UseRealVolumeFilter) return 1;    // Volume médio (default)
    
-   if(g_volumeMultiplier < 0.7) return 0;  // Volume baixo
-   else return 1;                         // Volume normal/alto
+   if(g_volumeMultiplier < 0.5) return 0;      // Volume baixo
+   else if(g_volumeMultiplier < 1.2) return 1; // Volume médio
+   else return 2;                              // Volume alto
 }
 
-// ✅ Função para calcular bucket de tempo
+// ✅ Função para calcular bucket de tempo (4 períodos)
 int GetTimeBucket()
 {
    MqlDateTime timeStruct;
@@ -4589,8 +4590,10 @@ int GetTimeBucket()
    
    int hour = timeStruct.hour;
    
-   if(hour >= 0 && hour < 12) return 0;      // Manhã/Madrugada
-   else return 1;                            // Tarde/Noite
+   if(hour >= 0 && hour < 6) return 0;       // Madrugada (0-6h)
+   else if(hour >= 6 && hour < 12) return 1; // Manhã (6-12h)
+   else if(hour >= 12 && hour < 18) return 2; // Tarde (12-18h)
+   else return 3;                            // Noite (18-24h)
 }
 
 // ======================================================================
@@ -6807,7 +6810,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    FileWrite(file_handle, "6. ✅ Reset de emergência disponível");
    FileWrite(file_handle, "");
    
-   string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)";
+   string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×4 = 288)";
    FileWrite(file_handle, systemInfo);
    
    string activeInfo = "Estados ativos na memória: " + IntegerToString(g_activeStatesCount);
@@ -7233,7 +7236,7 @@ int OnInit()
       if(CloseOppositeOnNewSignal) CloseAllPositions();
    }
 
-   Print("🔥🔥🔥 INICIALIZANDO SISTEMA SIMPLIFICADO...");
+   Print("🔥🔥🔥 INICIALIZANDO SISTEMA OTIMIZADO...");
    Print("🔥🔥🔥 CONFIGURAÇÃO DE ESTADOS:");
    Print("🔥🔥🔥 Bins por indicador:");
    Print("🔥🔥🔥 MA Distance: ", BINS_MA_DIST);
@@ -7241,11 +7244,11 @@ int OnInit()
    // ✅ REMOVIDO: ADX (indicador removido)
    // ✅ REMOVIDO: BB Position (indicador removido)
    Print("🔥🔥🔥 Volatilidade: ", BINS_VOLATILITY);
-   Print("🔥🔥🔥 Volume: ", BINS_VOLUME);
-   Print("🔥🔥🔥 Tempo: ", BINS_TIME);
-   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×2×2 = 96) - SIMPLIFICADO SEM ADX/BB");
+   Print("🔥🔥🔥 Volume: ", BINS_VOLUME, " (baixo, médio, alto)");
+   Print("🔥🔥🔥 Tempo: ", BINS_TIME, " (madrugada, manhã, tarde, noite)");
+   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×3×4 = 288) ✅");
    Print("🔥🔥🔥 MEMÓRIA MÁXIMA: ", MaxMemoryStates, " estados ativos");
-   Print("🔥🔥🔥 SISTEMA SIMPLIFICADO: ATIVADO (SEM ADX E BB)");
+   Print("🔥🔥🔥 SISTEMA OTIMIZADO: 288 ESTADOS ATIVOS");
    
    // ✅ CONFIGURAÇÕES APLICADAS:
    Print("⚙️ Configurações aplicadas:");
