@@ -776,6 +776,37 @@ void BlockState(int state)
 }
 
 // ✅✅✅ 2️⃣ FUNÇÃO UNIFICADA PARA DESBLOQUEAR ESTADO (CORRIGIDA COM VERIFICAÇÃO)
+void UnblockState(int state)
+{
+    if(state < 0 || state >= NUM_STATES) return;
+    
+    // Verificar se estado está bloqueado
+    if(!g_stateBlocked[state])
+    {
+        // Estado já está desbloqueado
+        return;
+    }
+    
+    // Desbloquear estado
+    g_stateBlocked[state] = false;
+    g_stateLastUnblockTime[state] = TimeCurrent();
+    
+    // Log de desbloqueio
+    int visits = g_stateVisits[state];
+    int wins = g_stateWins[state];
+    int losses = g_stateLosses[state];
+    double winRate = SafeDivide((double)wins, (double)visits, 0.0);
+    
+    Print("✅ ESTADO DESBLOQUEADO: ", state,
+          " | Visitas: ", visits,
+          " | Vitorias: ", wins, 
+          " | Perdas: ", losses,
+          " | Win Rate: ", DoubleToString(winRate*100, 1), "%",
+          " | Bloqueios anteriores: ", g_stateBlockCount[state]);
+    
+    g_memoryDirty = true;
+    InvalidateHUDCache();
+}
 
 
 // ✅✅✅ 3️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER BLOQUEADO (CORRIGIDA)
