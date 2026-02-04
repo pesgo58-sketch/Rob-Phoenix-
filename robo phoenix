@@ -7,6 +7,14 @@
 //|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
 //|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
+//|                                                                  |
+//|  🔧 CORREÇÕES DE BLOQUEIO/APRENDIZADO (GitHub PR):              |
+//|  ✅ Exploração mínima garantida (5%) para evitar travamento      |
+//|  ✅ Critério secundário de bloqueio (10 visitas, 90% perdas)    |
+//|  ✅ Bypass de validações quando Q-value alto (sistema confiante)|
+//|  ✅ Threshold de desbloqueio corrigido (35% → 45% win rate)     |
+//|  ✅ Auto-desbloqueio em OnTick removido (evita loops)           |
+//|  ✅ Logs diagnósticos detalhados para debug                     |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
