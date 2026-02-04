@@ -4,7 +4,7 @@
 //|          APENAS RSI, MACD, ATR, MA, VOLUME                       |
 //|                  COM SISTEMA DE MEMÓRIA OTIMIZADA COMPLETA       |
 //|                      SISTEMA DE BLOQUEIO UNIFICADO              |
-//|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
+//|                    Q-LEARNING PURO - SEM DECAY                   |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
@@ -73,7 +73,6 @@
 // • BadWinRateThreshold: Win rate abaixo = RUIM (padrão: 35%)
 // • MinVisitsForBlockDecision: Visitas mínimas para bloquear (padrão: 30)
 // • BlockLossRateThreshold: Taxa de perda para bloquear (padrão: 80%)
-// • UnblockWinRateThreshold: Taxa de vitória para desbloquear (padrão: 55%)
 //
 // ══════════════════════════════════════════════════════════════════════
 
@@ -263,10 +262,7 @@ double LearningRate                   = 0.03;         // Taxa de aprendizado (fi
 
 input group "──── 🎲 EXPLORAÇÃO ────";
 input bool   DisableExploration       = false;        // Desabilitar exploração completamente (usar apenas Q-learning)
-input bool   EnableAdaptiveExploration = false;       // Habilitar ajuste automático de exploração
-input double InitialExplorationRate   = 0.25;         // Taxa inicial de exploração (25% - REDUZIDO para mais trades)
-input double MinExplorationRate       = 0.0;          // Taxa mínima de exploração (pode ser 0% para convergir a zero)
-input double ExplorationDecay         = 0.999;        // Decay da exploração (0.1% por vitória)
+input double ExplorationRate          = 0.20;         // Taxa de exploração fixa (20%)
 input int    MinStateVisitsToTrade    = 1;            // Visitas mínimas para operar (1 - permite trade imediato)
 
 input group "──── 🔄 SISTEMA HÍBRIDO ────";
@@ -295,22 +291,12 @@ input bool   AutoCleanMemory          = true;         // Limpeza automática
 input int    CleanMemoryAfterTrades   = 100;          // Limpar após N trades
 input bool   UseIncrementalSave       = true;         // Salvamento incremental
 
-input group "──── 🔄 DECAY E RESET ────";
-input bool   EnableMemoryDecay        = true;         // Habilitar decay de memória
-input double DecayFactor              = 0.05;         // Fator de decay (5%)
-input bool   EnableIntelligentReset   = true;         // Reset inteligente
-input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
-input int    BadStateMinVisits        = 20;           // Visitas mínimas para reset
-input int    MinStatesBeforeReset     = 150;          // Mínimo de estados aprendidos antes de permitir resets
-input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
 input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
-input bool   EnableAutoUnblocking     = false;        // 🆕 Habilitar desbloqueio automático de estados (SEPARADO do bloqueio)
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
 input double BlockLossRateThreshold   = 0.60;         // Taxa perda para bloquear (REDUZIDO de 0.80 → 0.60)
-input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
 input int    MinVisitsForBlockDecision    = 10;       // Visitas mín. decisão bloqueio (REDUZIDO de 30 → 10)
 input bool   AggressiveLearningMode       = false;         // Modo aprendizado agressivo (MinVisits=5, LossRate=50%)
 input bool   EnableBlockingDebugLogs  = false;        // Habilitar logs detalhados de bloqueio
@@ -323,7 +309,6 @@ input double BadWinRateThreshold      = 0.35;         // Win rate abaixo = RUIM 
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
-input double MinSharpeToUnblock       = 0.8;          // Sharpe mínimo para desbloquear
 input double MaxSharpeToBlock         = 0.3;          // Sharpe máximo para bloquear
 input int    MinTradesForSharpe       = 30;           // Trades mínimos para calcular Sharpe
 
@@ -382,7 +367,6 @@ double g_stateProfitSqSum[];           // Soma de lucros ao quadrado por estado 
 int g_stateLastUpdate[];               // Último update de cada estado
 bool g_stateBlocked[];                 // Estados bloqueados por má performance
 datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
-datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio
 bool g_stateWasBlockedBefore[];        // Flag indicando se o estado já foi bloqueado anteriormente
 datetime g_stateBlockTime[];           // Timestamp de quando o estado foi bloqueado pela primeira vez
 int g_stateBlockCount[];               // Contador de quantas vezes o estado foi bloqueado
@@ -443,7 +427,6 @@ int  g_bestRSIAtrMacdConfigIndex       = 0;
 
 // Aprendizado - Controle
 bool g_learningInitialized = false;
-double g_currentExplorationRate = 0.0;
 int g_totalStatesDiscovered = 0;
 int g_totalQUpdates = 0;
 double g_averageQValue = 0.0;
@@ -469,14 +452,7 @@ datetime g_lastSaveTime = 0;
 int g_qUpdatesSinceSave = 0;
 bool g_lastSaveSuccess = false;
 
-// Decay e Reset
 datetime g_lastMaintenanceTime = 0;
-int g_totalDecayCycles = 0;
-int g_totalBadStateResets = 0;
-int g_stateResets = 0;
-int g_stateDecays = 0;
-static int g_lastDecayTradeCount = 0;
-datetime g_lastUnblockTestTime = 0; // Tempo do último teste de desbloqueio
 
 // ──────────────────────────────────────────────────────────────────────
 // 📈 3. INDICADORES TÉCNICOS
@@ -527,7 +503,6 @@ int g_lastBarProcessed = 0;
 // Controle diário
 int g_tradesToday = 0;
 datetime g_lastTradeDate = 0;
-datetime g_lastResetDate = 0;
 
 // ──────────────────────────────────────────────────────────────────────
 // 📊 5. ESTATÍSTICAS E PERFORMANCE
@@ -695,13 +670,11 @@ void DebugStuckStatesEnhanced()
    if(wronglyBlocked > 0)
    {
       // ❌ CORREÇÃO AUTOMÁTICA DESABILITADA
-      // Desbloqueio deve ser feito APENAS por:
-      // 1. AutoUnblockGoodStates() com critérios rigorosos (55% win rate, 30 visitas)
-      // 2. TestBlockedStatesPeriodically() após 30 dias com reteste gradual
-      // Desbloquear aqui com 30% e 5 visitas é MUITO permissivo e causa desbloqueios prematuros
+      // Estados bloqueados permanecem bloqueados (Q-learning puro)
+      // Sem sistema de desbloqueio automático
       
-      Print("⚠️ ", wronglyBlocked, " estados potencialmente bloqueados de forma prematura");
-      Print("   (Desbloqueio automático desabilitado - use AutoUnblockGoodStates)");
+      Print("⚠️ ", wronglyBlocked, " estados bloqueados");
+      Print("   (Estados bloqueados nunca são desbloqueados - Q-learning puro)");
       
       // for(int state = 0; state < NUM_STATES; state++)
       // {
@@ -724,256 +697,7 @@ void DebugStuckStatesEnhanced()
 // ======================================================================
 // ✅✅✅ 5. FUNÇÃO: DESBLOQUEAR ESTADOS BONS (REMOVIDO RESET DE ESTADOS)
 // ======================================================================
-void UnblockGoodStates()
-{
-   // 🚨 FIX: Respeitar EnableAutoUnblocking
-   if(!EnableAutoUnblocking)
-   {
-      if(EnableBlockingDebugLogs)
-      {
-         Print("🚫 UnblockGoodStates DESABILITADO (EnableAutoUnblocking=false)");
-      }
-      return;
-   }
-   
-   if(!EnableIntelligentReset) return;
-   
-   // ✅ PROTEÇÃO: Só desbloquear após ter base sólida de estados aprendidos
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return;
-   }
-   
-   int statesUnblocked = 0;
-   
-   Print("🔓 DESBLOQUEIO INTELIGENTE DE ESTADOS BONS");
-   
-   for(int s = 0; s < NUM_STATES; s++)
-   {
-      if(g_stateVisits[s] >= MinVisitsForBlockDecision)
-      {
-         double winRate = CalculateWinRate(s);
-         
-         // ✅ DESBLOQUEAR ESTADOS BONS (APENAS TESTAR, SEM RESETAR)
-         if(g_stateBlocked[s] && winRate >= 0.35)
-         {
-            g_stateBlocked[s] = false;
-            g_stateLastUnblockTime[s] = TimeCurrent();
-            statesUnblocked++;
-            Print("✅ DESBLOQUEIO Estado ", s,
-                  " | Win Rate boa: ", DoubleToString(winRate*100,1), "%",
-                  " | Visitas: ", g_stateVisits[s]);
-            
-            g_memoryDirty = true;
-            InvalidateHUDCache();
-         }
-      }
-   }
-   
-   if(statesUnblocked > 0)
-   {
-      Print("📊 RESUMO DO DESBLOQUEIO:");
-      Print("   Estados desbloqueados: ", statesUnblocked);
-      Print("   Total estados bloqueados restantes: ", CountBlockedStates());
-      
-      g_memoryDirty = true;
-      SaveState();
-   }
-}
 
-// ======================================================================
-// ✅✅✅ FUNÇÕES DE DECAY E RESET INTELIGENTE (NOVAS)
-// ======================================================================
-
-// ======================================================================
-// ✅✅✅ 1. FUNÇÃO DE DECAIMENTO SUAVE (CORRIGIDA)
-// ======================================================================
-void ApplyStateDecay()
-{
-   if(!EnableMemoryDecay) return;
-   
-   // ✅ PROTEÇÃO: Não aplicar decay antes de ter 100 estados descobertos
-   // Garante fase completa de aprendizado sem perder estados prematuramente
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return; // Decay desabilitado durante fase de descoberta inicial
-   }
-   
-   const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário (% a esquecer)
-   int statesDecayed = 0;
-   double totalMemoryBefore = 0;
-   double totalMemoryAfter = 0;
-
-   for(int s = 0; s < NUM_STATES; s++)
-   {
-      if(g_stateVisits[s] > 0)
-      {
-         totalMemoryBefore += g_stateVisits[s];
-         
-         // Aplicar decay somente em estados com histórico muito significativo
-         // ✅ CORREÇÃO: Aumentado de >10 para >50 para evitar cap artificial em 10 visitas
-         if(g_stateVisits[s] > 50)
-         {
-            // ✅ CORREÇÃO: Decay deve REMOVER X%, não MANTER X%
-            // Se DecayFactor = 0.05 (5%), deve manter 95% (1.0 - 0.05)
-            g_stateVisits[s] = (int)(g_stateVisits[s] * (1.0 - DECAY_FACTOR));
-            g_stateLosses[s] = (int)(g_stateLosses[s] * (1.0 - DECAY_FACTOR));
-            g_stateWins[s] = (int)(g_stateWins[s] * (1.0 - DECAY_FACTOR));
-            
-            // Garantir valores mínimos
-            if(g_stateVisits[s] < 1 && g_stateVisits[s] > 0) g_stateVisits[s] = 1;
-            if(g_stateLosses[s] < 0) g_stateLosses[s] = 0;
-            if(g_stateWins[s] < 0) g_stateWins[s] = 0;
-            
-            statesDecayed++;
-            
-            // Atualizar Q-values gradualmente
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               int idx = s * NUM_ACTIONS + a;
-               if(g_Q[idx] != 0.0)
-               {
-                  g_Q[idx] *= (1.0 - DECAY_FACTOR);
-               }
-            }
-         }
-         
-         totalMemoryAfter += g_stateVisits[s];
-      }
-   }
-   
-   // Recalcular estados ativos
-   g_activeStatesCount = 0;
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         if(g_activeStatesCount < MaxMemoryStates)
-         {
-            g_activeStates[g_activeStatesCount] = state;
-            g_activeStatesCount++;
-         }
-      }
-   }
-   
-   g_totalDecayCycles++;
-   
-   double memoryReduction = totalMemoryBefore > 0 ? 
-                          (1.0 - SafeDivide(totalMemoryAfter, totalMemoryBefore, 1.0)) * 100 : 0;
-   
-   Print("🔄 DECAY APLICADO: ", 
-         "Estados ajustados: ", statesDecayed,
-         " | Redução memória: ", DoubleToString(memoryReduction, 1), "%",
-         " | Estados ativos: ", g_activeStatesCount,
-         " | Ciclos: ", g_totalDecayCycles);
-   
-   g_memoryDirty = true;
-}
-
-// ======================================================================
-// ✅✅✅ 2. DESBLOQUEAR ESTADOS BONS (REMOVIDO RESET INTELIGENTE)
-// ======================================================================
-void UnblockGoodStatesAutomatic()
-{
-   // 🚨 FIX: Respeitar EnableAutoUnblocking
-   if(!EnableAutoUnblocking)
-   {
-      if(EnableBlockingDebugLogs)
-      {
-         Print("🚫 UnblockGoodStatesAutomatic DESABILITADO (EnableAutoUnblocking=false)");
-      }
-      return;
-   }
-   
-   if(!EnableIntelligentReset) return;
-   
-   // Verificar se temos estados suficientes antes de permitir desbloqueios
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return; // Não desbloquear até ter aprendido estados suficientes
-   }
-   
-   int statesUnblocked = 0;
-   
-   for(int s = 0; s < NUM_STATES; s++)
-   {
-      if(g_stateVisits[s] < BadStateMinVisits) continue;
-      
-      if(!g_stateBlocked[s]) continue; // Apenas estados bloqueados
-      
-      double winRate = CalculateWinRate(s);
-      
-      // ✅ DESBLOQUEAR ESTADOS BONS - Win rate >= 35%
-      if(winRate >= 0.35)
-      {
-         g_stateBlocked[s] = false;
-         g_stateLastUnblockTime[s] = TimeCurrent();
-         
-         statesUnblocked++;
-         
-         Print("✅ DESBLOQUEIO AUTOMÁTICO -> Estado: ", s,
-               " | Visitas: ", g_stateVisits[s],
-               " | Vitórias: ", g_stateWins[s],
-               " | Win Rate: ", DoubleToString(winRate*100, 1), "%");
-         
-         g_memoryDirty = true;
-         InvalidateHUDCache();
-      }
-   }
-   
-   if(statesUnblocked > 0)
-   {
-      Print("✅ ", statesUnblocked, " estados bons desbloqueados | Total bloqueados: ", CountBlockedStates());
-   }
-}
-
-// ======================================================================
-// ✅✅✅ 3. MANUTENÇÃO PERIÓDICA DO SISTEMA
-// ======================================================================
-void PerformMemoryMaintenance()
-{
-   static datetime lastMaintenance = 0;
-   
-   if(TimeCurrent() - lastMaintenance < (DecayCheckIntervalHours * 3600))
-      return;
-   
-   Print("🔧 INICIANDO MANUTENÇÃO PERIÓDICA DO SISTEMA...");
-   
-   // 1. Aplicar decay suave
-   if(EnableMemoryDecay)
-   {
-      ApplyStateDecay();
-   }
-   
-   // 2. Desbloquear estados bons (apenas após atingir limite mínimo)
-   if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
-   {
-      UnblockGoodStatesAutomatic();
-   }
-   
-   // 3. Limpar memória se necessário
-   if(AutoCleanMemory)
-   {
-      CleanMemory();
-   }
-   
-   // 4. Auto desbloquear estados bons
-   if(EnableUnifiedBlockingSystem)
-   {
-      AutoUnblockGoodStates();
-   }
-   
-   lastMaintenance = TimeCurrent();
-   
-   // Salvar após manutenção
-   SaveBrain();
-   SaveState();
-   
-   Print("✅ MANUTENÇÃO COMPLETA REALIZADA");
-   Print("   • Decay aplicado: ", g_totalDecayCycles, " ciclos");
-   Print("   • Estados ativos: ", g_activeStatesCount);
-   Print("   • Estados bloqueados: ", CountBlockedStates());
-}
 
 // ======================================================================
 // ✅✅✅ SISTEMA DE BLOQUEIO UNIFICADO CORRIGIDO
@@ -1048,45 +772,7 @@ void BlockState(int state)
 }
 
 // ✅✅✅ 2️⃣ FUNÇÃO UNIFICADA PARA DESBLOQUEAR ESTADO (CORRIGIDA COM VERIFICAÇÃO)
-void UnblockState(int state)
-{
-    if(state < 0 || state >= NUM_STATES) return;
-    
-    // 🚫 VERIFICAÇÃO CRÍTICA: Só desbloqueia se EnableAutoUnblocking = true
-    if(!EnableAutoUnblocking)
-    {
-        if(EnableBlockingDebugLogs)
-        {
-            Print("🚫 DESBLOQUEIO BLOQUEADO para estado ", state, 
-                  " (EnableAutoUnblocking=false). Estado permanece bloqueado.");
-        }
-        return;
-    }
 
-    if(g_stateLastUnblockTime[state] > 0 && TimeCurrent() - g_stateLastUnblockTime[state] < 3600)
-    {
-        Print("⏳ Cooldown ativo para estado ", state, " - aguardando 1h");
-        return;
-    }
-
-    if(g_stateBlocked[state])
-    {
-        g_stateBlocked[state] = false;
-        g_stateLastUnblockTime[state] = TimeCurrent();
-        
-        if(EnableBlockingDebugLogs)
-        {
-            Print("✅ ESTADO DESBLOQUEADO: ", state, 
-                  " | Visitas: ", g_stateVisits[state], 
-                  " | Vitórias: ", g_stateWins[state],
-                  " | Perdas: ", g_stateLosses[state],
-                  " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
-        }
-        
-        g_memoryDirty = true;
-        InvalidateHUDCache();
-    }
-}
 
 // ✅✅✅ 3️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER BLOQUEADO (CORRIGIDA)
 bool ShouldBlockState(int state)
@@ -1155,71 +841,8 @@ bool ShouldBlockState(int state)
 // ✅✅✅ 4️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER DESBLOQUEADO (CORRIGIDA)
 bool ShouldUnblockState(int state)
 {
-    if(state < 0 || state >= NUM_STATES) return false;
-    
-    if(!g_stateBlocked[state]) return false;
-    
-    int visits = g_stateVisits[state];
-    int wins = g_stateWins[state];
-    int losses = g_stateLosses[state];
-    
-    // ✅ MODO AGRESSIVO: Requer mais dados para desbloquear
-    int minVisits = AggressiveLearningMode ? 10 : MinVisitsForBlockDecision;
-    
-    if(visits < minVisits) 
-    {
-        // 🔍 DEBUG: Estado bloqueado sem visitas suficientes para desbloquear
-        if(EnableBlockingDebugLogs)
-        {
-            Print("🔓 UNBLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", minVisits, " → SEM DADOS SUFICIENTES (não desbloqueia)");
-        }
-        return false;
-    }
-    
-    double winRate = CalculateWinRate(state);
-    
-    // Critério 1: Win rate suficientemente alto
-    bool goodWinRate = (winRate >= UnblockWinRateThreshold);
-    
-    // Critério 2: Sharpe Ratio suficientemente alto (se habilitado)
-    bool goodSharpe = true;
-    double sharpe = 0.0;
-    if(EnableSharpeFilter)
-    {
-        int trades = g_stateWins[state] + g_stateLosses[state];
-        if(trades >= MinTradesForSharpe)
-        {
-            sharpe = CalculateSharpeRatio(state);
-            goodSharpe = (sharpe >= MinSharpeToUnblock);
-        }
-        else
-        {
-            // Se não tem dados suficientes para Sharpe, não desbloquear ainda
-            goodSharpe = false;
-        }
-    }
-    
-    // 🔍 DEBUG: Log detalhado de avaliação de desbloqueio
-    bool shouldUnblock = (goodWinRate && goodSharpe);
-    if(EnableBlockingDebugLogs || shouldUnblock)
-    {
-        Print("🔓 UNBLOCK DEBUG: State=", state, 
-              " | Visits=", visits,
-              " | Wins=", wins,
-              " | Losses=", losses,
-              " | WinRate=", DoubleToString(winRate*100, 1), "%",
-              " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
-              " | Sharpe=", DoubleToString(sharpe, 2),
-              " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
-              " | EnableSharpe=", EnableSharpeFilter,
-              " | GoodWR?=", goodWinRate,
-              " | GoodSharpe?=", goodSharpe,
-              " | AggressiveMode=", AggressiveLearningMode,
-              " → SHOULD UNBLOCK=", shouldUnblock);
-    }
-    
-    // Desbloquear apenas se AMBOS win rate E Sharpe forem bons
-    return shouldUnblock;
+    // States are never unblocked once blocked
+    return false;
 }
 
 // ✅✅✅ 5️⃣ FUNÇÃO PRINCIPAL DE VERIFICAÇÃO DE BLOQUEIO (SOMENTE LEITURA)
@@ -1267,15 +890,7 @@ void EvaluateAndUpdateBlockState(int state)
     }
     else if(!shouldBeBlocked && currentlyBlocked)
     {
-        // 🆕 VERIFICAÇÃO: Só tenta desbloquear se EnableAutoUnblocking = true
-        if(EnableAutoUnblocking && ShouldUnblockState(state))
-        {
-            UnblockState(state);
-        }
-        else if(!EnableAutoUnblocking && ShouldUnblockState(state) && EnableBlockingDebugLogs)
-        {
-            Print("🚫 Estado ", state, " qualifica para desbloqueio mas EnableAutoUnblocking=false");
-        }
+        // States once blocked stay blocked (no unblocking)
     }
 }
 
@@ -1292,8 +907,6 @@ void EvaluateAllActiveStates()
     lastFullEvaluation = TimeCurrent();
     
     int blocked = 0;
-    int unblocked = 0;
-    int unblockAttemptsFailed = 0;  // 🆕 Contador de tentativas de desbloqueio impedidas
     
     for(int i = 0; i < g_activeStatesCount; i++)
     {
@@ -1307,28 +920,11 @@ void EvaluateAllActiveStates()
             BlockState(state);
             blocked++;
         }
-        else if(!shouldBeBlocked && currentlyBlocked)
-        {
-            // 🆕 VERIFICAÇÃO: Só tenta desbloquear se EnableAutoUnblocking = true
-            if(EnableAutoUnblocking && ShouldUnblockState(state))
-            {
-                UnblockState(state);
-                unblocked++;
-            }
-            else if(!EnableAutoUnblocking && ShouldUnblockState(state))
-            {
-                unblockAttemptsFailed++;
-            }
-        }
     }
     
-    if(blocked > 0 || unblocked > 0 || unblockAttemptsFailed > 0)
+    if(blocked > 0)
     {
-      Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados, ", unblocked, " desbloqueados");
-      if(unblockAttemptsFailed > 0)
-      {
-         Print("🚫 ", unblockAttemptsFailed, " estados NÃO foram desbloqueados (EnableAutoUnblocking=false)");
-      }
+      Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados");
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
     }
 }
@@ -1396,116 +992,7 @@ void LogLearningProgress()
 
 // ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
 // ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
-void AutoUnblockGoodStates()
-{
-    // 🆕 VERIFICAÇÃO: Só executa se EnableAutoUnblocking = true
-    if(!EnableAutoUnblocking)
-    {
-        if(EnableBlockingDebugLogs)
-        {
-            Print("🚫 AutoUnblockGoodStates DESABILITADO (EnableAutoUnblocking=false)");
-        }
-        return;
-    }
-    
-    int unblocked = 0;
-    
-    for(int state = 0; state < NUM_STATES; state++)
-    {
-        if(g_stateBlocked[state] && ShouldUnblockState(state))
-        {
-            UnblockState(state);
-            unblocked++;
-        }
-    }
-    
-    if(unblocked > 0)
-    {
-        Print("🔄 ", unblocked, " estados desbloqueados automaticamente (win rate > ", 
-              DoubleToString(UnblockWinRateThreshold*100, 0), "%)");
-    }
-}
 
-// ======================================================================
-// ✅ TESTAR PERIODICAMENTE ESTADOS BLOQUEADOS
-// ======================================================================
-// Testa estados bloqueados periodicamente para ver se melhoraram
-// Desbloqueia temporariamente para coletar novas amostras
-void TestBlockedStatesPeriodically()
-{
-   datetime currentTime = TimeCurrent();
-   
-   // Testar a cada 7 dias (604800 segundos)
-   if(currentTime - g_lastUnblockTestTime < 604800)
-   {
-      return;
-   }
-   
-   g_lastUnblockTestTime = currentTime;
-   
-   int testedStates = 0;
-   int unblockedForTest = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(!g_stateBlocked[state]) continue;
-      
-      // Apenas testar estados com histórico significativo
-      if(g_stateVisits[state] < 10) continue;
-      
-      // Se estado já foi bloqueado 2+ vezes, PERMANECE BLOQUEADO
-      if(g_stateBlockCount[state] >= 2)
-      {
-         // Log apenas na primeira iteração para não poluir
-         if(testedStates == 0)
-         {
-            Print("🔒 Estado ", state, " PERMANENTEMENTE BLOQUEADO (bloqueado ", 
-                  g_stateBlockCount[state], " vezes - sem mais retestes)");
-         }
-         testedStates++;
-         continue; // Não desbloquear mais
-      }
-      
-      datetime timeSinceBlock = currentTime - g_stateLastBlockTime[state];
-      
-      // Se estado está bloqueado há mais de 30 dias, dar nova chance
-      if(timeSinceBlock > 2592000) // 30 dias em segundos
-      {
-         // Resetar estatísticas mas manter Q-values (aprendizado)
-         g_stateVisits[state] = 0;
-         g_stateWins[state] = 0;
-         g_stateLosses[state] = 0;
-         
-         // Desbloquear temporariamente para teste
-         g_stateBlocked[state] = false;
-         g_stateLastUnblockTime[state] = currentTime;
-         
-         unblockedForTest++;
-         
-         int tentativasRestantes = 2 - g_stateBlockCount[state];
-         string mensagemTentativa = (tentativasRestantes == 1) ? " (ÚLTIMA CHANCE)" : "";
-         
-         Print("🧪 Estado ", state, " desbloqueado para TESTE #", 
-               (g_stateBlockCount[state] + 1), mensagemTentativa,
-               " (bloqueado há ", (int)(timeSinceBlock / 86400), " dias)");
-      }
-      
-      testedStates++;
-      
-      // Limitar a 1 estado por vez para teste gradual e controlado
-      if(unblockedForTest >= 1) break;
-   }
-   
-   if(unblockedForTest > 0)
-   {
-      Print("📊 Teste periódico de estados bloqueados: ", unblockedForTest, 
-            " estado desbloqueado para coleta gradual de novas amostras");
-      InvalidateHUDCache();
-   }
-   
-   // ✅ NOVO: Log de progresso de aprendizagem (a cada 100 trades)
-   LogLearningProgress();
-}
 
 // ======================================================================
 // ✅✅✅ FUNÇÕES AUXILIARES CORRIGIDAS
@@ -1928,16 +1415,10 @@ void SaveState()
    FileWriteArray(handle, g_activeStates);
    FileWriteArray(handle, g_stateBlocked);
    FileWriteArray(handle, g_stateLastBlockTime);
-   FileWriteArray(handle, g_stateLastUnblockTime);
    FileWriteArray(handle, g_stateBlockCount);
    FileWriteInteger(handle, (int)g_activeStatesCount);
    FileWriteArray(handle, g_stateWinRate);
    FileWriteArray(handle, g_stateAvgProfit);
-   FileWriteInteger(handle, (int)g_stateResets);
-   FileWriteInteger(handle, (int)g_stateDecays);
-   FileWriteInteger(handle, (int)g_lastDecayTradeCount);
-   FileWriteInteger(handle, (int)g_totalDecayCycles);
-   FileWriteInteger(handle, (int)g_totalBadStateResets);
    
    FileClose(handle);
    
@@ -1974,7 +1455,6 @@ void LoadState()
    FileReadArray(handle, g_activeStates);
    FileReadArray(handle, g_stateBlocked);
    FileReadArray(handle, g_stateLastBlockTime);
-   FileReadArray(handle, g_stateLastUnblockTime);
    FileReadArray(handle, g_stateBlockCount);
    
    // 🔧 REGRA 3 — Converter para int se necessário
@@ -1984,18 +1464,6 @@ void LoadState()
    FileReadArray(handle, g_stateWinRate);
    FileReadArray(handle, g_stateAvgProfit);
    
-   int tempStateResets = FileReadInteger(handle);
-   int tempStateDecays = FileReadInteger(handle);
-   int tempLastDecayTradeCount = FileReadInteger(handle);
-   int tempTotalDecayCycles = FileReadInteger(handle);
-   int tempTotalBadStateResets = FileReadInteger(handle);
-   
-   g_stateResets = tempStateResets;
-   g_stateDecays = tempStateDecays;
-   g_lastDecayTradeCount = tempLastDecayTradeCount;
-   g_totalDecayCycles = tempTotalDecayCycles;
-   g_totalBadStateResets = tempTotalBadStateResets;
-   
    FileClose(handle);
    
    Print("✅ Estados carregados da memória persistente");
@@ -2004,8 +1472,7 @@ void LoadState()
    Print("📊 Total perdas REAIS: ", ArraySum(g_stateLosses));
    Print("📊 Total vitórias REAIS: ", ArraySum(g_stateWins));
    Print("📊 Estados bloqueados: ", CountBlockedStates());
-   Print("📊 Ciclos de decay: ", g_totalDecayCycles);
-   Print("📊 Estados resetados: ", g_totalBadStateResets);
+}
 }
 
 int ArraySum(const int &array[])
@@ -2043,7 +1510,7 @@ void AddActiveState(int state)
    
    // ✅ NOVO: Se exploração = 0%, NÃO adicionar novos estados
    // Com 0% exploração, usar APENAS estados já conhecidos
-   if(g_currentExplorationRate <= 0.0)
+   if(ExplorationRate <= 0.0)
    {
       // Estado novo mas exploração = 0% → NÃO adicionar
       // Sistema deve usar SOMENTE estados já na lista ativa
@@ -2109,7 +1576,6 @@ void CleanMemory()
             g_stateWins[state] = 0;
             g_stateLastUpdate[state] = 0;
             g_stateLastBlockTime[state] = 0;
-            g_stateLastUnblockTime[state] = 0;
             
             for(int a = 0; a < NUM_ACTIONS; a++)
             {
@@ -2219,7 +1685,6 @@ bool SaveBrainToFile(string filename)
       FileWriteInteger(h, (int)g_stateLastUpdate[state]);
       FileWriteInteger(h, (int)g_stateBlocked[state]);
       FileWriteLong(h, (long)g_stateLastBlockTime[state]);
-      FileWriteLong(h, (long)g_stateLastUnblockTime[state]);
       
       // Validação ao salvar: garante que contador está entre 0-10
       int blockCountToSave = g_stateBlockCount[state];
@@ -2239,7 +1704,7 @@ bool SaveBrainToFile(string filename)
       }
    }
    
-   FileWriteDouble(h, g_currentExplorationRate);
+   FileWriteDouble(h, ExplorationRate);
    FileWriteInteger(h, (int)g_tradesToday);
    FileWriteInteger(h, (int)g_consecutiveLosses);
    FileWriteInteger(h, (int)g_totalTrades);
@@ -2276,18 +1741,12 @@ bool SaveBrainToFile(string filename)
    
    FileWriteArray(h, g_stateWinRate);
    FileWriteArray(h, g_stateAvgProfit);
-   FileWriteInteger(h, (int)g_stateResets);
-   FileWriteInteger(h, (int)g_stateDecays);
-   FileWriteInteger(h, (int)g_lastDecayTradeCount);
-   FileWriteInteger(h, (int)g_totalDecayCycles);
-   FileWriteInteger(h, (int)g_totalBadStateResets);
    
    // 🔧 CORREÇÃO CRÍTICA: Salvar TODOS os estados bloqueados (não apenas ativos)
    // Isso garante que estados bloqueados sejam preservados mesmo se não estiverem em g_activeStates[]
    FileWriteArray(h, g_stateBlocked);
    FileWriteArray(h, g_stateBlockCount);
    FileWriteArray(h, g_stateLastBlockTime);
-   FileWriteArray(h, g_stateLastUnblockTime);
 
    // ✅ BUG FIX: Salvar arrays de ranking de estados (TOP 10 melhores e piores)
    // Isso preserva o ranking entre reinícios do EA
@@ -2360,9 +1819,6 @@ bool LoadBrainFromFile(string filename)
    if(ArraySize(g_stateLastBlockTime) != NUM_STATES)
       ArrayResize(g_stateLastBlockTime, NUM_STATES);
    
-   if(ArraySize(g_stateLastUnblockTime) != NUM_STATES)
-      ArrayResize(g_stateLastUnblockTime, NUM_STATES);
-   
    // ✅ NÃO zera g_Q[] - preserva valores existentes
    
    // 🔧 REGRA 3 — Converter para int se necessário
@@ -2384,7 +1840,6 @@ bool LoadBrainFromFile(string filename)
          g_stateLastUpdate[state] = FileReadInteger(h);
          g_stateBlocked[state] = (bool)FileReadInteger(h);
          g_stateLastBlockTime[state] = (datetime)FileReadLong(h);
-         g_stateLastUnblockTime[state] = (datetime)FileReadLong(h);
          
          // Lê contador de bloqueios com validação para evitar overflow/corrupção
          int blockCount = FileReadInteger(h);
@@ -2403,7 +1858,7 @@ bool LoadBrainFromFile(string filename)
       }
    }
    
-   g_currentExplorationRate = FileReadDouble(h);
+   ExplorationRate = FileReadDouble(h);
    g_tradesToday = FileReadInteger(h);
    g_consecutiveLosses = FileReadInteger(h);
    g_totalTrades = FileReadInteger(h);
@@ -2444,18 +1899,11 @@ bool LoadBrainFromFile(string filename)
    ArrayResize(g_stateAvgProfit, NUM_STATES);
    FileReadArray(h, g_stateAvgProfit, 0, NUM_STATES);
    
-   g_stateResets = FileReadInteger(h);
-   g_stateDecays = FileReadInteger(h);
-   g_lastDecayTradeCount = FileReadInteger(h);
-   g_totalDecayCycles = FileReadInteger(h);
-   g_totalBadStateResets = FileReadInteger(h);
-   
    // 🔧 CORREÇÃO CRÍTICA: Carregar TODOS os estados bloqueados (não apenas ativos)
    // Isso garante que estados bloqueados sejam preservados mesmo se não estiverem em g_activeStates[]
    FileReadArray(h, g_stateBlocked, 0, NUM_STATES);
    FileReadArray(h, g_stateBlockCount, 0, NUM_STATES);
    FileReadArray(h, g_stateLastBlockTime, 0, NUM_STATES);
-   FileReadArray(h, g_stateLastUnblockTime, 0, NUM_STATES);
    
    // ✅ BUG FIX: Carregar arrays de ranking de estados (TOP 10 melhores e piores)
    // Isso restaura o ranking entre reinícios do EA
@@ -2481,26 +1929,20 @@ bool LoadBrainFromFile(string filename)
    
    Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
    Print("📊 Estados bloqueados: ", CountBlockedStates());
-   Print("📊 Ciclos de decay: ", g_totalDecayCycles);
-   Print("📊 Estados resetados: ", g_totalBadStateResets);
    Print("📊 Total de trades: ", g_totalTrades, " (Wins: ", g_totalWins, ", Losses: ", g_totalLosses, ")");
    Print("💰 Lucro Total carregado: ", DoubleToString(g_sumProfit, 2));
    
    // Verificar se exploração está desabilitada
    if(DisableExploration)
    {
-      g_currentExplorationRate = 0.0;
+      ExplorationRate = 0.0;
       Print("🚫 EXPLORAÇÃO DESABILITADA - Modo exploitation only");
       Print("   Robô usará APENAS Q-learning (sem ações aleatórias)");
       Print("📊 Taxa de exploração: 0.0% (EXPLOITATION ONLY)");
    }
    else
    {
-      Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
-      if(MinExplorationRate == 0.0)
-      {
-         Print("   ⚙️ Sistema adaptativo convergirá para 0% (exploitation only)");
-      }
+      Print("📊 Taxa de exploração: ", DoubleToString(ExplorationRate * 100, 1), "% (FIXED)");
    }
    
    Print("🏆 Ranking carregado: ", (g_lastRankingUpdate > 0 ? "SIM" : "NÃO"), 
@@ -2725,9 +2167,6 @@ void ResetQTable()
    ArrayResize(g_stateLastBlockTime, NUM_STATES);
    ArrayInitialize(g_stateLastBlockTime, 0);
    
-   ArrayResize(g_stateLastUnblockTime, NUM_STATES);
-   ArrayInitialize(g_stateLastUnblockTime, 0);
-   
    ArrayResize(g_activeStates, MaxMemoryStates);
    g_activeStatesCount = 0;
    
@@ -2761,12 +2200,9 @@ void ResetQTable()
    g_buyProfit = 0.0;
    g_sellProfit = 0.0;
    
-   g_totalDecayCycles = 0;
-   g_totalBadStateResets = 0;
-   
    InitializeLearningSystem();
    
-   Print("🆕 Nova memória criada (Sistema Corrigido v307F com Decay e Reset)");
+   Print("🆕 Nova memória criada (Q-learning puro)");
 }
 
 // ======================================================================
@@ -2895,7 +2331,6 @@ void MonitorBadStates()
    Print("   Estados analisados: ", estadosAnalisados);
    Print("   Estados bloqueados: ", CountBlockedStates(), " (+", bloqueados, " novos)");
    Print("   Estados resetados: ", resetados);
-   Print("   Total resets acumulados: ", g_totalBadStateResets);
    
    // ✅ FORÇAR SAVE após monitoramento crítico
    if(bloqueados > 0 || resetados > 0)
@@ -2936,21 +2371,14 @@ void DebugBlockedStates()
          {
             blockedCount++;
             
-            if(winRate >= UnblockWinRateThreshold && g_stateVisits[state] >= MinVisitsForBlockDecision)
+            // Check if state was incorrectly blocked (good win rate)
+            if(winRate >= 0.55 && g_stateVisits[state] >= MinVisitsForBlockDecision)
             {
                wronglyBlocked++;
                PrintFormat("❌❌❌ ERRO GRAVE: Estado %d BLOQUEADO mas tem WIN RATE ALTA: %.1f%% | Visitas: %d", 
                      state, winRate*100, g_stateVisits[state]);
                
-               // 🆕 VERIFICAÇÃO: Só desbloqueia se EnableAutoUnblocking = true
-               if(EnableUnifiedBlockingSystem && EnableAutoUnblocking)
-               {
-                  UnblockState(state);
-               }
-               else if(EnableUnifiedBlockingSystem && !EnableAutoUnblocking)
-               {
-                  Print("🚫 Estado ", state, " NÃO foi desbloqueado (EnableAutoUnblocking=false)");
-               }
+               // States once blocked stay blocked (no unblocking)
             }
             else if(lossRate >= BlockLossRateThreshold && g_stateVisits[state] >= MinVisitsForBlockDecision)
             {
@@ -2969,12 +2397,6 @@ void DebugBlockedStates()
    
    Print(StringFormat("=== RESUMO: %d visitados | %d bloqueados | %d bloqueados erroneamente | %d bloqueados corretamente ===", 
          totalVisited, blockedCount, wronglyBlocked, correctlyBlocked));
-   
-   if(wronglyBlocked > 0 && EnableUnifiedBlockingSystem)
-   {
-      Print("🔥🔥🔥 CORRIGINDO ", wronglyBlocked, " ESTADOS BLOQUEADOS ERRONEAMENTE...");
-      AutoUnblockGoodStates();
-   }
 }
 
 //+------------------------------------------------------------------+
@@ -3206,16 +2628,12 @@ void EmergencyReset()
       g_stateWins[s] = 0;
       g_stateBlocked[s] = false;
       g_stateLastBlockTime[s] = 0;
-      g_stateLastUnblockTime[s] = 0;
       g_stateLastUpdate[s] = 0;
    }
    
    g_activeStatesCount = 0;
-   g_currentExplorationRate = InitialExplorationRate;
    g_tradesToday = 0;
    g_consecutiveLosses = 0;
-   g_totalDecayCycles = 0;
-   g_totalBadStateResets = 0;
    
    // Resetar arrays
    ArrayInitialize(g_recentProfits, 0.0);
@@ -3270,7 +2688,6 @@ void DebugStuckStates()
    Print("   Estados travados (múltiplos de 10): ", stuckStates);
    Print("   Estados com 10+ visitas: ", CountStatesWithMinVisits(10));
    Print("   Estados com 20+ visitas: ", CountStatesWithMinVisits(20));
-   Print("   Total BadStateResets: ", g_totalBadStateResets);
    Print("=== FIM DEBUG ===");
 }
 
@@ -3292,376 +2709,19 @@ int CountStatesWithMinVisits(int minVisits)
 // ======================================================================
 // ✅✅✅ FUNÇÃO: CORREÇÃO DE EMERGÊNCIA DOS CONTADORES
 // ======================================================================
-void EmergencyCounterFix()
-{
-   // 🚨 FIX CRÍTICO: Verificar EnableAutoUnblocking antes de qualquer desbloqueio
-   // Esta função pode desbloquear estados, então deve respeitar a configuração
-   if(!EnableAutoUnblocking)
-   {
-      Print("🚫 EmergencyCounterFix: Desbloqueio de estados BLOQUEADO (EnableAutoUnblocking=false)");
-      Print("   Função executará apenas correções de contadores, sem desbloquear estados.");
-      Print("   Estados bloqueados permanecerão bloqueados conforme configuração.");
-      
-      // Ainda pode corrigir contadores corrompidos sem desbloquear
-      int corruptedStates = 0;
-      for(int state = 0; state < NUM_STATES; state++)
-      {
-         if(g_stateVisits[state] > 0)
-         {
-            // Corrigir contadores inconsistentes
-            if(g_stateWins[state] > g_stateVisits[state])
-            {
-               Print("❌ Estado ", state, " com contadores corrompidos - corrigindo");
-               double estimatedWinRate = 0.3;
-               g_stateWins[state] = (int)(g_stateVisits[state] * estimatedWinRate);
-               g_stateLosses[state] = g_stateVisits[state] - g_stateWins[state];
-               corruptedStates++;
-            }
-         }
-      }
-      
-      if(corruptedStates > 0)
-      {
-         Print("✅ Corrigidos ", corruptedStates, " estados com contadores corrompidos");
-         Print("   (Nenhum estado foi desbloqueado)");
-      }
-      
-      return;  // Não desbloqueia estados
-   }
-   
-   Print("🔥🔥🔥 CORREÇÃO DE EMERGÊNCIA DOS CONTADORES");
-   
-   int fixedStates = 0;
-   int unblockedStates = 0;
-   int corruptedStates = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         // ✅ CORRIGIR CONTADORES INCONSISTENTES
-         if(g_stateWins[state] > g_stateVisits[state])
-         {
-            Print("❌❌❌ ERRO CRÍTICO: Estado ", state, 
-                  " | Visitas: ", g_stateVisits[state],
-                  " | Vitórias: ", g_stateWins[state], " (IMPOSSÍVEL!)");
-            
-            // Correção: Recalcular baseado em win rate realista
-            double estimatedWinRate = 0.3; // Assumir 30% win rate
-            g_stateWins[state] = (int)(g_stateVisits[state] * estimatedWinRate);
-            g_stateLosses[state] = g_stateVisits[state] - g_stateWins[state];
-            
-            corruptedStates++;
-            fixedStates++;
-         }
-         
-         // ✅ DESBLOQUEAR ESTADOS BLOQUEADOS ERRONEAMENTE
-         if(g_stateBlocked[state])
-         {
-            double winRate = CalculateWinRate(state);
-            
-            // Regras mais sensatas para desbloqueio
-            if((g_stateVisits[state] < 5 && winRate > 0.1) || // Poucas visitas com alguma vitória
-               (g_stateVisits[state] >= 5 && winRate >= 0.25)) // Win rate razoável
-            {
-               g_stateBlocked[state] = false;
-               unblockedStates++;
-               Print("✅ Estado ", state, " desbloqueado | Win rate: ", 
-                     DoubleToString(winRate*100,1), "% | Visitas: ", g_stateVisits[state]);
-            }
-         }
-         
-         // ✅ CORRIGIR ESTADOS COM 0 VISITAS MAS COM CONTADORES
-         if(g_stateVisits[state] == 0 && (g_stateWins[state] > 0 || g_stateLosses[state] > 0))
-         {
-            Print("🔄 Estado ", state, " com contadores mas 0 visitas - resetando");
-            g_stateWins[state] = 0;
-            g_stateLosses[state] = 0;
-            g_stateBlocked[state] = false;
-            fixedStates++;
-         }
-      }
-   }
-   
-   // ✅ CORRIGIR ESTATÍSTICAS GLOBAIS
-   int totalVisits = 0;
-   int totalWins = 0;
-   int totalLosses = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      totalVisits += g_stateVisits[state];
-      totalWins += g_stateWins[state];
-      totalLosses += g_stateLosses[state];
-   }
-   
-   // Recalcular totais
-   g_totalTrades = totalVisits; // Cada visita = 1 trade real
-   g_totalWins = totalWins;
-   g_totalLosses = totalLosses;
-   
-   Print("📊 RESUMO DA CORREÇÃO:");
-   Print("   Estados com dados corruptos: ", corruptedStates);
-   Print("   Estados corrigidos: ", fixedStates);
-   Print("   Estados desbloqueados: ", unblockedStates);
-   Print("   Novos totais:");
-   Print("     Total Visitas: ", totalVisits);
-   Print("     Total Vitórias: ", totalWins);
-   Print("     Total Perdas: ", totalLosses);
-   Print("     Win Rate: ", totalVisits > 0 ? 
-         DoubleToString((double)totalWins/totalVisits*100, 1) : "0.0", "%");
-   
-   // Forçar save
-   g_memoryDirty = true;
-   SaveState();
-   SaveBrain();
-}
+
 
 // ======================================================================
 // ✅✅✅ FUNÇÃO: REVISÃO COMPLETA DO SISTEMA DE BLOQUEIO
 // ======================================================================
-void OverhaulBlockingSystem()
-{
-   // 🚨 FIX CRÍTICO: Verificar EnableAutoUnblocking antes de desbloquear estados
-   if(!EnableAutoUnblocking)
-   {
-      Print("🚫 OverhaulBlockingSystem: Desbloqueio de estados BLOQUEADO (EnableAutoUnblocking=false)");
-      Print("   Função executará apenas análise e bloqueio, sem desbloquear estados.");
-      
-      // Ainda pode bloquear estados ruins
-      int newlyBlocked = 0;
-      for(int state = 0; state < NUM_STATES; state++)
-      {
-         if(g_stateVisits[state] >= MinVisitsForBlockDecision && !g_stateBlocked[state])
-         {
-            double winRate = CalculateWinRate(state);
-            if(winRate < StateBlockThreshold)
-            {
-               g_stateBlocked[state] = true;
-               newlyBlocked++;
-            }
-         }
-      }
-      
-      if(newlyBlocked > 0)
-      {
-         Print("✅ Bloqueados ", newlyBlocked, " estados ruins");
-         Print("   (Nenhum estado foi desbloqueado - EnableAutoUnblocking=false)");
-         g_memoryDirty = true;
-      }
-      
-      return;
-   }
-   
-   Print("🔄 REVISÃO COMPLETA DO SISTEMA DE BLOQUEIO");
-   
-   int blockedBefore = CountBlockedStates();
-   int totalVisited = g_activeStatesCount;
-   
-   // ✅ NOVAS REGRAS INTELIGENTES
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         double winRate = CalculateWinRate(state);
-         
-         // ✅ REGRAS PARA BLOQUEIO (MAIS RESTRITIVAS)
-         bool shouldBeBlocked = false;
-         
-         // 1. Muito ruim com histórico suficiente
-         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < StateBlockThreshold)
-         {
-            shouldBeBlocked = true;
-         }
-         // 2. Catastrófico mesmo com histórico mínimo
-         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < (StateBlockThreshold / 2.0))
-         {
-            shouldBeBlocked = true;
-         }
-         // 3. Nunca ganhou com visitas significativas
-         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0)
-         {
-            shouldBeBlocked = true;
-         }
-         
-         // ✅ REGRAS PARA DESBLOQUEIO (MAIS LENIENTES)
-         bool shouldBeUnblocked = false;
-         
-         // 1. Performance aceitável
-         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate >= 0.30)
-         {
-            shouldBeUnblocked = true;
-         }
-         // 2. Poucas visitas, não bloquear prematuramente
-         else if(g_stateVisits[state] < 5)
-         {
-            shouldBeUnblocked = true;
-         }
-         // 3. Mostrando melhoria recente
-         else if(g_stateBlocked[state] && winRate >= 0.25)
-         {
-            shouldBeUnblocked = true;
-         }
-         
-         // APLICAR DECISÃO
-         if(shouldBeBlocked && !g_stateBlocked[state])
-         {
-            g_stateBlocked[state] = true;
-         }
-         else if(shouldBeUnblocked && g_stateBlocked[state])
-         {
-            g_stateBlocked[state] = false;
-         }
-      }
-   }
-   
-   int blockedAfter = CountBlockedStates();
-   
-   Print("📊 RESULTADO DA REVISÃO:");
-   Print("   Estados visitados: ", totalVisited);
-   Print("   Bloqueados antes: ", blockedBefore, " (", 
-         totalVisited > 0 ? DoubleToString((double)blockedBefore/totalVisited*100,1) : "0", "%)");
-   Print("   Bloqueados depois: ", blockedAfter, " (", 
-         totalVisited > 0 ? DoubleToString((double)blockedAfter/totalVisited*100,1) : "0", "%)");
-   Print("   Mudança: ", blockedAfter - blockedBefore);
-   
-   g_memoryDirty = true;
-}
+
 
 // ======================================================================
 // ✅✅✅ FUNÇÃO: RESET PARCIAL INTELIGENTE
 // ======================================================================
-void IntelligentPartialReset()
-{
-   // ✅ PROTEÇÃO: Não resetar até ter base sólida de estados aprendidos
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return; // Não resetar até ter aprendido estados suficientes
-   }
-   
-   Print("🧠 RESET PARCIAL INTELIGENTE");
-   
-   int statesReset = 0;
-   int statesRetained = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         double winRate = CalculateWinRate(state);
-         
-         // ✅ CRITÉRIOS PARA RESET COMPLETO (usar MinVisitsForBlockDecision)
-         if((g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15) || // Muito ruim
-            (g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0) ||  // Nunca ganhou
-            (g_stateVisits[state] > MinVisitsForBlockDecision && winRate < 0.25))    // Histórico longo ruim
-         {
-            // Reset completo
-            g_stateVisits[state] = 0;
-            g_stateWins[state] = 0;
-            g_stateLosses[state] = 0;
-            // ✅ NÃO desbloquear estado ruim - preservar bloqueio
-            // g_stateBlocked[state] permanece inalterado
-            
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[state * NUM_ACTIONS + a] = 0.0;
-            }
-            
-            statesReset++;
-         }
-         // ✅ RESET PARCIAL PARA ESTADOS MÉDIOS
-         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.30)
-         {
-            // Manter 30% da memória
-            g_stateVisits[state] = (int)(g_stateVisits[state] * 0.3);
-            g_stateWins[state] = (int)(g_stateWins[state] * 0.3);
-            g_stateLosses[state] = (int)(g_stateLosses[state] * 0.3);
-            
-            // Garantir mínimos
-            if(g_stateVisits[state] < 1) g_stateVisits[state] = 1;
-            if(g_stateWins[state] < 0) g_stateWins[state] = 0;
-            if(g_stateLosses[state] < 0) g_stateLosses[state] = 0;
-            
-            // Reduzir Q-values
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[state * NUM_ACTIONS + a] *= 0.3;
-            }
-            
-            statesRetained++;
-         }
-         else
-         {
-            statesRetained++;
-         }
-      }
-   }
-   
-   // Recalcular estados ativos
-   g_activeStatesCount = 0;
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         if(g_activeStatesCount < MaxMemoryStates)
-         {
-            g_activeStates[g_activeStatesCount] = state;
-            g_activeStatesCount++;
-         }
-      }
-   }
-   
-   Print("📊 RESULTADO DO RESET:");
-   Print("   Estados resetados completamente: ", statesReset);
-   Print("   Estados mantidos (com redução): ", statesRetained);
-   Print("   Total estados ativos após reset: ", g_activeStatesCount);
-   
-   g_memoryDirty = true;
-   SaveState();
-}
 
-// ======================================================================
-// ✅✅✅ FUNÇÃO: OTIMIZAR PARÂMETROS DINAMICAMENTE
-// ======================================================================
-void OptimizeParametersDynamically()
-{
-   Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
-   
-   // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
-   
-   // ✅ Ajuste adaptativo apenas se habilitado
-   if(EnableAdaptiveExploration)
-   {
-      if(currentWinRate < 0.25)
-      {
-         // Performance ruim, aumentar exploração
-         g_currentExplorationRate = MathMin(g_currentExplorationRate * 1.2, 0.8);
-         Print("📈 Aumentando exploração para ", DoubleToString(g_currentExplorationRate*100,1), 
-               "% (win rate baixa: ", DoubleToString(currentWinRate*100,1), "%)");
-      }
-      else if(currentWinRate > 0.35)
-      {
-         // Performance boa, reduzir exploração
-         g_currentExplorationRate = MathMax(g_currentExplorationRate * 0.9, MinExplorationRate);
-         Print("📉 Reduzindo exploração para ", DoubleToString(g_currentExplorationRate*100,1), 
-               "% (win rate boa: ", DoubleToString(currentWinRate*100,1), "%)");
-      }
-   }
-   
-   // ✅ AJUSTAR LEARNING RATE
-   if(g_totalTrades > 500)
-   {
-      LearningRate = 0.01; // Reduzir após muitos trades
-      Print("🎓 Learning rate ajustado para 0.01 (maturidade do sistema)");
-   }
-   
-   // ✅ AJUSTAR LIMITES DE BLOQUEIO
-   // Mantém sempre MinVisitsForBlockDecision = 30 (não ajusta mais para 8)
-   // Garantia: Estados NUNCA bloqueados com menos de 30 visitas
-   
-   g_memoryDirty = true;
-}
+
+
 
 // ======================================================================
 // ✅ HUD LEVE - FUNÇÕES OTIMIZADAS
@@ -3765,21 +2825,6 @@ void CreateHUDObjects()
       ObjectSetString(0, "HUD_Quality", OBJPROP_TEXT, "   Qualidade: ELITE=0 | BONS=0 | NEUTROS=0 | RUINS=0 | BLOQ=0");
       hudObjects[hudObjectCount++] = "HUD_Quality";
       currentY += lineHeight + 5;
-   }
-   
-   if(ObjectCreate(0, "HUD_DecayInfo", OBJ_LABEL, 0, 0, 0))
-   {
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_YDISTANCE, currentY);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_COLOR, clrYellow);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_FONTSIZE, 9);
-      ObjectSetString(0, "HUD_DecayInfo", OBJPROP_FONT, "Arial");
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_BACK, false);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_SELECTABLE, false);
-      ObjectSetString(0, "HUD_DecayInfo", OBJPROP_TEXT, "   Decay: Ativo | Ciclos: 0");
-      hudObjects[hudObjectCount++] = "HUD_DecayInfo";
-      currentY += lineHeight;
    }
    
    if(ObjectCreate(0, "HUD_Direction", OBJ_LABEL, 0, 0, 0))
@@ -4071,11 +3116,6 @@ void UpdateHUDLight()
                                      g_blockedStatesCount);
    ObjectSetString(0, "HUD_Quality", OBJPROP_TEXT, qualityText);
    
-   string decayInfo = StringFormat("   Decay: %s | Ciclos: %d", 
-                                   EnableMemoryDecay ? "Ativo" : "Inativo",
-                                   g_totalDecayCycles);
-   ObjectSetString(0, "HUD_DecayInfo", OBJPROP_TEXT, decayInfo);
-   
    string directionIcon = GetDirectionIconFast(currentDir);
    string directionText = (currentDir == 1) ? "BUY" : (currentDir == 2) ? "SELL" : "NEUTRO";
    color dirColor = GetDirectionColorFast(currentDir);
@@ -4135,7 +3175,7 @@ void UpdateHUDLight()
       cachedVolume = g_volumeMultiplier;
    }
    
-   double explorationRatePercent = g_currentExplorationRate * 100;
+   double explorationRatePercent = ExplorationRate * 100;
    // ⚠️ GARANTIR QUE NÃO PASSE DE 100%
    if(explorationRatePercent > 100.0) explorationRatePercent = 100.0;
    string newExploration = StringFormat("Exploração: %.0f%%", explorationRatePercent);
@@ -4574,25 +3614,6 @@ void UpdateQ(int state, int action, double reward)
    
    g_memoryDirty = true;
    
-   // ✅ EXPLORAÇÃO DINÂMICA BASEADA EM PERFORMANCE (apenas se habilitado)
-   if(EnableAdaptiveExploration)
-   {
-      if(reward > 0)
-      {
-         // Reduzir exploração após vitória
-         g_currentExplorationRate *= ExplorationDecay;
-      }
-      else if(reward < -1.0)
-      {
-         // ✅ CORRIGIDO: Aumentar exploração após perda grande, mas respeitar InitialExplorationRate como máximo
-         g_currentExplorationRate = MathMin(g_currentExplorationRate * 1.1, InitialExplorationRate);
-      }
-   }
-   
-   // ✅ GARANTIR LIMITES
-   if(g_currentExplorationRate > 1.0) g_currentExplorationRate = 1.0;
-   if(g_currentExplorationRate < MinExplorationRate) g_currentExplorationRate = MinExplorationRate;
-   
    g_qUpdatesSinceSave++;
    g_totalQUpdates++;
    
@@ -4774,13 +3795,6 @@ int ChooseAction(int state)
    
    if(g_consecutiveLosses >= 12)
    {
-      // ✅ Reset apenas se adaptativo estiver habilitado
-      if(EnableAdaptiveExploration)
-      {
-         // ✅ CORRIGIDO: Reseta para InitialExplorationRate SEM multiplicar ou forçar mínimo
-         g_currentExplorationRate = InitialExplorationRate;
-         Print("♻️ Reset de exploração após ", g_consecutiveLosses, " perdas consecutivas para ", DoubleToString(g_currentExplorationRate*100,1), "%");
-      }
    }
    
    // ⚠️ CORREÇÃO: EXPLORAÇÃO BALANCEADA PARA ESTADOS NOVOS
@@ -4803,7 +3817,7 @@ int ChooseAction(int state)
    }
    
    // Para estados conhecidos, usar taxa de exploração normal
-   double eps = g_currentExplorationRate;
+   double eps = ExplorationRate;
    
    // ⚠️ CAP REMOVIDO - Permitir exploração natural sem limite artificial
    // (Cap de 70% após 100 trades removido para permitir descoberta adequada de estados)
@@ -5166,14 +4180,13 @@ void ExecuteAction(int action, int state)
       else commentType = "NEUTRO";
    }
    
-   string comment = StringFormat("PHX307F_CORRIGIDO_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f_DECAY%d", 
+   string comment = StringFormat("PHX307F_QL_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f", 
                    isBuy ? "BUY" : "SELL",
                    commentType,
                    pyramidLevel,
                    FixedSL_Points, FixedTP_Points,
                    g_volumeMultiplier,
-                   quality,
-                   g_totalDecayCycles);
+                   quality);
    
    // ✅ CORREÇÃO: Atribuir string diretamente ao campo comment
    req.comment = comment;
@@ -5227,15 +4240,14 @@ void ExecuteAction(int action, int state)
       else lotTypeMsg = "📊 NEUTRO ";
    }
    
-   g_statusMessage = StringFormat("✅ %s%s #%d executado (VOL: %.1fx, Q: %.2f, Decay: %d)", 
+   g_statusMessage = StringFormat("✅ %s%s #%d executado (VOL: %.1fx, Q: %.2f)", 
                                   lotTypeMsg, 
                                   isBuy ? "BUY" : "SELL", 
                                   pyramidLevel, 
                                   g_volumeMultiplier, 
-                                  quality,
-                                  g_totalDecayCycles);
+                                  quality);
    
-   Print("🎯 TRADE EXECUTADO COM SUCESSO - SISTEMA CORRIGIDO COM DECAY: ",
+   Print("🎯 TRADE EXECUTADO - Q-LEARNING: ",
          lotTypeMsg,
          isBuy ? "BUY" : "SELL", " #", pyramidLevel,
          " | Estado: ", state,
@@ -5244,8 +4256,7 @@ void ExecuteAction(int action, int state)
          " | Lote: ", desiredLot, " (", DoubleToString(desiredLot/LotSize, 1), "x)",
          " | SL: ", DoubleToString(slPoints, 0), " pts",
          " | TP: ", DoubleToString(tpPoints, 0), " pts",
-         " | Preço: ", DoubleToString(price, 5),
-         " | Ciclos Decay: ", g_totalDecayCycles);
+         " | Preço: ", DoubleToString(price, 5));
    
    Print("📊 AGUARDANDO FECHAMENTO: Trade executado, visitas/perdas serão atualizadas apenas após fechamento...");
 }
@@ -6481,13 +5492,7 @@ void InitializeLearningSystem()
    ArrayResize(g_stateAvgProfit, NUM_STATES);
    ArrayInitialize(g_stateAvgProfit, 0.0);
    
-   g_stateResets = 0;
-   g_stateDecays = 0;
-   g_lastDecayTradeCount = 0;
-   g_totalDecayCycles = 0;
-   g_totalBadStateResets = 0;
-   
-   Print("🧠 Sistema de aprendizado inteligente inicializado (memória otimizada com decay)");
+   Print("🧠 Sistema de Q-learning puro inicializado");
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -7460,29 +6465,26 @@ void CreateDailySummaryReport()
    FileWrite(file_handle, "Data: " + TimeToString(TimeCurrent(), TIME_DATE));
    FileWrite(file_handle, "================================================================");
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "📈 RESUMO DO DIA (SISTEMA SUPER CORRIGIDO)");
+   FileWrite(file_handle, "📈 RESUMO DO DIA (Q-LEARNING PURO)");
    FileWrite(file_handle, "----------------------------------------");
    FileWrite(file_handle, "Trades REAIS Realizados: " + IntegerToString(g_tradesToday));
    FileWrite(file_handle, "Estados Ativos: " + IntegerToString(g_activeStatesCount));
    FileWrite(file_handle, "Estados Bloqueados: " + IntegerToString(CountBlockedStates()));
    FileWrite(file_handle, "Volume Médio Multiplicador: " + DoubleToString(g_volumeMultiplier, 2) + "x");
-   FileWrite(file_handle, "Ciclos de Decay: " + IntegerToString(g_totalDecayCycles));
-   FileWrite(file_handle, "Estados Resetados: " + IntegerToString(g_totalBadStateResets));
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "🧠 PROGRESSO DO APRENDIZADO (SISTEMA SUPER CORRIGIDO)");
+   FileWrite(file_handle, "🧠 PROGRESSO DO APRENDIZADO");
    FileWrite(file_handle, "----------------------------------------");
    double discoveryPercent = (double)g_activeStatesCount/NUM_STATES*100;
    FileWrite(file_handle, "Estados Descobertos: " + IntegerToString(g_activeStatesCount) + "/" + 
             IntegerToString(NUM_STATES) + " (" + DoubleToString(discoveryPercent, 1) + "%)");
-   FileWrite(file_handle, "Taxa de Exploração: " + DoubleToString(g_currentExplorationRate * 100, 1) + "%");
+   FileWrite(file_handle, "Taxa de Exploração: " + DoubleToString(ExplorationRate * 100, 1) + "%");
    FileWrite(file_handle, "Contagem Corrigida: " + IntegerToString(g_totalTrades) + " trades REAIS");
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "🛡️ CORREÇÕES IMPLEMENTADAS:");
-   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (576 estados)");
-   FileWrite(file_handle, "2. ✅ Reset automático funcionando");
-   FileWrite(file_handle, "3. ✅ Estados não travam mais em 10 visitas");
-   FileWrite(file_handle, "4. ✅ Regras de bloqueio mais agressivas");
-   FileWrite(file_handle, "5. ✅ Debug de estados travados implementado");
+   FileWrite(file_handle, "🛡️ SISTEMA:");
+   FileWrite(file_handle, "1. ✅ Q-learning puro sem decay");
+   FileWrite(file_handle, "2. ✅ Block bad states (never unblock)");
+   FileWrite(file_handle, "3. ✅ Fixed exploration rate");
+   FileWrite(file_handle, "4. ✅ Regras de bloqueio agressivas");
    FileWrite(file_handle, "");
    
    // ✅ NOVO: Exportar ranking de melhores e piores estados
@@ -7605,39 +6607,24 @@ void OnTick()
          if(badPerformanceCounter >= 5)
          {
             Print("🔥 ATIVAÇÃO DE CORREÇÃO DE EMERGÊNCIA");
-            EmergencyCounterFix();
-            OverhaulBlockingSystem();
             badPerformanceCounter = 0;
-         }
-      }
-      
-      // Verificar bloqueios excessivos (apenas após atingir limite mínimo)
-      // ✅ Verifica EnableIntelligentReset antes de resetar
-      if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
-      {
-         double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
-         if(blockedRatio > 0.7 && g_activeStatesCount > 50)
-         {
-            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
-            IntelligentPartialReset();
          }
       }
    }
 
-   // ✅ CHAMAR CORREÇÕES A CADA HORA
+   // ✅ CLEAN MEMORY PERIODICALLY
    static datetime lastMaintenanceCall = 0;
    if(TimeCurrent() - lastMaintenanceCall >= 3600)
    {
-      PerformMemoryMaintenance();
-      
-      // ✅ OTIMIZAÇÃO DINÂMICA
-      OptimizeParametersDynamically();
-      
-      // ✅ TESTE PERIÓDICO DE ESTADOS BLOQUEADOS
-      if(EnableUnifiedBlockingSystem)
+      // Clean memory if needed
+      if(AutoCleanMemory)
       {
-         TestBlockedStatesPeriodically();
+         CleanMemory();
       }
+      
+      // Save periodically
+      SaveBrain();
+      SaveState();
       
       lastMaintenanceCall = TimeCurrent();
    }
@@ -7662,71 +6649,9 @@ void OnTick()
       static int debugCounter = 0;
       debugCounter++;
       
-      // ✅ NOVO: Taxa de exploração adaptativa baseada no progresso
-      // 🎲 SISTEMA DE EXPLORAÇÃO ADAPTATIVA
-      // Verifica se exploração está desabilitada
-      if(DisableExploration)
-      {
-         // Exploração = 0% (modo exploitation only)
-         if(g_currentExplorationRate > 0.0)
-         {
-            g_currentExplorationRate = 0.0;
-            Print("⚙️ Taxa de exploração: 0.0% (EXPLOITATION ONLY - apenas Q-learning)");
-         }
-      }
-      else
-      {
-         // Sistema adaptativo por fases
-         static int lastExplorationAdjust = 0;
-         if(g_totalTrades > 0 && (g_totalTrades % 200 == 0 || debugCounter - lastExplorationAdjust > 200))
-         {
-            double newRate = g_currentExplorationRate;
-            string phase = "";
-            
-            if(g_totalTrades <= 200)
-            {
-               // Fase 1: Exploração alta inicial
-               newRate = 0.40; // 40%
-               phase = "Fase 1: Exploração inicial";
-            }
-            else if(g_totalTrades <= 1000)
-            {
-               // Fase 2: Aprendizado balanceado
-               newRate = 0.25; // 25%
-               phase = "Fase 2: Aprendizado";
-            }
-            else
-            {
-               // Fase 3: Convergência para MinExplorationRate
-               newRate = MinExplorationRate;
-               if(MinExplorationRate == 0.0)
-                  phase = "Fase 3: Convergência (EXPLOITATION ONLY)";
-               else
-                  phase = "Fase 3: Convergência";
-            }
-            
-            if(MathAbs(newRate - g_currentExplorationRate) > 0.01)
-            {
-               g_currentExplorationRate = newRate;
-               Print("⚙️ Taxa de exploração ajustada: ", DoubleToString(newRate*100, 1), "% (", phase, ")");
-               if(newRate == 0.0)
-               {
-                  Print("   ✅ Exploração = 0% - Usando apenas Q-learning (exploitation only)");
-               }
-               lastExplorationAdjust = debugCounter;
-            }
-         }
-      }
-      
       if(debugCounter % 50 == 0)
       {
          DebugStuckStatesEnhanced();
-      }
-      
-      // ✅ Desbloquear estados bons apenas após atingir limite mínimo de estados
-      if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset && debugCounter % 100 == 0)
-      {
-         UnblockGoodStates();
       }
 
       MqlDateTime today,last;
@@ -7744,12 +6669,6 @@ void OnTick()
          g_consecutiveLosses=0;
          g_lastResetDate=TimeCurrent();
          cachedTradesToday = -1;
-         
-         // ✅ DESBLOQUEIO PARCIAL apenas após atingir limite mínimo de estados
-         if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
-         {
-            UnblockGoodStates();
-         }
          
          if(EnableTextExport)
          {
@@ -7777,7 +6696,7 @@ void OnTick()
          else
          {
             // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
-            if(g_currentExplorationRate <= 0.0)
+            if(ExplorationRate <= 0.0)
             {
                bool stateInActiveList = false;
                for(int i = 0; i < g_activeStatesCount; i++)
@@ -7899,12 +6818,6 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    string discoveryInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
    FileWrite(file_handle, discoveryInfo);
    
-   string decayInfo = "Ciclos de decay: " + IntegerToString(g_totalDecayCycles);
-   FileWrite(file_handle, decayInfo);
-   
-   string resetInfo = "Estados resetados: " + IntegerToString(g_totalBadStateResets);
-   FileWrite(file_handle, resetInfo);
-   
    if(IncludeStatistics)
    {
       FileWrite(file_handle, "");
@@ -7950,7 +6863,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       FileWrite(file_handle, consecutiveLosses);
       
       // ⚠️ GARANTIR QUE EXPLORAÇÃO NÃO PASSE DE 100%
-      double exploration = MathMin(g_currentExplorationRate * 100, 100.0);
+      double exploration = MathMin(ExplorationRate * 100, 100.0);
       string explorationStr = "Taxa Exploração: " + DoubleToString(exploration, 1) + "%";
       FileWrite(file_handle, explorationStr);
    }
@@ -8096,9 +7009,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    Print("📄 Memória exportada para texto: ", filename, 
          " | Estados: ", g_activeStatesCount,
          " | Bloqueados: ", blockedCount,
-         " | Trades reais: ", g_totalTrades,
-         " | Ciclos decay: ", g_totalDecayCycles,
-         " | Resets: ", g_totalBadStateResets);
+         " | Trades reais: ", g_totalTrades);
    
    return true;
 }
@@ -8164,8 +7075,6 @@ int OnInit()
       ArrayResize(g_stateBlocked, NUM_STATES);
    if(ArraySize(g_stateLastBlockTime) != NUM_STATES)
       ArrayResize(g_stateLastBlockTime, NUM_STATES);
-   if(ArraySize(g_stateLastUnblockTime) != NUM_STATES)
-      ArrayResize(g_stateLastUnblockTime, NUM_STATES);
    if(ArraySize(g_stateWasBlockedBefore) != NUM_STATES)
       ArrayResize(g_stateWasBlockedBefore, NUM_STATES);
    if(ArraySize(g_stateBlockTime) != NUM_STATES)
@@ -8227,7 +7136,6 @@ int OnInit()
       ArrayInitialize(g_stateLastUpdate, 0);
       ArrayInitialize(g_stateBlocked, false);
       ArrayInitialize(g_stateLastBlockTime, 0);
-      ArrayInitialize(g_stateLastUnblockTime, 0);
       ArrayInitialize(g_stateWasBlockedBefore, false);
       ArrayInitialize(g_stateBlockTime, 0);
       ArrayInitialize(g_stateBlockCount, 0);
@@ -8256,8 +7164,6 @@ int OnInit()
       
       g_activeStatesCount = 0;
       
-      // ✅ SEMPRE usa taxa configurada - SEM forçar mínimo
-      g_currentExplorationRate = InitialExplorationRate;
       g_memoryInitialized = true;
       SaveBrain();
       Print("✅ Novo cérebro criado (Sistema Super Corrigido v309)");
@@ -8267,13 +7173,9 @@ int OnInit()
       // ✅ Arquivo carregado - memória preservada!
       g_memoryInitialized = true;
       
-      // ✅ SEMPRE usa taxa de exploração configurada em InitialExplorationRate
-      // Permite testar aprendizado com diferentes taxas de exploração
-      g_currentExplorationRate = InitialExplorationRate;
-      
       Print("✅ Cérebro existente carregado (Sistema Super Corrigido v309)");
       Print("📊 Estados ativos preservados: ", g_activeStatesCount);
-      Print("⚙️ Taxa de exploração configurada: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+      Print("⚙️ Taxa de exploração configurada: ", DoubleToString(ExplorationRate * 100, 1), "%");
       
       // ✅ Verificação final: Confirma que dados foram carregados corretamente
       if(g_activeStatesCount > 0)
@@ -8341,35 +7243,19 @@ int OnInit()
    
    // ✅ CONFIGURAÇÕES APLICADAS:
    Print("⚙️ Configurações aplicadas:");
-   Print("   • Exploration Rate: ", DoubleToString(g_currentExplorationRate * 100, 1), "% (REDUZIDO para mais trades)");
+   Print("   • Exploration Rate: ", DoubleToString(ExplorationRate * 100, 1), "% (FIXED rate)");
    Print("   • MinVisitsToTrade: ", MinStateVisitsToTrade, " (permite trade imediato)");
    Print("   • MinVisitsForQualityDecision: ", MinVisitsForQualityDecision, " (classificação mais rápida)");
    Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
-   Print("   • MinStatesBeforeReset: 150 (previne resets e decay prematuros)");
    
-   // 🆕 AVISO SOBRE DESBLOQUEIO AUTOMÁTICO
+   // Simple Q-learning: block bad states, never unblock
    if(EnableUnifiedBlockingSystem)
    {
-      if(EnableAutoUnblocking)
-      {
-         Print("✅ Desbloqueio automático: ATIVADO");
-         Print("   • Estados bloqueados podem ser desbloqueados se melhorarem (win rate > ", 
-               DoubleToString(UnblockWinRateThreshold*100, 0), "%)");
-      }
-      else
-      {
-         Print("🚫 Desbloqueio automático: DESATIVADO");
-         Print("   ⚠️ ATENÇÃO: Estados bloqueados permanecerão PERMANENTEMENTE bloqueados!");
-         Print("   ⚠️ Nenhum estado será desbloqueado automaticamente, mesmo se melhorar.");
-      }
+      Print("✅ Bloqueio: ATIVADO");
+      Print("   ⚠️ Estados bloqueados NUNCA são desbloqueados (simple Q-learning)");
    }
-   
-   if(EnableUnifiedBlockingSystem)
-   {
-      AutoUnblockGoodStates();
-      TestBlockedStatesPeriodically();
-   }
+
 
    if(EnableMemoryExport) ExportAllMemoryFiles();
 
@@ -8383,11 +7269,10 @@ int OnInit()
    Print("   4. ✅ Correção automática de estados travados");
    Print("   5. ✅ Sistema anti-bloqueio-erroneo ativado");
    Print("   6. ✅ Teste periódico de estados bloqueados (a cada 30 dias)");
-   Print("🔥 NOVAS FUNÇÕES ADICIONADAS:");
-   Print("   • EmergencyCounterFix() - Correção emergencial de contadores");
-   Print("   • OverhaulBlockingSystem() - Revisão completa do bloqueio");
-   Print("   • IntelligentPartialReset() - Reset parcial inteligente");
-   Print("   • OptimizeParametersDynamically() - Otimização dinâmica");
+   Print("🔥 SIMPLIFIED Q-LEARNING:");
+   Print("   • Fixed exploration rate (no decay)");
+   Print("   • Block bad states (never unblock)");
+   Print("   • Simple UpdateQ and ChooseAction");
    Print("===============================================================");
    Print("💾 CONFIGURAÇÃO DE BACKUP (ANTI-PERDA DE DADOS):");
    Print("   • Salvamento após cada trade: ", (SaveAfterEachTrade ? "ATIVO ✅" : "DESATIVADO ❌"));
