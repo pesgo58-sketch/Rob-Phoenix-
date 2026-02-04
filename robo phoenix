@@ -899,6 +899,23 @@ bool ShouldBlockState(int state)
     int losses = g_stateLosses[state];
     int wins = g_stateWins[state];
     
+    // ✅ FIX: Critério secundário para estados muito ruins com menos visitas
+    // Se tem 10+ visitas com 90%+ perdas, bloquear imediatamente
+    if(visits >= 10 && visits < MinVisitsForBlockDecision)
+    {
+        double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
+        if(lossRate >= 0.90)
+        {
+            Print("🚫 BLOQUEIO ANTECIPADO Estado ", state, 
+                  " | Visits=", visits,
+                  " | Wins=", wins,
+                  " | Losses=", losses,
+                  " | LossRate=", DoubleToString(lossRate*100, 1), "%",
+                  " | Critério: 90%+ perdas com 10+ visitas");
+            return true;
+        }
+    }
+    
     if(visits < MinVisitsForBlockDecision) 
     {
         // 🔍 DEBUG: Estado sem visitas suficientes (log reduzido)
@@ -3941,7 +3958,10 @@ void UpdateQ(int state, int action, double reward)
    
    // ✅ GARANTIR LIMITES
    if(g_currentExplorationRate > 1.0) g_currentExplorationRate = 1.0;
-   if(g_currentExplorationRate < MinExplorationRate) g_currentExplorationRate = MinExplorationRate;
+   // ✅ FIX: Garantir exploração mínima absoluta de 5%, mesmo que usuário configure 0%
+   double absoluteMinExploration = 0.05;  // 5% mínimo absoluto
+   double effectiveMinExploration = MathMax(MinExplorationRate, absoluteMinExploration);
+   if(g_currentExplorationRate < effectiveMinExploration) g_currentExplorationRate = effectiveMinExploration;
    
    g_qUpdatesSinceSave++;
    g_totalQUpdates++;
@@ -4110,6 +4130,97 @@ int ChooseAction(int state)
          " | Win Rate: ", DoubleToString(winRate*100,1), "%");
    
    return bestA;
+}
+
+// ======================================================================
+// ✅ FUNÇÃO DE DIAGNÓSTICO - Por que o robô não está entrando
+// ======================================================================
+string DiagnoseWhyNotTrading(bool isBuy, int state)
+{
+   string reasons = "";
+   int reasonCount = 0;
+   
+   // Verificar estado bloqueado
+   if(IsStateBlocked(state))
+   {
+      reasons += StringFormat("\n  %d. Estado %d está BLOQUEADO (mau desempenho histórico)", ++reasonCount, state);
+      int visits = g_stateVisits[state];
+      int wins = g_stateWins[state];
+      int losses = g_stateLosses[state];
+      double winRate = SafeDivide((double)wins, (double)visits, 0.0);
+      reasons += StringFormat("\n     - Visitas: %d | Vitórias: %d | Perdas: %d | Win Rate: %.1f%%", 
+                              visits, wins, losses, winRate * 100);
+   }
+   
+   // Verificar limites diários
+   if(g_tradesToday >= MaxTradesPerDay)
+   {
+      reasons += StringFormat("\n  %d. Limite diário de trades atingido (%d/%d)", ++reasonCount, g_tradesToday, MaxTradesPerDay);
+   }
+   
+   // Verificar perdas consecutivas
+   if(g_consecutiveLosses >= ConsecutiveLossLimit)
+   {
+      reasons += StringFormat("\n  %d. Limite de perdas consecutivas atingido (%d/%d)", ++reasonCount, g_consecutiveLosses, ConsecutiveLossLimit);
+   }
+   
+   // Verificar posição
+   if(!CanOpenNewPosition(isBuy))
+   {
+      reasons += StringFormat("\n  %d. Restrições de posição/direção", ++reasonCount);
+      int currentDir = GetCurrentPositionsDirection();
+      if(currentDir == 1) reasons += "\n     - Já existe posição BUY";
+      if(currentDir == 2) reasons += "\n     - Já existe posição SELL";
+      if(currentDir == 3) reasons += "\n     - Posições em AMBAS direções (erro)";
+      
+      int sameDirCount = CountSameDirectionPositions(isBuy);
+      if(sameDirCount >= MaxTradesPerDirection)
+      {
+         reasons += StringFormat("\n     - Limite por direção: %d/%d", sameDirCount, MaxTradesPerDirection);
+      }
+   }
+   
+   // Verificar tempo
+   if(!CanTradeBasedOnTime())
+   {
+      datetime currentTime = TimeCurrent();
+      int secondsSince = (int)(currentTime - g_lastTradeTime);
+      int required = MinMinutesBetweenTrades * 60;
+      reasons += StringFormat("\n  %d. Tempo mínimo entre trades: %ds/%ds", ++reasonCount, secondsSince, required);
+   }
+   
+   // Verificar volatilidade
+   if(UseVolatilityFilter && !CheckVolatility())
+   {
+      reasons += StringFormat("\n  %d. Volatilidade muito alta (ATR spike)", ++reasonCount);
+   }
+   
+   // Verificar volume
+   if(UseRealVolumeFilter && !CheckRealVolume())
+   {
+      reasons += StringFormat("\n  %d. Volume insuficiente", ++reasonCount);
+   }
+   
+   // Verificar indicadores
+   if(!ValidateAllIndicators(isBuy))
+   {
+      reasons += StringFormat("\n  %d. Validação de indicadores falhou:", ++reasonCount);
+      if(UseRSIValidation && !ValidateWithRSI(isBuy))
+         reasons += "\n     - RSI não confirma";
+      if(UseBBValidation && !ValidateWithBollingerBands(isBuy))
+         reasons += "\n     - Bollinger Bands não confirmam";
+      if(UseADXValidation && !ValidateWithADX())
+         reasons += "\n     - ADX insuficiente";
+      if(UseTrendValidation && !ValidateWithTrend(isBuy))
+         reasons += "\n     - Tendência não confirma";
+   }
+   
+   if(reasonCount == 0)
+   {
+      return "✅ Nenhum bloqueio detectado - Trade deveria ser permitido";
+   }
+   
+   return StringFormat("⛔ TRADE BLOQUEADO - %d razões:\n%s", reasonCount, reasons);
 }
 
 // ======================================================================
@@ -6307,6 +6418,24 @@ void OnTick()
       if(debugCounter % 50 == 0)
       {
          DebugStuckStatesEnhanced();
+         
+         // ✅ NOVO: Diagnóstico de "Por que não está operando"
+         // Logar a cada 50 barras se não houve trades recentes
+         if(g_totalTrades > 0)
+         {
+            datetime timeSinceLastTrade = TimeCurrent() - g_lastTradeDate;
+            int hoursSinceLastTrade = (int)(timeSinceLastTrade / 3600);
+            
+            if(hoursSinceLastTrade > 2)  // Se não operou por mais de 2 horas
+            {
+               Print("📊 DIAGNÓSTICO: ", hoursSinceLastTrade, " horas sem operar");
+               Print("   - Total de trades: ", g_totalTrades);
+               Print("   - Estados bloqueados: ", CountBlockedStates(), "/", g_activeStatesCount);
+               Print("   - Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+               Print("   - Trades hoje: ", g_tradesToday, "/", MaxTradesPerDay);
+               Print("   - Perdas consecutivas: ", g_consecutiveLosses, "/", ConsecutiveLossLimit);
+            }
+         }
       }
       
       // ✅ Desbloquear estados bons apenas após atingir limite mínimo de estados
@@ -6362,45 +6491,26 @@ void OnTick()
          }
          else
          {
-            // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
-            if(g_currentExplorationRate <= 0.0)
+            // ✅ FIX: Garantir exploração mínima de 5% para evitar travamento total
+            // Se exploração caiu muito, aumentar temporariamente
+            if(g_currentExplorationRate < 0.05)
             {
-               bool stateInActiveList = false;
-               for(int i = 0; i < g_activeStatesCount; i++)
-               {
-                  if(g_activeStates[i] == s)
-                  {
-                     stateInActiveList = true;
-                     break;
-                  }
-               }
-               
-               if(!stateInActiveList)
-               {
-                  // Estado novo mas exploração = 0% → NÃO usar este estado
-                  g_statusMessage = StringFormat("⏸️ Estado %d desconhecido (exploração 0%%)", s);
-                  return;  // ✅ BLOQUEIA uso de estados novos
-               }
+               g_currentExplorationRate = 0.15;  // Boost temporário para 15%
+               Print("⚠️ EXPLORAÇÃO CRÍTICA: Aumentando temporariamente para 15% para evitar travamento");
             }
             
-            // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
+            // ✅ REMOVIDO: Bloqueio duro de estados novos quando exploração baixa
+            // O sistema de exploração já cuida disso naturalmente via ChooseAction
+            // Bloquear totalmente novos estados impede o robô de se adaptar
+            
+            // ✅ VERIFICAÇÃO DE BLOQUEIO - REMOVIDO AUTO-DESBLOQUEIO
+            // O auto-desbloqueio em OnTick cria loops de bloqueio/desbloqueio
+            // Confiar apenas em EvaluateAndUpdateBlockState após trades
             if(IsStateBlocked(s))
             {
-               double winRate = CalculateWinRate(s);
-               
-               // Auto-desbloqueio se performance melhorou
-               if(winRate >= 0.35 && g_stateVisits[s] >= 5)
-               {
-                  g_stateBlocked[s] = false;
-                  Print("🔄 AUTO-DESBLOQUEIO Estado ", s, 
-                        " | Win Rate: ", DoubleToString(winRate*100,1), "%");
-               }
-               else
-               {
-                  g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
-                  UpdateQ_NOP(s);
-                  return;
-               }
+               g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
+               UpdateQ_NOP(s);
+               return;
             }
             
             int a = ChooseAction(s);
