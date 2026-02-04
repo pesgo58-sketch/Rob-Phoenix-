@@ -101,16 +101,19 @@ input double BBDeviation              = 2.2;          // Desvio das Bandas de Bo
 input int    ATRPeriod                = 18;           // Período do ATR
 
 input group "──── ✅ VALIDAÇÕES DE INDICADORES ────";
-input bool   UseRSIValidation         = true;         // Usar validação por RSI
-input double RSI_Overbought           = 75.0;         // RSI sobrecomprado
-input double RSI_Oversold             = 25.0;         // RSI sobrevendido
-input bool   UseBBValidation          = true;         // Usar validação por BB
-input double BB_UpperThreshold        = 0.7;          // Threshold superior BB
-input double BB_LowerThreshold        = 0.3;          // Threshold inferior BB
-input bool   UseADXValidation         = true;         // Usar validação por ADX
-input double MinADXStrength           = 20.0;         // Força mínima do ADX
-input bool   UseTrendValidation       = true;         // Usar validação de tendência
-input double MinDistanceFromMA        = 0.3;          // Distância mínima da MA
+input bool   UseIndicatorValidation    = true;         // Usar validações de indicadores
+input bool   BypassValidationOnHighQ   = true;         // Bypass validações quando Q-value alto
+input double HighQBypassThreshold      = 2.0;          // Q-value mínimo para bypass (padrão: 2.0)
+input bool   UseRSIValidation          = true;         // Usar validação por RSI
+input double RSI_Overbought            = 75.0;         // RSI sobrecomprado
+input double RSI_Oversold              = 25.0;         // RSI sobrevendido
+input bool   UseBBValidation           = true;         // Usar validação por BB
+input double BB_UpperThreshold         = 0.7;          // Threshold superior BB
+input double BB_LowerThreshold         = 0.3;          // Threshold inferior BB
+input bool   UseADXValidation          = true;         // Usar validação por ADX
+input double MinADXStrength            = 20.0;         // Força mínima do ADX
+input bool   UseTrendValidation        = true;         // Usar validação de tendência
+input double MinDistanceFromMA         = 0.3;          // Distância mínima da MA
 
 input group "──── 📊 FILTRO DE VOLUME ────";
 input bool   UseRealVolumeFilter      = true;         // Usar filtro de volume
@@ -590,7 +593,8 @@ void UnblockGoodStates()
          double winRate = CalculateWinRate(s);
          
          // ✅ DESBLOQUEAR ESTADOS BONS (APENAS TESTAR, SEM RESETAR)
-         if(g_stateBlocked[s] && winRate >= 0.35)
+         // ✅ FIX: Aumentar threshold de 35% para 45% - estados com <45% ainda são ruins
+         if(g_stateBlocked[s] && winRate >= 0.45)
          {
             g_stateBlocked[s] = false;
             g_stateLastUnblockTime[s] = TimeCurrent();
@@ -4202,7 +4206,7 @@ string DiagnoseWhyNotTrading(bool isBuy, int state)
    }
    
    // Verificar indicadores
-   if(!ValidateAllIndicators(isBuy))
+   if(UseIndicatorValidation && !ValidateAllIndicators(isBuy, state))
    {
       reasons += StringFormat("\n  %d. Validação de indicadores falhou:", ++reasonCount);
       if(UseRSIValidation && !ValidateWithRSI(isBuy))
@@ -4276,7 +4280,7 @@ void ExecuteAction(int action, int state)
       return;
    }
    
-   if(!ValidateAllIndicators(isBuy))
+   if(!ValidateAllIndicators(isBuy, state))
    {
       g_statusMessage = "⛔ Indicadores não confirmam";
       UpdateQ_NOP(state);
@@ -5468,8 +5472,29 @@ bool CheckVolatility()
    return true;
 }
 
-bool ValidateAllIndicators(bool isBuy)
+bool ValidateAllIndicators(bool isBuy, int state = -1)
 {
+   // ✅ NOVO: Bypass completo se validações desabilitadas
+   if(!UseIndicatorValidation)
+   {
+      Print("✅ VALIDAÇÕES DESABILITADAS - Trade permitido");
+      return true;
+   }
+   
+   // ✅ NOVO: Bypass quando Q-value muito alto (sistema confiante)
+   if(BypassValidationOnHighQ && state >= 0)
+   {
+      int action = isBuy ? 1 : 2;
+      double qValue = g_Q[state * NUM_ACTIONS + action];
+      
+      if(qValue >= HighQBypassThreshold)
+      {
+         Print("🚀 BYPASS DE VALIDAÇÕES: Q-value alto (", DoubleToString(qValue, 2), 
+               " >= ", DoubleToString(HighQBypassThreshold, 2), ") - Sistema confiante!");
+         return true;
+      }
+   }
+   
    Print("=== VALIDAÇÃO DE INDICADORES PARA ", isBuy ? "BUY" : "SELL", " ===");
    
    if(!ValidateWithRSI(isBuy))
