@@ -4155,12 +4155,12 @@ string DiagnoseWhyNotTrading(bool isBuy, int state)
    // Verificar estado bloqueado
    if(IsStateBlocked(state))
    {
-      reasons += StringFormat("\n  %d. Estado %d está BLOQUEADO (mau desempenho histórico)", ++reasonCount, state);
+      reasons += StringFormat("\n  %d. Estado %d esta BLOQUEADO (mau desempenho historico)", ++reasonCount, state);
       int visits = g_stateVisits[state];
       int wins = g_stateWins[state];
       int losses = g_stateLosses[state];
       double winRate = SafeDivide((double)wins, (double)visits, 0.0);
-      reasons += StringFormat("\n     - Visitas: %d | Vitórias: %d | Perdas: %d | Win Rate: %.1f%%", 
+      reasons += StringFormat("\n     - Visitas: %d | Vitorias: %d | Perdas: %d | Win Rate: %.1f%%", 
                               visits, wins, losses, winRate * 100);
    }
    
@@ -6452,19 +6452,19 @@ void OnTick()
       {
          DebugStuckStatesEnhanced();
          
-         // ✅ NOVO: Diagnóstico de "Por que não está operando"
-         // Logar a cada 50 barras se não houve trades recentes
+         // ✅ NOVO: Diagnostico de "Por que nao esta operando"
+         // Logar a cada 50 barras se nao houve trades recentes
          if(g_totalTrades > 0)
          {
             datetime timeSinceLastTrade = TimeCurrent() - g_lastTradeDate;
             int hoursSinceLastTrade = (int)(timeSinceLastTrade / 3600);
             
-            if(hoursSinceLastTrade > 2)  // Se não operou por mais de 2 horas
+            if(hoursSinceLastTrade > 2)  // Se nao operou por mais de 2 horas
             {
-               Print("📊 DIAGNÓSTICO: ", hoursSinceLastTrade, " horas sem operar");
+               Print("[DIAGNOSTICO] ", hoursSinceLastTrade, " horas sem operar");
                Print("   - Total de trades: ", g_totalTrades);
                Print("   - Estados bloqueados: ", CountBlockedStates(), "/", g_activeStatesCount);
-               Print("   - Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+               Print("   - Taxa de exploracao: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
                Print("   - Trades hoje: ", g_tradesToday, "/", MaxTradesPerDay);
                Print("   - Perdas consecutivas: ", g_consecutiveLosses, "/", ConsecutiveLossLimit);
             }
