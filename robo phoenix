@@ -775,38 +775,8 @@ void BlockState(int state)
     }
 }
 
-// ✅✅✅ 2️⃣ FUNÇÃO UNIFICADA PARA DESBLOQUEAR ESTADO (CORRIGIDA COM VERIFICAÇÃO)
-void UnblockState(int state)
-{
-    if(state < 0 || state >= NUM_STATES) return;
-    
-    // Verificar se estado está bloqueado
-    if(!g_stateBlocked[state])
-    {
-        // Estado já está desbloqueado
-        return;
-    }
-    
-    // Desbloquear estado
-    g_stateBlocked[state] = false;
-    g_stateLastUnblockTime[state] = TimeCurrent();
-    
-    // Log de desbloqueio
-    int visits = g_stateVisits[state];
-    int wins = g_stateWins[state];
-    int losses = g_stateLosses[state];
-    double winRate = SafeDivide((double)wins, (double)visits, 0.0);
-    
-    Print("✅ ESTADO DESBLOQUEADO: ", state,
-          " | Visitas: ", visits,
-          " | Vitorias: ", wins, 
-          " | Perdas: ", losses,
-          " | Win Rate: ", DoubleToString(winRate*100, 1), "%",
-          " | Bloqueios anteriores: ", g_stateBlockCount[state]);
-    
-    g_memoryDirty = true;
-    InvalidateHUDCache();
-}
+// ✅✅✅ 2️⃣ ESTADOS BLOQUEADOS PERMANECEM BLOQUEADOS PERMANENTEMENTE
+// Sem função de desbloqueio - conforme solicitado pelo usuário
 
 
 // ✅✅✅ 3️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER BLOQUEADO (CORRIGIDA)
@@ -873,44 +843,8 @@ bool ShouldBlockState(int state)
     return shouldBlock;
 }
 
-// ✅✅✅ 4️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER DESBLOQUEADO (CORRIGIDA)
-bool ShouldUnblockState(int state)
-{
-    if(state < 0 || state >= NUM_STATES) return false;
-    
-    if(!g_stateBlocked[state]) return false;  // Ja esta desbloqueado
-    
-    int visits = g_stateVisits[state];
-    int wins = g_stateWins[state];
-    
-    // CORRECAO: Permitir desbloquear estados se performance melhorar
-    // Criterio 1: Win rate >= 50% com pelo menos 20 visitas
-    if(visits >= 20)
-    {
-        double winRate = SafeDivide((double)wins, (double)visits, 0.0);
-        if(winRate >= 0.50)
-        {
-            Print("✅ DESBLOQUEIO: Estado ", state, " melhorou (WR=", 
-                  DoubleToString(winRate*100,1), "%)");
-            return true;
-        }
-    }
-    
-    // Criterio 2: Desbloquear apos 7 dias para dar nova chance
-    datetime currentTime = TimeCurrent();
-    datetime blockTime = g_stateLastBlockTime[state];
-    if(blockTime > 0)
-    {
-        int daysSinceBlock = (int)((currentTime - blockTime) / 86400);
-        if(daysSinceBlock >= 7)
-        {
-            Print("🔄 TESTE: Estado ", state, " desbloqueado apos ", daysSinceBlock, " dias");
-            return true;
-        }
-    }
-    
-    return false;
-}
+// ✅✅✅ 4️⃣ ESTADOS BLOQUEADOS NUNCA SÃO DESBLOQUEADOS
+// Função de desbloqueio removida conforme solicitado pelo usuário
 
 // ✅✅✅ 5️⃣ FUNÇÃO PRINCIPAL DE VERIFICAÇÃO DE BLOQUEIO (SOMENTE LEITURA)
 bool IsStateBlocked(int state)
@@ -974,14 +908,12 @@ void EvaluateAllActiveStates()
     lastFullEvaluation = TimeCurrent();
     
     int blocked = 0;
-    int unblocked = 0;
     
     for(int i = 0; i < g_activeStatesCount; i++)
     {
         int state = g_activeStates[i];
         
         bool shouldBeBlocked = ShouldBlockState(state);
-        bool shouldBeUnblocked = ShouldUnblockState(state);
         bool currentlyBlocked = g_stateBlocked[state];
         
         if(shouldBeBlocked && !currentlyBlocked)
@@ -989,16 +921,12 @@ void EvaluateAllActiveStates()
             BlockState(state);
             blocked++;
         }
-        else if(shouldBeUnblocked && currentlyBlocked)
-        {
-            UnblockState(state);
-            unblocked++;
-        }
+        // ✅ REMOVIDO: Lógica de desbloqueio - estados bloqueados permanecem bloqueados PERMANENTEMENTE
     }
     
-    if(blocked > 0 || unblocked > 0)
+    if(blocked > 0)
     {
-      Print("📊 Avaliacao periodica de estados: ", blocked, " bloqueados, ", unblocked, " desbloqueados");
+      Print("📊 Avaliacao periodica de estados: ", blocked, " bloqueados");
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
     }
 }
@@ -6746,21 +6674,12 @@ void OnTick()
          }
          
          // ✅ VERIFICAÇÃO DE BLOQUEIO - ÚNICO PONTO
-         // CORRECAO: Se estado bloqueado, desbloquear periodicamente
+         // Estados bloqueados PERMANECEM BLOQUEADOS (sem desbloqueio)
          if(IsStateBlocked(s))
          {
-            // Tentar desbloquear se criterios atendidos
-            if(ShouldUnblockState(s))
-            {
-               UnblockState(s);
-               Print("✅ Estado ", s, " foi desbloqueado - dando nova chance");
-            }
-            else
-            {
-               g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
-               UpdateQ_NOP(s);
-               return;
-            }
+            g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
+            UpdateQ_NOP(s);
+            return;
          }
          
          int a = ChooseAction(s);
