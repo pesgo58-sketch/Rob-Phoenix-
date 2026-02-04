@@ -1,16 +1,80 @@
 //+------------------------------------------------------------------+
-//|                         Phoenix_Trader_v307_FIXED_CORRIGIDO.mq5  |
-//|          CONTAGEM CORRIGIDA + DECAY FUNCIONAL + EXPLORAÇÃO LIMITADA |
+//|                         Phoenix_Trader_SIMPLIFIED.mq5            |
+//|          SISTEMA SIMPLIFICADO - SEM ADX E BB                     |
+//|          APENAS RSI, MACD, ATR, MA, VOLUME                       |
 //|                  COM SISTEMA DE MEMÓRIA OTIMIZADA COMPLETA       |
 //|                      SISTEMA DE BLOQUEIO UNIFICADO              |
-//|                             ESTADOS VARIADOS v307F_ESTADOS       |
-//|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
+//|                    Q-LEARNING PURO - SEM DECAY                   |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
-//|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
-#property version   "3.07"
+#property version   "3.08"
+
+// ══════════════════════════════════════════════════════════════════════
+// 📖 DOCUMENTAÇÃO DO SISTEMA DE BLOQUEIO E QUALIDADE DE ESTADOS
+// ══════════════════════════════════════════════════════════════════════
+//
+// FLUXO COMPLETO DE FUNCIONAMENTO:
+// ─────────────────────────────────────────────────────────────────────
+//
+// 1️⃣ CÁLCULO DO ESTADO (CalculateState)
+//    - O robô analisa indicadores técnicos (MA, RSI, Volume, etc.)
+//    - ✅ SIMPLIFICADO: Removidos ADX e Bollinger Bands
+//    - Discretiza valores em bins para criar um número de estado (0-95)
+//    - Este estado representa a "situação de mercado" atual
+//
+// 2️⃣ VERIFICAÇÃO DE BLOQUEIO (IsStateBlocked)
+//    - Antes de qualquer ação, verifica se o estado está bloqueado
+//    - Estados bloqueados = estados com histórico de má performance
+//    - Sistema unificado gerencia bloqueio/desbloqueio automaticamente
+//
+// 3️⃣ CLASSIFICAÇÃO DE QUALIDADE (GetStateQuality)
+//    - Cada estado recebe uma classificação de qualidade:
+//      • BLOQUEADO: Estado marcado como bloqueado pelo sistema
+//      • RUIM: Win rate < 35% (com visitas suficientes)
+//      • NEUTRO: Win rate entre 35-55% ou dados insuficientes
+//      • BOM: Win rate entre 55-70%
+//      • ELITE: Win rate >= 70%
+//    - IMPORTANTE: Estados bloqueados são SEMPRE classificados como BLOQUEADO,
+//      independente do número de visitas
+//
+// 4️⃣ CÁLCULO DE SCORE NUMÉRICO (GetStateQualityScore)
+//    - Retorna valor numérico (-2.0 a 2.0) baseado em Q-values e win rate
+//    - Usado para calcular multiplicadores de lote (Smart Lot)
+//    - Quanto maior o score, maior o lote utilizado
+//
+// 5️⃣ DECISÃO DE TRADE (ExecuteAction)
+//    - Verifica se estado está bloqueado → se sim, cancela trade
+//    - Verifica qualidade do estado → se BLOQUEADO, cancela trade
+//    - Calcula lote baseado no score de qualidade
+//    - Executa ordem se todas as validações passarem
+//
+// 6️⃣ APRENDIZADO (UpdateQ)
+//    - Após fechamento do trade, atualiza:
+//      • Q-values (aprendizado por reforço)
+//      • Estatísticas do estado (visitas, wins, losses)
+//      • Win rate do estado
+//    - Sistema de bloqueio avalia se estado deve ser bloqueado/desbloqueado
+//
+// 7️⃣ HUD E RELATÓRIOS
+//    - HUD mostra em tempo real:
+//      • Estados bloqueados e percentual
+//      • Distribuição de qualidade (ELITE/BOM/NEUTRO/RUIM/BLOQ)
+//    - Relatórios diários incluem:
+//      • TOP 10 melhores estados (ELITE/BONS)
+//      • TOP 10 piores estados (RUINS/BLOQUEADOS)
+//
+// PARÂMETROS CONFIGURÁVEIS:
+// ─────────────────────────────────────────────────────────────────────
+// • MinVisitsForQualityDecision: Visitas mínimas para classificar (padrão: 30)
+// • EliteWinRateThreshold: Win rate para ELITE (padrão: 70%)
+// • GoodWinRateThreshold: Win rate para BOM (padrão: 55%)
+// • BadWinRateThreshold: Win rate abaixo = RUIM (padrão: 35%)
+// • MinVisitsForBlockDecision: Visitas mínimas para bloquear (padrão: 30)
+// • BlockLossRateThreshold: Taxa de perda para bloquear (padrão: 80%)
+//
+// ══════════════════════════════════════════════════════════════════════
 
 // ====
 // Includes essenciais
@@ -41,14 +105,16 @@ CHistoryOrderInfo historyOrderInfo;
 // Reduzindo para um número gerenciável de estados
 #define BINS_MA_DIST   3      // Reduzido de 6 para 3
 #define BINS_RSI       4      // Reduzido de 6 para 4  
-#define BINS_ADX       2      // Mantido 2
-#define BINS_BBPOS     3      // Reduzido de 6 para 3
+// ✅ REMOVIDO: BINS_ADX (indicador ADX removido)
+// ✅ REMOVIDO: BINS_BBPOS (indicador BB removido)
 #define BINS_VOLATILITY 2     // Mantido 2
-#define BINS_VOLUME    2      // Reduzido de 3 para 2
-#define BINS_TIME      2      // Reduzido de 4 para 2
+#define BINS_VOLUME    3      // ✅ AUMENTADO: 2 → 3 (baixo, médio, alto)
+#define BINS_TIME      4      // ✅ AUMENTADO: 2 → 4 (madrugada, manhã, tarde, noite)
 
-// Cálculo do número total de estados - DEVE SER 576
-#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_ADX * BINS_BBPOS * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
+// Cálculo do número total de estados - AUMENTADO para 288
+// Antes: 3 * 4 * 2 * 2 * 2 = 96 estados
+// Agora: 3 * 4 * 2 * 3 * 4 = 288 estados ✅
+#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
 
 #define NUM_ACTIONS 3  // 0:NOP, 1:Buy, 2:Sell
 
@@ -57,10 +123,23 @@ CHistoryOrderInfo historyOrderInfo;
 // ============================================================
 const int MIN_VISITS_FOR_BLOCK = 30;
 
-// ✅ CONSTANTE PARA BOLLINGER BANDS
-// Quando a banda tem range zero (inválida), usar 0.5 (meio da banda)
-// como valor neutro, indicando que o preço está no centro
-const double BB_NEUTRAL_POSITION = 0.5;
+// ══════════════════════════════════════════════════════════════════════
+// 🎯 ENUM: CLASSIFICAÇÃO DE QUALIDADE DE ESTADOS
+// ══════════════════════════════════════════════════════════════════════
+// Define categorias de qualidade para cada estado baseado em desempenho
+// BLOCKED: Estado bloqueado pelo sistema unificado (má performance)
+// BAD: Estado com win rate ruim (abaixo de limites aceitáveis)
+// NEUTRAL: Estado com desempenho neutro/mediano
+// GOOD: Estado com bom desempenho (win rate acima de 55%)
+// ELITE: Estado com excelente desempenho (win rate acima de 70%)
+enum ENUM_STATE_QUALITY
+{
+   STATE_QUALITY_BLOCKED = 0,  // Estado bloqueado - não operar
+   STATE_QUALITY_BAD = 1,      // Estado ruim - reduzir lote ou evitar
+   STATE_QUALITY_NEUTRAL = 2,  // Estado neutro - lote padrão
+   STATE_QUALITY_GOOD = 3,     // Estado bom - aumentar lote
+   STATE_QUALITY_ELITE = 4     // Estado elite - lote máximo
+};
 
 // Persistência
 #define FILE_MAGIC   0x50484F45
@@ -96,20 +175,22 @@ input group "──── 📊 INDICADORES PRINCIPAIS ────";
 input int    MAPeriod                 = 200;          // Período da Média Móvel
 input ENUM_MA_METHOD  MAMethod        = MODE_EMA;     // Tipo da Média Móvel
 input int    RSIPeriod                = 20;           // Período do RSI
-input int    BBPeriod                 = 24;           // Período das Bandas de Bollinger
-input double BBDeviation              = 2.2;          // Desvio das Bandas de Bollinger
+// ✅ REMOVIDO: BBPeriod e BBDeviation (indicador BB removido)
 input int    ATRPeriod                = 18;           // Período do ATR
 
-input group "──── ✅ VALIDAÇÕES DE INDICADORES ────";
+input group "──── 🎯 INDICADORES SIMPLIFICADOS (RSI+MACD+ATR) ────";
+input int    MACD_Fast                = 12;           // MACD Fast EMA
+input int    MACD_Slow                = 26;           // MACD Slow EMA  
+input int    MACD_Signal              = 9;            // MACD Signal line
+input double ATR_StopMult             = 2.0;          // Multiplicador ATR para Stop/TP
+
+input group "──── ✅ VALIDAÇÕES DE INDICADORES (LEGACY) ────";
 input bool   UseRSIValidation         = true;         // Usar validação por RSI
 input double RSI_Overbought           = 75.0;         // RSI sobrecomprado
 input double RSI_Oversold             = 25.0;         // RSI sobrevendido
-input bool   UseBBValidation          = true;         // Usar validação por BB
-input double BB_UpperThreshold        = 0.7;          // Threshold superior BB
-input double BB_LowerThreshold        = 0.3;          // Threshold inferior BB
-input bool   UseADXValidation         = true;         // Usar validação por ADX
-input double MinADXStrength           = 20.0;         // Força mínima do ADX
-input bool   UseTrendValidation       = true;         // Usar validação de tendência
+// ✅ REMOVIDO: UseBBValidation, BB thresholds (indicador BB removido)
+// ✅ REMOVIDO: UseADXValidation, MinADXStrength (indicador ADX removido)
+input bool   UseTrendValidation       = false;        // Usar validação de tendência (DESATIVADO)
 input double MinDistanceFromMA        = 0.3;          // Distância mínima da MA
 
 input group "──── 📊 FILTRO DE VOLUME ────";
@@ -134,8 +215,10 @@ input int    TrailingStopPoints       = 20000;        // Trailing stop em pontos
 input int    TrailingStepPoints       = 5000;         // Passo do trailing em pontos
 input int    TrailingStartPoints      = 10000;        // Início do trailing em pontos
 // ❌ ATR trailing REMOVIDO - sistema usa APENAS pontos fixos
-input bool   UseBreakevenStop         = false;        // Usar breakeven
-input int    BreakevenTriggerPoints   = 15000;        // Trigger do breakeven em pontos
+input bool   UseBreakevenStop         = false;        // Usar breakeven (0 a 0)
+input int    BreakevenTriggerPoints   = 5000;         // Trigger do breakeven em pontos (REDUZIDO: ativa cedo)
+input int    BreakevenAddPoints       = 0;            // Pontos adicionais no breakeven (0 = puro)
+input bool   BreakevenBeforeTrailing  = true;         // Força breakeven ANTES do trailing
 input bool   TrailBothSLandTP         = false;        // Trailing em SL e TP
 
 // ──────────────────────────────────────────────────────────────────────
@@ -178,17 +261,23 @@ input bool   EnableDynamicReward      = false;        // Reward dinâmica por es
 double LearningRate                   = 0.03;         // Taxa de aprendizado (fixo)
 
 input group "──── 🎲 EXPLORAÇÃO ────";
-input bool   EnableAdaptiveExploration = false;       // Habilitar ajuste automático de exploração
-input double InitialExplorationRate   = 0.40;         // Taxa inicial de exploração (40%)
-input double MinExplorationRate       = 0.20;         // Taxa mínima de exploração (20%)
-input double ExplorationDecay         = 0.999;        // Decay da exploração (0.1% por vitória)
-input int    MinStateVisitsToTrade    = 2;            // Visitas mínimas para operar
+input bool   DisableExploration       = false;        // Desabilitar exploração completamente (usar apenas Q-learning)
+input double ExplorationRate          = 0.20;         // Taxa de exploração fixa (20%)
+input int    MinStateVisitsToTrade    = 1;            // Visitas mínimas para operar (1 - permite trade imediato)
 
 input group "──── 🔄 SISTEMA HÍBRIDO ────";
 input bool   EnablePyramidingLearning = true;         // Aprendizado de piramidação
 input int    PyramidLearningBonus     = 10;           // Bônus aprendizado pirâmide
 input double PyramidBlockingMultiplier = 1.5;         // Multiplicador bloqueio pirâmide
 input int    MinPyramidVisitsForBlock = 50;           // Visitas mín. para bloquear pirâmide
+
+input group "──── 🧪 PESQUISA AUTO RSI+ATR+MACD ────";
+input bool   EnableRSIAtrMacdParamSearch       = false;  // Habilitar pesquisa automática
+input int    TradesPerRSIAtrMacdConfig        = 300;     // Trades por configuração
+input bool   UseBestRSIAtrMacdConfigAfterTest = true;    // Usar melhor config após teste
+input bool   UseSimplifiedSignalLogic         = false;   // Usar lógica simplificada RSI+MACD
+input bool   EnableParamSearchReport          = true;    // Gerar relatório de testes
+input int    ParamSearchReportIntervalTrades  = 50;      // Intervalo relatório (trades)
 
 // ──────────────────────────────────────────────────────────────────────
 // 💾 6. MEMÓRIA E PERSISTÊNCIA
@@ -202,26 +291,24 @@ input bool   AutoCleanMemory          = true;         // Limpeza automática
 input int    CleanMemoryAfterTrades   = 100;          // Limpar após N trades
 input bool   UseIncrementalSave       = true;         // Salvamento incremental
 
-input group "──── 🔄 DECAY E RESET ────";
-input bool   EnableMemoryDecay        = true;         // Habilitar decay de memória
-input double DecayFactor              = 0.05;         // Fator de decay (5%)
-input bool   EnableIntelligentReset   = true;         // Reset inteligente
-input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
-input int    BadStateMinVisits        = 20;           // Visitas mínimas para reset
-input int    MinStatesBeforeReset     = 150;          // Mínimo de estados aprendidos antes de permitir resets
-input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
 input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
-input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
-input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input double BlockLossRateThreshold   = 0.60;         // Taxa perda para bloquear (REDUZIDO de 0.80 → 0.60)
+input int    MinVisitsForBlockDecision    = 10;       // Visitas mín. decisão bloqueio (REDUZIDO de 30 → 10)
+input bool   AggressiveLearningMode       = false;         // Modo aprendizado agressivo (MinVisits=5, LossRate=50%)
+input bool   EnableBlockingDebugLogs  = false;        // Habilitar logs detalhados de bloqueio
+
+input group "──── 🎯 CLASSIFICAÇÃO DE QUALIDADE ────";
+input int    MinVisitsForQualityDecision = 15;        // Visitas mín. para classificar qualidade (REDUZIDO para 15)
+input double EliteWinRateThreshold    = 0.70;         // Win rate para ELITE (70%)
+input double GoodWinRateThreshold     = 0.55;         // Win rate para BOM (55%)
+input double BadWinRateThreshold      = 0.35;         // Win rate abaixo = RUIM (35%)
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
-input double MinSharpeToUnblock       = 0.8;          // Sharpe mínimo para desbloquear
 input double MaxSharpeToBlock         = 0.3;          // Sharpe máximo para bloquear
 input int    MinTradesForSharpe       = 30;           // Trades mínimos para calcular Sharpe
 
@@ -280,21 +367,74 @@ double g_stateProfitSqSum[];           // Soma de lucros ao quadrado por estado 
 int g_stateLastUpdate[];               // Último update de cada estado
 bool g_stateBlocked[];                 // Estados bloqueados por má performance
 datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
-datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio
 bool g_stateWasBlockedBefore[];        // Flag indicando se o estado já foi bloqueado anteriormente
 datetime g_stateBlockTime[];           // Timestamp de quando o estado foi bloqueado pela primeira vez
 int g_stateBlockCount[];               // Contador de quantas vezes o estado foi bloqueado
 double g_stateWinRate[];               // Win rate calculado por estado
 double g_stateAvgProfit[];             // Lucro médio por estado
 
+// ──────────────────────────────────────────────────────────────────────
+// 🏆 RANKING DE ESTADOS - Sistema de classificação de qualidade
+// ──────────────────────────────────────────────────────────────────────
+// Estrutura para armazenar informações de ranking de estados
+struct StateRankInfo
+{
+   int state;                // Número do estado
+   double winRate;           // Taxa de vitória
+   int visits;               // Número de visitas
+   double profit;            // Lucro total
+   ENUM_STATE_QUALITY quality; // Qualidade do estado
+};
+
+StateRankInfo g_bestStates[10];       // Top 10 melhores estados
+StateRankInfo g_worstStates[10];      // Top 10 piores estados
+datetime g_lastRankingUpdate = 0;     // Última atualização do ranking
+int g_rankingUpdateIntervalMinutes = 30; // Atualizar ranking a cada 30 minutos
+
+// Contadores de qualidade (para HUD)
+int g_eliteStatesCount = 0;
+int g_goodStatesCount = 0;
+int g_neutralStatesCount = 0;
+int g_badStatesCount = 0;
+int g_blockedStatesCount = 0;
+
+// ──────────────────────────────────────────────────────────────────────
+// 🧪 PESQUISA AUTOMÁTICA DE PARÂMETROS RSI+ATR+MACD
+// ──────────────────────────────────────────────────────────────────────
+#define MAX_RSIAtrMacd_CONFIGS 4
+
+struct RSIAtrMacdConfig
+{
+   double rsiOverbought;
+   double rsiOversold;
+   
+   int    atrPeriod;
+   double atrStopMult;
+   
+   int    macdFast;
+   int    macdSlow;
+   int    macdSignal;
+   
+   double totalProfit;
+   int    totalTrades;
+};
+
+RSIAtrMacdConfig g_RSIAtrMacdConfigs[MAX_RSIAtrMacd_CONFIGS];
+int  g_currentRSIAtrMacdConfigIndex    = 0;
+int  g_tradesInCurrentRSIAtrMacdConfig = 0;
+bool g_rsiAtrMacdSearchCompleted       = false;
+int  g_bestRSIAtrMacdConfigIndex       = 0;
+
 // Aprendizado - Controle
 bool g_learningInitialized = false;
-double g_currentExplorationRate = 0.0;
 int g_totalStatesDiscovered = 0;
 int g_totalQUpdates = 0;
 double g_averageQValue = 0.0;
 double g_maxQValue = 0.0;
 double g_minQValue = 0.0;
+
+// ✅ NOVO: Taxa de exploração atual (pode ser modificada em runtime)
+double g_currentExplorationRate = 0.20;  // Inicializada com valor padrão, será setada no OnInit()
 
 // Aprendizado - Proteção contra estados congelados
 static int g_lastCalculatedState = -1;
@@ -315,24 +455,18 @@ datetime g_lastSaveTime = 0;
 int g_qUpdatesSinceSave = 0;
 bool g_lastSaveSuccess = false;
 
-// Decay e Reset
 datetime g_lastMaintenanceTime = 0;
-int g_totalDecayCycles = 0;
-int g_totalBadStateResets = 0;
-int g_stateResets = 0;
-int g_stateDecays = 0;
-static int g_lastDecayTradeCount = 0;
-datetime g_lastUnblockTestTime = 0; // Tempo do último teste de desbloqueio
 
 // ──────────────────────────────────────────────────────────────────────
 // 📈 3. INDICADORES TÉCNICOS
 // ──────────────────────────────────────────────────────────────────────
 string g_currentSymbol;
-int g_adxHandle = INVALID_HANDLE;
-int g_maHandle  = INVALID_HANDLE;
-int g_rsiHandle = INVALID_HANDLE;
-int g_bbHandle  = INVALID_HANDLE;
-int g_atrHandle = INVALID_HANDLE;
+// ✅ REMOVIDO: g_adxHandle (indicador ADX removido)
+int g_maHandle   = INVALID_HANDLE;
+int g_rsiHandle  = INVALID_HANDLE;
+// ✅ REMOVIDO: g_bbHandle (indicador BB removido)
+int g_atrHandle  = INVALID_HANDLE;
+int g_macdHandle = INVALID_HANDLE;  // ✅ MACD handle para sistema simplificado
 
 // ──────────────────────────────────────────────────────────────────────
 // 💰 4. CONTROLE DE TRADES E POSIÇÕES
@@ -372,7 +506,6 @@ int g_lastBarProcessed = 0;
 // Controle diário
 int g_tradesToday = 0;
 datetime g_lastTradeDate = 0;
-datetime g_lastResetDate = 0;
 
 // ──────────────────────────────────────────────────────────────────────
 // 📊 5. ESTATÍSTICAS E PERFORMANCE
@@ -453,6 +586,7 @@ datetime g_lastTextExportTime = 0;
 int g_textExportCount = 0;
 datetime g_lastPeriodicSaveTime = 0;  // ✅ NOVO: Controle de salvamento periódico
 int g_periodicSaveCount = 0;          // ✅ NOVO: Contador de saves periódicos
+datetime g_lastResetDate = 0;         // ✅ NOVO: Data do último reset diário
 
 // ──────────────────────────────────────────────────────────────────────
 // 📅 RELATÓRIO MENSAL/ANUAL DE LUCROS
@@ -539,12 +673,12 @@ void DebugStuckStatesEnhanced()
    // ✅ CORREÇÃO AUTOMÁTICA
    if(wronglyBlocked > 0)
    {
-      Print("🔥🔥🔥 APLICANDO CORREÇÃO AUTOMÁTICA...");
+      // ❌ CORREÇÃO AUTOMÁTICA DESABILITADA
+      // Estados bloqueados permanecem bloqueados (Q-learning puro)
+      // Sem sistema de desbloqueio automático
       
-      // ❌ REMOVIDO - Desbloqueio deve ser feito APENAS por:
-      // 1. AutoUnblockGoodStates() com critérios rigorosos (55% win rate, 30 visitas)
-      // 2. TestBlockedStatesPeriodically() após 30 dias com reteste gradual
-      // Desbloquear aqui com 30% e 5 visitas é MUITO permissivo e causa desbloqueios prematuros
+      Print("⚠️ ", wronglyBlocked, " estados bloqueados");
+      Print("   (Estados bloqueados nunca são desbloqueados - Q-learning puro)");
       
       // for(int state = 0; state < NUM_STATES; state++)
       // {
@@ -559,8 +693,6 @@ void DebugStuckStatesEnhanced()
       //       }
       //    }
       // }
-      
-      Print("✅✅✅ ", wronglyBlocked, " estados desbloqueados automaticamente");
    }
    
    Print("=== FIM DEBUG ===");
@@ -569,236 +701,7 @@ void DebugStuckStatesEnhanced()
 // ======================================================================
 // ✅✅✅ 5. FUNÇÃO: DESBLOQUEAR ESTADOS BONS (REMOVIDO RESET DE ESTADOS)
 // ======================================================================
-void UnblockGoodStates()
-{
-   if(!EnableIntelligentReset) return;
-   
-   // ✅ PROTEÇÃO: Só desbloquear após ter base sólida de estados aprendidos
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return;
-   }
-   
-   int statesUnblocked = 0;
-   
-   Print("🔓 DESBLOQUEIO INTELIGENTE DE ESTADOS BONS");
-   
-   for(int s = 0; s < NUM_STATES; s++)
-   {
-      if(g_stateVisits[s] >= MinVisitsForBlockDecision)
-      {
-         double winRate = CalculateWinRate(s);
-         
-         // ✅ DESBLOQUEAR ESTADOS BONS (APENAS TESTAR, SEM RESETAR)
-         if(g_stateBlocked[s] && winRate >= 0.35)
-         {
-            g_stateBlocked[s] = false;
-            g_stateLastUnblockTime[s] = TimeCurrent();
-            statesUnblocked++;
-            Print("✅ DESBLOQUEIO Estado ", s,
-                  " | Win Rate boa: ", DoubleToString(winRate*100,1), "%",
-                  " | Visitas: ", g_stateVisits[s]);
-            
-            g_memoryDirty = true;
-            InvalidateHUDCache();
-         }
-      }
-   }
-   
-   if(statesUnblocked > 0)
-   {
-      Print("📊 RESUMO DO DESBLOQUEIO:");
-      Print("   Estados desbloqueados: ", statesUnblocked);
-      Print("   Total estados bloqueados restantes: ", CountBlockedStates());
-      
-      g_memoryDirty = true;
-      SaveState();
-   }
-}
 
-// ======================================================================
-// ✅✅✅ FUNÇÕES DE DECAY E RESET INTELIGENTE (NOVAS)
-// ======================================================================
-
-// ======================================================================
-// ✅✅✅ 1. FUNÇÃO DE DECAIMENTO SUAVE (CORRIGIDA)
-// ======================================================================
-void ApplyStateDecay()
-{
-   if(!EnableMemoryDecay) return;
-   
-   // ✅ PROTEÇÃO: Não aplicar decay antes de ter 100 estados descobertos
-   // Garante fase completa de aprendizado sem perder estados prematuramente
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return; // Decay desabilitado durante fase de descoberta inicial
-   }
-   
-   const double DECAY_FACTOR = DecayFactor; // Configurável pelo usuário (% a esquecer)
-   int statesDecayed = 0;
-   double totalMemoryBefore = 0;
-   double totalMemoryAfter = 0;
-
-   for(int s = 0; s < NUM_STATES; s++)
-   {
-      if(g_stateVisits[s] > 0)
-      {
-         totalMemoryBefore += g_stateVisits[s];
-         
-         // Aplicar decay somente em estados com histórico muito significativo
-         // ✅ CORREÇÃO: Aumentado de >10 para >50 para evitar cap artificial em 10 visitas
-         if(g_stateVisits[s] > 50)
-         {
-            // ✅ CORREÇÃO: Decay deve REMOVER X%, não MANTER X%
-            // Se DecayFactor = 0.05 (5%), deve manter 95% (1.0 - 0.05)
-            g_stateVisits[s] = (int)(g_stateVisits[s] * (1.0 - DECAY_FACTOR));
-            g_stateLosses[s] = (int)(g_stateLosses[s] * (1.0 - DECAY_FACTOR));
-            g_stateWins[s] = (int)(g_stateWins[s] * (1.0 - DECAY_FACTOR));
-            
-            // Garantir valores mínimos
-            if(g_stateVisits[s] < 1 && g_stateVisits[s] > 0) g_stateVisits[s] = 1;
-            if(g_stateLosses[s] < 0) g_stateLosses[s] = 0;
-            if(g_stateWins[s] < 0) g_stateWins[s] = 0;
-            
-            statesDecayed++;
-            
-            // Atualizar Q-values gradualmente
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               int idx = s * NUM_ACTIONS + a;
-               if(g_Q[idx] != 0.0)
-               {
-                  g_Q[idx] *= (1.0 - DECAY_FACTOR);
-               }
-            }
-         }
-         
-         totalMemoryAfter += g_stateVisits[s];
-      }
-   }
-   
-   // Recalcular estados ativos
-   g_activeStatesCount = 0;
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         if(g_activeStatesCount < MaxMemoryStates)
-         {
-            g_activeStates[g_activeStatesCount] = state;
-            g_activeStatesCount++;
-         }
-      }
-   }
-   
-   g_totalDecayCycles++;
-   
-   double memoryReduction = totalMemoryBefore > 0 ? 
-                          (1.0 - SafeDivide(totalMemoryAfter, totalMemoryBefore, 1.0)) * 100 : 0;
-   
-   Print("🔄 DECAY APLICADO: ", 
-         "Estados ajustados: ", statesDecayed,
-         " | Redução memória: ", DoubleToString(memoryReduction, 1), "%",
-         " | Estados ativos: ", g_activeStatesCount,
-         " | Ciclos: ", g_totalDecayCycles);
-   
-   g_memoryDirty = true;
-}
-
-// ======================================================================
-// ✅✅✅ 2. DESBLOQUEAR ESTADOS BONS (REMOVIDO RESET INTELIGENTE)
-// ======================================================================
-void UnblockGoodStatesAutomatic()
-{
-   if(!EnableIntelligentReset) return;
-   
-   // Verificar se temos estados suficientes antes de permitir desbloqueios
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return; // Não desbloquear até ter aprendido estados suficientes
-   }
-   
-   int statesUnblocked = 0;
-   
-   for(int s = 0; s < NUM_STATES; s++)
-   {
-      if(g_stateVisits[s] < BadStateMinVisits) continue;
-      
-      if(!g_stateBlocked[s]) continue; // Apenas estados bloqueados
-      
-      double winRate = CalculateWinRate(s);
-      
-      // ✅ DESBLOQUEAR ESTADOS BONS - Win rate >= 35%
-      if(winRate >= 0.35)
-      {
-         g_stateBlocked[s] = false;
-         g_stateLastUnblockTime[s] = TimeCurrent();
-         
-         statesUnblocked++;
-         
-         Print("✅ DESBLOQUEIO AUTOMÁTICO -> Estado: ", s,
-               " | Visitas: ", g_stateVisits[s],
-               " | Vitórias: ", g_stateWins[s],
-               " | Win Rate: ", DoubleToString(winRate*100, 1), "%");
-         
-         g_memoryDirty = true;
-         InvalidateHUDCache();
-      }
-   }
-   
-   if(statesUnblocked > 0)
-   {
-      Print("✅ ", statesUnblocked, " estados bons desbloqueados | Total bloqueados: ", CountBlockedStates());
-   }
-}
-
-// ======================================================================
-// ✅✅✅ 3. MANUTENÇÃO PERIÓDICA DO SISTEMA
-// ======================================================================
-void PerformMemoryMaintenance()
-{
-   static datetime lastMaintenance = 0;
-   
-   if(TimeCurrent() - lastMaintenance < (DecayCheckIntervalHours * 3600))
-      return;
-   
-   Print("🔧 INICIANDO MANUTENÇÃO PERIÓDICA DO SISTEMA...");
-   
-   // 1. Aplicar decay suave
-   if(EnableMemoryDecay)
-   {
-      ApplyStateDecay();
-   }
-   
-   // 2. Desbloquear estados bons (apenas após atingir limite mínimo)
-   if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
-   {
-      UnblockGoodStatesAutomatic();
-   }
-   
-   // 3. Limpar memória se necessário
-   if(AutoCleanMemory)
-   {
-      CleanMemory();
-   }
-   
-   // 4. Auto desbloquear estados bons
-   if(EnableUnifiedBlockingSystem)
-   {
-      AutoUnblockGoodStates();
-   }
-   
-   lastMaintenance = TimeCurrent();
-   
-   // Salvar após manutenção
-   SaveBrain();
-   SaveState();
-   
-   Print("✅ MANUTENÇÃO COMPLETA REALIZADA");
-   Print("   • Decay aplicado: ", g_totalDecayCycles, " ciclos");
-   Print("   • Estados ativos: ", g_activeStatesCount);
-   Print("   • Estados bloqueados: ", CountBlockedStates());
-}
 
 // ======================================================================
 // ✅✅✅ SISTEMA DE BLOQUEIO UNIFICADO CORRIGIDO
@@ -825,7 +728,10 @@ void BlockState(int state)
     
     if(visits < MinVisitsForBlockDecision)
     {
-        Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
+        if(EnableBlockingDebugLogs)
+        {
+            Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
+        }
         return;
     }
     
@@ -846,49 +752,31 @@ void BlockState(int state)
             g_stateBlockTime[state] = TimeCurrent();
         }
         
-        Print("⛔ ESTADO BLOQUEADO CORRETAMENTE: ", state, 
-              " | Visitas REAIS: ", visits, 
-              " | Perdas REAIS: ", losses, 
-              " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
-              " | Bloqueios totais: ", g_stateBlockCount[state]);
+        if(EnableBlockingDebugLogs)
+        {
+            Print("⛔ ESTADO BLOQUEADO: ", state, 
+                  " | Visitas: ", visits, 
+                  " | Perdas: ", losses, 
+                  " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
+                  " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
+                  " | Bloqueios totais: ", g_stateBlockCount[state]);
+        }
         
         g_memoryDirty = true;
         InvalidateHUDCache();
     }
     else
     {
-        Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
-              DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
+        if(EnableBlockingDebugLogs)
+        {
+            Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
+                  DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
+        }
     }
 }
 
-// ✅✅✅ 2️⃣ FUNÇÃO UNIFICADA PARA DESBLOQUEAR ESTADO (CORRIGIDA)
-void UnblockState(int state)
-{
-    if(state < 0 || state >= NUM_STATES) return;
+// ✅✅✅ 2️⃣ FUNÇÃO UNIFICADA PARA DESBLOQUEAR ESTADO (CORRIGIDA COM VERIFICAÇÃO)
 
-    if(g_stateLastUnblockTime[state] > 0 && TimeCurrent() - g_stateLastUnblockTime[state] < 3600)
-    {
-        Print("⏳ Cooldown ativo para estado ", state, " - aguardando 1h");
-        return;
-    }
-
-    if(g_stateBlocked[state])
-    {
-        g_stateBlocked[state] = false;
-        g_stateLastUnblockTime[state] = TimeCurrent();
-        
-        Print("✅ ESTADO DESBLOQUEADO: ", state, 
-              " | Visitas: ", g_stateVisits[state], 
-              " | Vitórias: ", g_stateWins[state],
-              " | Perdas: ", g_stateLosses[state],
-              " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
-        
-        g_memoryDirty = true;
-        InvalidateHUDCache();
-    }
-}
 
 // ✅✅✅ 3️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER BLOQUEADO (CORRIGIDA)
 bool ShouldBlockState(int state)
@@ -899,20 +787,27 @@ bool ShouldBlockState(int state)
     int losses = g_stateLosses[state];
     int wins = g_stateWins[state];
     
-    if(visits < MinVisitsForBlockDecision) 
+    // ✅ MODO AGRESSIVO: Bloqueio mais rápido e rigoroso
+    int minVisits = AggressiveLearningMode ? 5 : MinVisitsForBlockDecision;
+    double lossThreshold = AggressiveLearningMode ? 0.50 : BlockLossRateThreshold;
+    
+    if(visits < minVisits) 
     {
         // 🔍 DEBUG: Estado sem visitas suficientes (log reduzido)
-        // Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não bloqueia)");
+        // Print("🔍 BLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", minVisits, " → SEM DADOS SUFICIENTES (não bloqueia)");
         return false;
     }
     
     double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
     double winRate = SafeDivide((double)wins, (double)visits, 0.0);
     
-    // Critério 1: Taxa de perda muito alta
-    bool highLossRate = (lossRate >= BlockLossRateThreshold);
+    // ✅ CRITÉRIO 1: Taxa de perda muito alta
+    bool highLossRate = (lossRate >= lossThreshold);
     
-    // Critério 2: Sharpe Ratio muito baixo (se habilitado)
+    // ✅ CRITÉRIO 2: Win rate muito baixa (novo critério adicional)
+    bool lowWinRate = (winRate < 0.35); // Bloqueia se win rate < 35%
+    
+    // ✅ CRITÉRIO 3: Sharpe Ratio muito baixo (se habilitado)
     bool lowSharpe = false;
     double sharpe = 0.0;
     if(EnableSharpeFilter)
@@ -926,7 +821,7 @@ bool ShouldBlockState(int state)
     }
     
     // 🔍 DEBUG: Log detalhado apenas quando bloqueio vai acontecer
-    bool shouldBlock = (highLossRate || lowSharpe);
+    bool shouldBlock = (highLossRate || lowWinRate || lowSharpe);
     if(shouldBlock)
     {
         Print("🚫 BLOQUEANDO Estado ", state, 
@@ -935,74 +830,23 @@ bool ShouldBlockState(int state)
               " | Losses=", losses,
               " | WinRate=", DoubleToString(winRate*100, 1), "%",
               " | LossRate=", DoubleToString(lossRate*100, 1), "%",
-              " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+              " | LossRateTH=", DoubleToString(lossThreshold*100, 1), "%",
               " | Sharpe=", DoubleToString(sharpe, 2),
               " | HighLoss?=", highLossRate,
-              " | LowSharpe?=", lowSharpe);
+              " | LowWinRate?=", lowWinRate,
+              " | LowSharpe?=", lowSharpe,
+              " | AggressiveMode=", AggressiveLearningMode);
     }
     
-    // Bloquear se OU taxa de perda alta OU Sharpe muito baixo
+    // ✅ Bloquear se OU taxa de perda alta OU win rate baixa OU Sharpe muito baixo
     return shouldBlock;
 }
 
 // ✅✅✅ 4️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER DESBLOQUEADO (CORRIGIDA)
 bool ShouldUnblockState(int state)
 {
-    if(state < 0 || state >= NUM_STATES) return false;
-    
-    if(!g_stateBlocked[state]) return false;
-    
-    int visits = g_stateVisits[state];
-    int wins = g_stateWins[state];
-    int losses = g_stateLosses[state];
-    
-    if(visits < MinVisitsForBlockDecision) 
-    {
-        // 🔍 DEBUG: Estado bloqueado sem visitas suficientes para desbloquear
-        Print("🔓 UNBLOCK DEBUG: State=", state, " | Visits=", visits, " < MinVisits=", MinVisitsForBlockDecision, " → SEM DADOS SUFICIENTES (não desbloqueia)");
-        return false;
-    }
-    
-    double winRate = CalculateWinRate(state);
-    
-    // Critério 1: Win rate suficientemente alto
-    bool goodWinRate = (winRate >= UnblockWinRateThreshold);
-    
-    // Critério 2: Sharpe Ratio suficientemente alto (se habilitado)
-    bool goodSharpe = true;
-    double sharpe = 0.0;
-    if(EnableSharpeFilter)
-    {
-        int trades = g_stateWins[state] + g_stateLosses[state];
-        if(trades >= MinTradesForSharpe)
-        {
-            sharpe = CalculateSharpeRatio(state);
-            goodSharpe = (sharpe >= MinSharpeToUnblock);
-        }
-        else
-        {
-            // Se não tem dados suficientes para Sharpe, não desbloquear ainda
-            goodSharpe = false;
-        }
-    }
-    
-    // 🔍 DEBUG: Log detalhado de avaliação de desbloqueio
-    bool shouldUnblock = (goodWinRate && goodSharpe);
-    Print("🔓 UNBLOCK DEBUG: State=", state, 
-          " | Visits=", visits,
-          " | Wins=", wins,
-          " | Losses=", losses,
-          " | WinRate=", DoubleToString(winRate*100, 1), "%",
-          " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
-          " | Sharpe=", DoubleToString(sharpe, 2),
-          " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
-          " | EnableSharpe=", EnableSharpeFilter,
-          " | GoodWR?=", goodWinRate,
-          " | GoodSharpe?=", goodSharpe,
-          " → SHOULD UNBLOCK=", shouldUnblock);
-    
-    // Desbloquear apenas se AMBOS win rate E Sharpe forem bons
-    return shouldUnblock;
+    // States are never unblocked once blocked
+    return false;
 }
 
 // ✅✅✅ 5️⃣ FUNÇÃO PRINCIPAL DE VERIFICAÇÃO DE BLOQUEIO (SOMENTE LEITURA)
@@ -1024,16 +868,33 @@ void EvaluateAndUpdateBlockState(int state)
     bool shouldBeBlocked = ShouldBlockState(state);
     bool currentlyBlocked = g_stateBlocked[state];
     
+    // 🚨 DIAGNÓSTICO DETALHADO: Por que estado não foi bloqueado?
+    if(!shouldBeBlocked && !currentlyBlocked && EnableBlockingDebugLogs)
+    {
+        double winRate = CalculateWinRate(state);
+        double lossRate = SafeDivide(g_stateLosses[state], g_stateVisits[state], 0.0);
+        
+        Print("🔍 DIAGNÓSTICO: Estado ", state, " NÃO bloqueado");
+        Print("   Visitas: ", g_stateVisits[state], " (min: ", MinVisitsForBlockDecision, ")");
+        Print("   Win rate: ", DoubleToString(winRate*100,1), "% (precisa <35% para bloquear)");
+        Print("   Loss rate: ", DoubleToString(lossRate*100,1), "% (precisa >", DoubleToString(BlockLossRateThreshold*100,1), "% para bloquear)");
+        Print("   Vitórias: ", g_stateWins[state], " | Perdas: ", g_stateLosses[state]);
+    }
+    
     if(shouldBeBlocked && !currentlyBlocked)
     {
         BlockState(state);
+        
+        // 🚨 LOG DETALHADO quando bloqueia
+        double winRate = CalculateWinRate(state);
+        double lossRate = SafeDivide(g_stateLosses[state], g_stateVisits[state], 0.0);
+        Print("🚨 ESTADO BLOQUEADO: ", state);
+        Print("   Razão: Win rate ", DoubleToString(winRate*100,1), "% | Loss rate ", DoubleToString(lossRate*100,1), "%");
+        Print("   Histórico: ", g_stateWins[state], "W / ", g_stateLosses[state], "L / ", g_stateVisits[state], " visitas");
     }
     else if(!shouldBeBlocked && currentlyBlocked)
     {
-        if(ShouldUnblockState(state))
-        {
-            UnblockState(state);
-        }
+        // States once blocked stay blocked (no unblocking)
     }
 }
 
@@ -1050,7 +911,6 @@ void EvaluateAllActiveStates()
     lastFullEvaluation = TimeCurrent();
     
     int blocked = 0;
-    int unblocked = 0;
     
     for(int i = 0; i < g_activeStatesCount; i++)
     {
@@ -1064,121 +924,79 @@ void EvaluateAllActiveStates()
             BlockState(state);
             blocked++;
         }
-        else if(!shouldBeBlocked && currentlyBlocked)
-        {
-            if(ShouldUnblockState(state))
-            {
-                UnblockState(state);
-                unblocked++;
-            }
-        }
     }
     
-    if(blocked > 0 || unblocked > 0)
+    if(blocked > 0)
     {
-      Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados, ", unblocked, " desbloqueados");
+      Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados");
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
     }
 }
 
-// ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
-void AutoUnblockGoodStates()
+// ✅ NOVA FUNÇÃO: Log de progresso de aprendizagem
+void LogLearningProgress()
 {
-    int unblocked = 0;
-    
-    for(int state = 0; state < NUM_STATES; state++)
-    {
-        if(g_stateBlocked[state] && ShouldUnblockState(state))
-        {
-            UnblockState(state);
-            unblocked++;
-        }
-    }
-    
-    if(unblocked > 0)
-    {
-        Print("🔄 ", unblocked, " estados desbloqueados automaticamente (win rate > ", 
-              DoubleToString(UnblockWinRateThreshold*100, 0), "%)");
-    }
+   static int lastLogTrade = 0;
+   static datetime lastLogTime = 0;
+   
+   // Log a cada 100 trades OU a cada 1 hora
+   bool shouldLog = false;
+   if(g_totalTrades > 0 && g_totalTrades % 100 == 0 && g_totalTrades != lastLogTrade)
+   {
+      shouldLog = true;
+      lastLogTrade = g_totalTrades;
+   }
+   else if(TimeCurrent() - lastLogTime >= 3600) // 1 hora
+   {
+      shouldLog = true;
+      lastLogTime = TimeCurrent();
+   }
+   
+   if(!shouldLog) return;
+   
+   int totalBlocked = CountBlockedStates();
+   int totalActive = g_activeStatesCount;
+   
+   // Contar distribuição de qualidade
+   int elite = 0, good = 0, neutral = 0, bad = 0, blocked = 0;
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] > 0)
+      {
+         ENUM_STATE_QUALITY q = GetStateQuality(i);
+         switch(q)
+         {
+            case STATE_QUALITY_ELITE:    elite++; break;
+            case STATE_QUALITY_GOOD:     good++; break;
+            case STATE_QUALITY_NEUTRAL:  neutral++; break;
+            case STATE_QUALITY_BAD:      bad++; break;
+            case STATE_QUALITY_BLOCKED:  blocked++; break;
+         }
+      }
+   }
+   
+   double globalWinRate = SafeDivide((double)g_totalWins, (double)(g_totalWins + g_totalLosses), 0.0);
+   
+   Print("═══════════════════════════════════════════════════════");
+   Print("🧠 PROGRESSO DE APRENDIZAGEM - Trade #", g_totalTrades);
+   Print("═══════════════════════════════════════════════════════");
+   Print("📊 Win Rate Global: ", DoubleToString(globalWinRate * 100, 1), "% (", g_totalWins, "W / ", g_totalLosses, "L)");
+   Print("📊 Estados Ativos: ", totalActive, " de ", NUM_STATES, " possíveis");
+   Print("📊 Estados Bloqueados: ", totalBlocked, " (", DoubleToString((double)totalBlocked/NUM_STATES*100, 1), "%)");
+   Print("📊 Qualidade - ELITE:", elite, " | GOOD:", good, " | NEUTRAL:", neutral, " | BAD:", bad, " | BLOCKED:", blocked);
+   Print("💰 Lucro Total: ", DoubleToString(g_sumProfit, 2));
+   
+   if(AggressiveLearningMode)
+   {
+      Print("⚡ MODO AGRESSIVO ATIVO - MinVisits=5, LossThreshold=50%");
+   }
+   
+   Print("═══════════════════════════════════════════════════════");
 }
 
-// ======================================================================
-// ✅ TESTAR PERIODICAMENTE ESTADOS BLOQUEADOS
-// ======================================================================
-// Testa estados bloqueados periodicamente para ver se melhoraram
-// Desbloqueia temporariamente para coletar novas amostras
-void TestBlockedStatesPeriodically()
-{
-   datetime currentTime = TimeCurrent();
-   
-   // Testar a cada 7 dias (604800 segundos)
-   if(currentTime - g_lastUnblockTestTime < 604800)
-   {
-      return;
-   }
-   
-   g_lastUnblockTestTime = currentTime;
-   
-   int testedStates = 0;
-   int unblockedForTest = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(!g_stateBlocked[state]) continue;
-      
-      // Apenas testar estados com histórico significativo
-      if(g_stateVisits[state] < 10) continue;
-      
-      // Se estado já foi bloqueado 2+ vezes, PERMANECE BLOQUEADO
-      if(g_stateBlockCount[state] >= 2)
-      {
-         // Log apenas na primeira iteração para não poluir
-         if(testedStates == 0)
-         {
-            Print("🔒 Estado ", state, " PERMANENTEMENTE BLOQUEADO (bloqueado ", 
-                  g_stateBlockCount[state], " vezes - sem mais retestes)");
-         }
-         testedStates++;
-         continue; // Não desbloquear mais
-      }
-      
-      datetime timeSinceBlock = currentTime - g_stateLastBlockTime[state];
-      
-      // Se estado está bloqueado há mais de 30 dias, dar nova chance
-      if(timeSinceBlock > 2592000) // 30 dias em segundos
-      {
-         // Resetar estatísticas mas manter Q-values (aprendizado)
-         g_stateVisits[state] = 0;
-         g_stateWins[state] = 0;
-         g_stateLosses[state] = 0;
-         
-         // Desbloquear temporariamente para teste
-         g_stateBlocked[state] = false;
-         g_stateLastUnblockTime[state] = currentTime;
-         
-         unblockedForTest++;
-         
-         int tentativasRestantes = 2 - g_stateBlockCount[state];
-         string mensagemTentativa = (tentativasRestantes == 1) ? " (ÚLTIMA CHANCE)" : "";
-         
-         Print("🧪 Estado ", state, " desbloqueado para TESTE #", 
-               (g_stateBlockCount[state] + 1), mensagemTentativa,
-               " (bloqueado há ", (int)(timeSinceBlock / 86400), " dias)");
-      }
-      
-      testedStates++;
-      
-      // Limitar a 1 estado por vez para teste gradual e controlado
-      if(unblockedForTest >= 1) break;
-   }
-   
-   if(unblockedForTest > 0)
-   {
-      Print("📊 Teste periódico de estados bloqueados: ", unblockedForTest, 
-            " estado desbloqueado para coleta gradual de novas amostras");
-      InvalidateHUDCache();
-   }
-}
+// ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
+// ✅✅✅ 8️⃣ FUNÇÃO PARA DESBLOQUEAR ESTADOS BONS AUTOMATICAMENTE (CORRIGIDA)
+
 
 // ======================================================================
 // ✅✅✅ FUNÇÕES AUXILIARES CORRIGIDAS
@@ -1601,16 +1419,10 @@ void SaveState()
    FileWriteArray(handle, g_activeStates);
    FileWriteArray(handle, g_stateBlocked);
    FileWriteArray(handle, g_stateLastBlockTime);
-   FileWriteArray(handle, g_stateLastUnblockTime);
    FileWriteArray(handle, g_stateBlockCount);
    FileWriteInteger(handle, (int)g_activeStatesCount);
    FileWriteArray(handle, g_stateWinRate);
    FileWriteArray(handle, g_stateAvgProfit);
-   FileWriteInteger(handle, (int)g_stateResets);
-   FileWriteInteger(handle, (int)g_stateDecays);
-   FileWriteInteger(handle, (int)g_lastDecayTradeCount);
-   FileWriteInteger(handle, (int)g_totalDecayCycles);
-   FileWriteInteger(handle, (int)g_totalBadStateResets);
    
    FileClose(handle);
    
@@ -1647,7 +1459,6 @@ void LoadState()
    FileReadArray(handle, g_activeStates);
    FileReadArray(handle, g_stateBlocked);
    FileReadArray(handle, g_stateLastBlockTime);
-   FileReadArray(handle, g_stateLastUnblockTime);
    FileReadArray(handle, g_stateBlockCount);
    
    // 🔧 REGRA 3 — Converter para int se necessário
@@ -1657,18 +1468,6 @@ void LoadState()
    FileReadArray(handle, g_stateWinRate);
    FileReadArray(handle, g_stateAvgProfit);
    
-   int tempStateResets = FileReadInteger(handle);
-   int tempStateDecays = FileReadInteger(handle);
-   int tempLastDecayTradeCount = FileReadInteger(handle);
-   int tempTotalDecayCycles = FileReadInteger(handle);
-   int tempTotalBadStateResets = FileReadInteger(handle);
-   
-   g_stateResets = tempStateResets;
-   g_stateDecays = tempStateDecays;
-   g_lastDecayTradeCount = tempLastDecayTradeCount;
-   g_totalDecayCycles = tempTotalDecayCycles;
-   g_totalBadStateResets = tempTotalBadStateResets;
-   
    FileClose(handle);
    
    Print("✅ Estados carregados da memória persistente");
@@ -1677,8 +1476,6 @@ void LoadState()
    Print("📊 Total perdas REAIS: ", ArraySum(g_stateLosses));
    Print("📊 Total vitórias REAIS: ", ArraySum(g_stateWins));
    Print("📊 Estados bloqueados: ", CountBlockedStates());
-   Print("📊 Ciclos de decay: ", g_totalDecayCycles);
-   Print("📊 Estados resetados: ", g_totalBadStateResets);
 }
 
 int ArraySum(const int &array[])
@@ -1782,7 +1579,6 @@ void CleanMemory()
             g_stateWins[state] = 0;
             g_stateLastUpdate[state] = 0;
             g_stateLastBlockTime[state] = 0;
-            g_stateLastUnblockTime[state] = 0;
             
             for(int a = 0; a < NUM_ACTIONS; a++)
             {
@@ -1892,7 +1688,6 @@ bool SaveBrainToFile(string filename)
       FileWriteInteger(h, (int)g_stateLastUpdate[state]);
       FileWriteInteger(h, (int)g_stateBlocked[state]);
       FileWriteLong(h, (long)g_stateLastBlockTime[state]);
-      FileWriteLong(h, (long)g_stateLastUnblockTime[state]);
       
       // Validação ao salvar: garante que contador está entre 0-10
       int blockCountToSave = g_stateBlockCount[state];
@@ -1949,18 +1744,32 @@ bool SaveBrainToFile(string filename)
    
    FileWriteArray(h, g_stateWinRate);
    FileWriteArray(h, g_stateAvgProfit);
-   FileWriteInteger(h, (int)g_stateResets);
-   FileWriteInteger(h, (int)g_stateDecays);
-   FileWriteInteger(h, (int)g_lastDecayTradeCount);
-   FileWriteInteger(h, (int)g_totalDecayCycles);
-   FileWriteInteger(h, (int)g_totalBadStateResets);
    
    // 🔧 CORREÇÃO CRÍTICA: Salvar TODOS os estados bloqueados (não apenas ativos)
    // Isso garante que estados bloqueados sejam preservados mesmo se não estiverem em g_activeStates[]
    FileWriteArray(h, g_stateBlocked);
    FileWriteArray(h, g_stateBlockCount);
    FileWriteArray(h, g_stateLastBlockTime);
-   FileWriteArray(h, g_stateLastUnblockTime);
+
+   // ✅ BUG FIX: Salvar arrays de ranking de estados (TOP 10 melhores e piores)
+   // Isso preserva o ranking entre reinícios do EA
+   FileWriteLong(h, (long)g_lastRankingUpdate);
+   for(int i = 0; i < 10; i++)
+   {
+      FileWriteInteger(h, g_bestStates[i].state);
+      FileWriteDouble(h, g_bestStates[i].winRate);
+      FileWriteInteger(h, g_bestStates[i].visits);
+      FileWriteDouble(h, g_bestStates[i].profit);
+      FileWriteInteger(h, (int)g_bestStates[i].quality);
+   }
+   for(int i = 0; i < 10; i++)
+   {
+      FileWriteInteger(h, g_worstStates[i].state);
+      FileWriteDouble(h, g_worstStates[i].winRate);
+      FileWriteInteger(h, g_worstStates[i].visits);
+      FileWriteDouble(h, g_worstStates[i].profit);
+      FileWriteInteger(h, (int)g_worstStates[i].quality);
+   }
 
    FileClose(h);
    return true;
@@ -2013,9 +1822,6 @@ bool LoadBrainFromFile(string filename)
    if(ArraySize(g_stateLastBlockTime) != NUM_STATES)
       ArrayResize(g_stateLastBlockTime, NUM_STATES);
    
-   if(ArraySize(g_stateLastUnblockTime) != NUM_STATES)
-      ArrayResize(g_stateLastUnblockTime, NUM_STATES);
-   
    // ✅ NÃO zera g_Q[] - preserva valores existentes
    
    // 🔧 REGRA 3 — Converter para int se necessário
@@ -2037,7 +1843,6 @@ bool LoadBrainFromFile(string filename)
          g_stateLastUpdate[state] = FileReadInteger(h);
          g_stateBlocked[state] = (bool)FileReadInteger(h);
          g_stateLastBlockTime[state] = (datetime)FileReadLong(h);
-         g_stateLastUnblockTime[state] = (datetime)FileReadLong(h);
          
          // Lê contador de bloqueios com validação para evitar overflow/corrupção
          int blockCount = FileReadInteger(h);
@@ -2097,27 +1902,55 @@ bool LoadBrainFromFile(string filename)
    ArrayResize(g_stateAvgProfit, NUM_STATES);
    FileReadArray(h, g_stateAvgProfit, 0, NUM_STATES);
    
-   g_stateResets = FileReadInteger(h);
-   g_stateDecays = FileReadInteger(h);
-   g_lastDecayTradeCount = FileReadInteger(h);
-   g_totalDecayCycles = FileReadInteger(h);
-   g_totalBadStateResets = FileReadInteger(h);
-   
    // 🔧 CORREÇÃO CRÍTICA: Carregar TODOS os estados bloqueados (não apenas ativos)
    // Isso garante que estados bloqueados sejam preservados mesmo se não estiverem em g_activeStates[]
    FileReadArray(h, g_stateBlocked, 0, NUM_STATES);
    FileReadArray(h, g_stateBlockCount, 0, NUM_STATES);
    FileReadArray(h, g_stateLastBlockTime, 0, NUM_STATES);
-   FileReadArray(h, g_stateLastUnblockTime, 0, NUM_STATES);
+   
+   // ✅ BUG FIX: Carregar arrays de ranking de estados (TOP 10 melhores e piores)
+   // Isso restaura o ranking entre reinícios do EA
+   g_lastRankingUpdate = (datetime)FileReadLong(h);
+   for(int i = 0; i < 10; i++)
+   {
+      g_bestStates[i].state = FileReadInteger(h);
+      g_bestStates[i].winRate = FileReadDouble(h);
+      g_bestStates[i].visits = FileReadInteger(h);
+      g_bestStates[i].profit = FileReadDouble(h);
+      g_bestStates[i].quality = (ENUM_STATE_QUALITY)FileReadInteger(h);
+   }
+   for(int i = 0; i < 10; i++)
+   {
+      g_worstStates[i].state = FileReadInteger(h);
+      g_worstStates[i].winRate = FileReadDouble(h);
+      g_worstStates[i].visits = FileReadInteger(h);
+      g_worstStates[i].profit = FileReadDouble(h);
+      g_worstStates[i].quality = (ENUM_STATE_QUALITY)FileReadInteger(h);
+   }
    
    FileClose(h);
    
    Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
    Print("📊 Estados bloqueados: ", CountBlockedStates());
-   Print("📊 Ciclos de decay: ", g_totalDecayCycles);
-   Print("📊 Estados resetados: ", g_totalBadStateResets);
    Print("📊 Total de trades: ", g_totalTrades, " (Wins: ", g_totalWins, ", Losses: ", g_totalLosses, ")");
-   Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+   Print("💰 Lucro Total carregado: ", DoubleToString(g_sumProfit, 2));
+   
+   // Verificar se exploração está desabilitada
+   if(DisableExploration)
+   {
+      g_currentExplorationRate = 0.0;
+      Print("🚫 EXPLORAÇÃO DESABILITADA - Modo exploitation only");
+      Print("   Robô usará APENAS Q-learning (sem ações aleatórias)");
+      Print("📊 Taxa de exploração: 0.0% (EXPLOITATION ONLY)");
+   }
+   else
+   {
+      Print("📊 Taxa de exploração: ", DoubleToString(g_currentExplorationRate * 100, 1), "% (FIXED)");
+   }
+   
+   Print("🏆 Ranking carregado: ", (g_lastRankingUpdate > 0 ? "SIM" : "NÃO"), 
+         " | Melhores: ", g_bestStates[0].visits, " visitas",
+         " | Piores: ", g_worstStates[0].visits, " visitas");
    
    return true;
 }
@@ -2128,8 +1961,9 @@ bool LoadBrainFromFile(string filename)
 
 string BrainKey()
 {
-   return StringFormat("B%dx%dx%dx%dx%dx%dx%d_A%d",
-      BINS_MA_DIST,BINS_RSI,BINS_ADX,BINS_BBPOS,BINS_VOLATILITY,BINS_VOLUME,BINS_TIME,NUM_ACTIONS);
+   // ✅ SIMPLIFICADO: Removidos BINS_ADX e BINS_BBPOS (indicadores removidos)
+   return StringFormat("B%dx%dx%dx%dx%d_A%d",
+      BINS_MA_DIST,BINS_RSI,BINS_VOLATILITY,BINS_VOLUME,BINS_TIME,NUM_ACTIONS);
 }
 
 string GetBrainFileName()
@@ -2286,6 +2120,24 @@ bool LoadBrain()
    return result;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⚠️ FUNÇÃO UTILITÁRIA: ResetQTable
+// ══════════════════════════════════════════════════════════════════════
+// Função para resetar completamente a Q-table e todos os arrays de estado
+// 
+// ⚠️⚠️⚠️ ATENÇÃO CRÍTICA ⚠️⚠️⚠️
+// Esta função NÃO é chamada automaticamente. 
+// Chamar esta função irá:
+//   - APAGAR TODO O APRENDIZADO (Q-values, visitas, wins, losses)
+//   - ZERAR O LUCRO TOTAL (g_sumProfit = 0)
+//   - RESETAR TODOS OS CONTADORES DE TRADE
+//   - PERDER TODO O RANKING DE ESTADOS
+// 
+// Deve ser chamada manualmente APENAS em casos específicos:
+//   - Debug/desenvolvimento
+//   - Quando se deseja começar o aprendizado do ZERO
+//   - NUNCA deve ser chamada durante operação normal
+// ══════════════════════════════════════════════════════════════════════
 void ResetQTable()
 {
    int sz = NUM_STATES * NUM_ACTIONS;
@@ -2318,14 +2170,12 @@ void ResetQTable()
    ArrayResize(g_stateLastBlockTime, NUM_STATES);
    ArrayInitialize(g_stateLastBlockTime, 0);
    
-   ArrayResize(g_stateLastUnblockTime, NUM_STATES);
-   ArrayInitialize(g_stateLastUnblockTime, 0);
-   
    ArrayResize(g_activeStates, MaxMemoryStates);
    g_activeStatesCount = 0;
    
    g_learningInitialized = true;
    g_totalTrades = g_totalWins = g_totalLosses = 0;
+   // ⚠️ ATENÇÃO: Linha abaixo ZERA o lucro total
    g_sumProfit = 0.0;
    
    g_totalStatesDiscovered = 0;
@@ -2353,12 +2203,9 @@ void ResetQTable()
    g_buyProfit = 0.0;
    g_sellProfit = 0.0;
    
-   g_totalDecayCycles = 0;
-   g_totalBadStateResets = 0;
-   
    InitializeLearningSystem();
    
-   Print("🆕 Nova memória criada (Sistema Corrigido v307F com Decay e Reset)");
+   Print("🆕 Nova memória criada (Q-learning puro)");
 }
 
 // ======================================================================
@@ -2487,7 +2334,6 @@ void MonitorBadStates()
    Print("   Estados analisados: ", estadosAnalisados);
    Print("   Estados bloqueados: ", CountBlockedStates(), " (+", bloqueados, " novos)");
    Print("   Estados resetados: ", resetados);
-   Print("   Total resets acumulados: ", g_totalBadStateResets);
    
    // ✅ FORÇAR SAVE após monitoramento crítico
    if(bloqueados > 0 || resetados > 0)
@@ -2528,16 +2374,14 @@ void DebugBlockedStates()
          {
             blockedCount++;
             
-            if(winRate >= UnblockWinRateThreshold && g_stateVisits[state] >= MinVisitsForBlockDecision)
+            // Check if state was incorrectly blocked (good win rate)
+            if(winRate >= 0.55 && g_stateVisits[state] >= MinVisitsForBlockDecision)
             {
                wronglyBlocked++;
                PrintFormat("❌❌❌ ERRO GRAVE: Estado %d BLOQUEADO mas tem WIN RATE ALTA: %.1f%% | Visitas: %d", 
                      state, winRate*100, g_stateVisits[state]);
                
-               if(EnableUnifiedBlockingSystem)
-               {
-                  UnblockState(state);
-               }
+               // States once blocked stay blocked (no unblocking)
             }
             else if(lossRate >= BlockLossRateThreshold && g_stateVisits[state] >= MinVisitsForBlockDecision)
             {
@@ -2556,11 +2400,127 @@ void DebugBlockedStates()
    
    Print(StringFormat("=== RESUMO: %d visitados | %d bloqueados | %d bloqueados erroneamente | %d bloqueados corretamente ===", 
          totalVisited, blockedCount, wronglyBlocked, correctlyBlocked));
+}
+
+//+------------------------------------------------------------------+
+//| 📊 Análise detalhada de distribuição de estados                  |
+//+------------------------------------------------------------------+
+void LogStateDistributionAnalysis()
+{
+   Print("═══════════════════════════════════════════════════════");
+   Print("📊 ANÁLISE DE DISTRIBUIÇÃO DE ESTADOS");
+   Print("═══════════════════════════════════════════════════════");
    
-   if(wronglyBlocked > 0 && EnableUnifiedBlockingSystem)
+   int visitedCount = 0;
+   int blockedCount = 0;
+   
+   // Contadores por bucket
+   int maBuckets[3] = {0, 0, 0};
+   int rsiBuckets[4] = {0, 0, 0, 0};
+   int volBuckets[2] = {0, 0};
+   int volumeBuckets[2] = {0, 0};
+   int timeBuckets[2] = {0, 0};
+   
+   for(int state = 0; state < NUM_STATES; state++)
    {
-      Print("🔥🔥🔥 CORRIGINDO ", wronglyBlocked, " ESTADOS BLOQUEADOS ERRONEAMENTE...");
-      AutoUnblockGoodStates();
+      if(g_stateVisits[state] > 0)
+      {
+         visitedCount++;
+         
+         // Decompor estado em componentes (ordem inversa do cálculo)
+         int temp = state;
+         int ma = temp % BINS_MA_DIST;
+         temp /= BINS_MA_DIST;
+         int rsi = temp % BINS_RSI;
+         temp /= BINS_RSI;
+         int vol = temp % BINS_VOLATILITY;
+         temp /= BINS_VOLATILITY;
+         int volume = temp % BINS_VOLUME;
+         temp /= BINS_VOLUME;
+         int time = temp % BINS_TIME;
+         
+         maBuckets[ma]++;
+         rsiBuckets[rsi]++;
+         volBuckets[vol]++;
+         volumeBuckets[volume]++;
+         timeBuckets[time]++;
+      }
+      
+      if(g_stateBlocked[state])
+         blockedCount++;
+   }
+   
+   double visitedPct = (visitedCount * 100.0) / NUM_STATES;
+   double unvisitedPct = ((NUM_STATES - visitedCount) * 100.0) / NUM_STATES;
+   
+   PrintFormat("Total de estados possíveis: %d", NUM_STATES);
+   PrintFormat("Estados visitados: %d (%.1f%%)", visitedCount, visitedPct);
+   PrintFormat("Estados com 0 visitas: %d (%.1f%%)", NUM_STATES - visitedCount, unvisitedPct);
+   PrintFormat("Estados bloqueados: %d", blockedCount);
+   Print("");
+   Print("📌 Distribuição por componente:");
+   Print("");
+   
+   Print("MA Distance (3 buckets):");
+   PrintFormat("  Bucket 0 (perto): %d estados", maBuckets[0]);
+   PrintFormat("  Bucket 1 (médio): %d estados", maBuckets[1]);
+   PrintFormat("  Bucket 2 (longe): %d estados", maBuckets[2]);
+   Print("");
+   
+   Print("RSI (4 buckets):");
+   PrintFormat("  Bucket 0 (<30): %d estados", rsiBuckets[0]);
+   PrintFormat("  Bucket 1 (30-50): %d estados", rsiBuckets[1]);
+   PrintFormat("  Bucket 2 (50-70): %d estados", rsiBuckets[2]);
+   PrintFormat("  Bucket 3 (>70): %d estados", rsiBuckets[3]);
+   Print("");
+   
+   Print("Volatilidade (2 buckets):");
+   PrintFormat("  Bucket 0 (baixa): %d estados", volBuckets[0]);
+   PrintFormat("  Bucket 1 (alta): %d estados", volBuckets[1]);
+   Print("");
+   
+   Print("Volume (2 buckets):");
+   PrintFormat("  Bucket 0 (baixo): %d estados", volumeBuckets[0]);
+   PrintFormat("  Bucket 1 (alto): %d estados", volumeBuckets[1]);
+   Print("");
+   
+   Print("Hora do dia (2 buckets):");
+   PrintFormat("  Bucket 0 (8-17h): %d estados", timeBuckets[0]);
+   PrintFormat("  Bucket 1 (outras): %d estados", timeBuckets[1]);
+   Print("");
+   
+   // Listar alguns estados nunca visitados
+   Print("⚠️ ESTADOS NUNCA VISITADOS (primeiros 20):");
+   int shown = 0;
+   for(int state = 0; state < NUM_STATES && shown < 20; state++)
+   {
+      if(g_stateVisits[state] == 0)
+      {
+         int temp = state;
+         int ma = temp % BINS_MA_DIST;
+         temp /= BINS_MA_DIST;
+         int rsi = temp % BINS_RSI;
+         temp /= BINS_RSI;
+         int vol = temp % BINS_VOLATILITY;
+         temp /= BINS_VOLATILITY;
+         int volume = temp % BINS_VOLUME;
+         temp /= BINS_VOLUME;
+         int time = temp % BINS_TIME;
+         
+         PrintFormat("Estado %d: MA=%d RSI=%d VOL=%d VOLUME=%d TIME=%d (0 visitas)", 
+                    state, ma, rsi, vol, volume, time);
+         shown++;
+      }
+   }
+   
+   Print("═══════════════════════════════════════════════════════");
+   
+   // Alertas
+   if(visitedCount < NUM_STATES / 3 && g_totalTrades > 500)
+   {
+      Print("⚠️⚠️⚠️ ALERTA: Apenas ", visitedCount, " estados visitados em ", g_totalTrades, " trades!");
+      Print("   Isso é menos de 33% do espaço de estados.");
+      Print("   Considere: aumentar exploração inicial, revisar buckets, ou desbloquear estados periodicamente");
    }
 }
 
@@ -2671,16 +2631,12 @@ void EmergencyReset()
       g_stateWins[s] = 0;
       g_stateBlocked[s] = false;
       g_stateLastBlockTime[s] = 0;
-      g_stateLastUnblockTime[s] = 0;
       g_stateLastUpdate[s] = 0;
    }
    
    g_activeStatesCount = 0;
-   g_currentExplorationRate = InitialExplorationRate;
    g_tradesToday = 0;
    g_consecutiveLosses = 0;
-   g_totalDecayCycles = 0;
-   g_totalBadStateResets = 0;
    
    // Resetar arrays
    ArrayInitialize(g_recentProfits, 0.0);
@@ -2735,7 +2691,6 @@ void DebugStuckStates()
    Print("   Estados travados (múltiplos de 10): ", stuckStates);
    Print("   Estados com 10+ visitas: ", CountStatesWithMinVisits(10));
    Print("   Estados com 20+ visitas: ", CountStatesWithMinVisits(20));
-   Print("   Total BadStateResets: ", g_totalBadStateResets);
    Print("=== FIM DEBUG ===");
 }
 
@@ -2757,310 +2712,19 @@ int CountStatesWithMinVisits(int minVisits)
 // ======================================================================
 // ✅✅✅ FUNÇÃO: CORREÇÃO DE EMERGÊNCIA DOS CONTADORES
 // ======================================================================
-void EmergencyCounterFix()
-{
-   Print("🔥🔥🔥 CORREÇÃO DE EMERGÊNCIA DOS CONTADORES");
-   
-   int fixedStates = 0;
-   int unblockedStates = 0;
-   int corruptedStates = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         // ✅ CORRIGIR CONTADORES INCONSISTENTES
-         if(g_stateWins[state] > g_stateVisits[state])
-         {
-            Print("❌❌❌ ERRO CRÍTICO: Estado ", state, 
-                  " | Visitas: ", g_stateVisits[state],
-                  " | Vitórias: ", g_stateWins[state], " (IMPOSSÍVEL!)");
-            
-            // Correção: Recalcular baseado em win rate realista
-            double estimatedWinRate = 0.3; // Assumir 30% win rate
-            g_stateWins[state] = (int)(g_stateVisits[state] * estimatedWinRate);
-            g_stateLosses[state] = g_stateVisits[state] - g_stateWins[state];
-            
-            corruptedStates++;
-            fixedStates++;
-         }
-         
-         // ✅ DESBLOQUEAR ESTADOS BLOQUEADOS ERRONEAMENTE
-         if(g_stateBlocked[state])
-         {
-            double winRate = CalculateWinRate(state);
-            
-            // Regras mais sensatas para desbloqueio
-            if((g_stateVisits[state] < 5 && winRate > 0.1) || // Poucas visitas com alguma vitória
-               (g_stateVisits[state] >= 5 && winRate >= 0.25)) // Win rate razoável
-            {
-               g_stateBlocked[state] = false;
-               unblockedStates++;
-               Print("✅ Estado ", state, " desbloqueado | Win rate: ", 
-                     DoubleToString(winRate*100,1), "% | Visitas: ", g_stateVisits[state]);
-            }
-         }
-         
-         // ✅ CORRIGIR ESTADOS COM 0 VISITAS MAS COM CONTADORES
-         if(g_stateVisits[state] == 0 && (g_stateWins[state] > 0 || g_stateLosses[state] > 0))
-         {
-            Print("🔄 Estado ", state, " com contadores mas 0 visitas - resetando");
-            g_stateWins[state] = 0;
-            g_stateLosses[state] = 0;
-            g_stateBlocked[state] = false;
-            fixedStates++;
-         }
-      }
-   }
-   
-   // ✅ CORRIGIR ESTATÍSTICAS GLOBAIS
-   int totalVisits = 0;
-   int totalWins = 0;
-   int totalLosses = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      totalVisits += g_stateVisits[state];
-      totalWins += g_stateWins[state];
-      totalLosses += g_stateLosses[state];
-   }
-   
-   // Recalcular totais
-   g_totalTrades = totalVisits; // Cada visita = 1 trade real
-   g_totalWins = totalWins;
-   g_totalLosses = totalLosses;
-   
-   Print("📊 RESUMO DA CORREÇÃO:");
-   Print("   Estados com dados corruptos: ", corruptedStates);
-   Print("   Estados corrigidos: ", fixedStates);
-   Print("   Estados desbloqueados: ", unblockedStates);
-   Print("   Novos totais:");
-   Print("     Total Visitas: ", totalVisits);
-   Print("     Total Vitórias: ", totalWins);
-   Print("     Total Perdas: ", totalLosses);
-   Print("     Win Rate: ", totalVisits > 0 ? 
-         DoubleToString((double)totalWins/totalVisits*100, 1) : "0.0", "%");
-   
-   // Forçar save
-   g_memoryDirty = true;
-   SaveState();
-   SaveBrain();
-}
+
 
 // ======================================================================
 // ✅✅✅ FUNÇÃO: REVISÃO COMPLETA DO SISTEMA DE BLOQUEIO
 // ======================================================================
-void OverhaulBlockingSystem()
-{
-   Print("🔄 REVISÃO COMPLETA DO SISTEMA DE BLOQUEIO");
-   
-   int blockedBefore = CountBlockedStates();
-   int totalVisited = g_activeStatesCount;
-   
-   // ✅ NOVAS REGRAS INTELIGENTES
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         double winRate = CalculateWinRate(state);
-         
-         // ✅ REGRAS PARA BLOQUEIO (MAIS RESTRITIVAS)
-         bool shouldBeBlocked = false;
-         
-         // 1. Muito ruim com histórico suficiente
-         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < StateBlockThreshold)
-         {
-            shouldBeBlocked = true;
-         }
-         // 2. Catastrófico mesmo com histórico mínimo
-         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < (StateBlockThreshold / 2.0))
-         {
-            shouldBeBlocked = true;
-         }
-         // 3. Nunca ganhou com visitas significativas
-         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0)
-         {
-            shouldBeBlocked = true;
-         }
-         
-         // ✅ REGRAS PARA DESBLOQUEIO (MAIS LENIENTES)
-         bool shouldBeUnblocked = false;
-         
-         // 1. Performance aceitável
-         if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate >= 0.30)
-         {
-            shouldBeUnblocked = true;
-         }
-         // 2. Poucas visitas, não bloquear prematuramente
-         else if(g_stateVisits[state] < 5)
-         {
-            shouldBeUnblocked = true;
-         }
-         // 3. Mostrando melhoria recente
-         else if(g_stateBlocked[state] && winRate >= 0.25)
-         {
-            shouldBeUnblocked = true;
-         }
-         
-         // APLICAR DECISÃO
-         if(shouldBeBlocked && !g_stateBlocked[state])
-         {
-            g_stateBlocked[state] = true;
-         }
-         else if(shouldBeUnblocked && g_stateBlocked[state])
-         {
-            g_stateBlocked[state] = false;
-         }
-      }
-   }
-   
-   int blockedAfter = CountBlockedStates();
-   
-   Print("📊 RESULTADO DA REVISÃO:");
-   Print("   Estados visitados: ", totalVisited);
-   Print("   Bloqueados antes: ", blockedBefore, " (", 
-         totalVisited > 0 ? DoubleToString((double)blockedBefore/totalVisited*100,1) : "0", "%)");
-   Print("   Bloqueados depois: ", blockedAfter, " (", 
-         totalVisited > 0 ? DoubleToString((double)blockedAfter/totalVisited*100,1) : "0", "%)");
-   Print("   Mudança: ", blockedAfter - blockedBefore);
-   
-   g_memoryDirty = true;
-}
+
 
 // ======================================================================
 // ✅✅✅ FUNÇÃO: RESET PARCIAL INTELIGENTE
 // ======================================================================
-void IntelligentPartialReset()
-{
-   // ✅ PROTEÇÃO: Não resetar até ter base sólida de estados aprendidos
-   if(g_activeStatesCount < MinStatesBeforeReset)
-   {
-      return; // Não resetar até ter aprendido estados suficientes
-   }
-   
-   Print("🧠 RESET PARCIAL INTELIGENTE");
-   
-   int statesReset = 0;
-   int statesRetained = 0;
-   
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         double winRate = CalculateWinRate(state);
-         
-         // ✅ CRITÉRIOS PARA RESET COMPLETO (usar MinVisitsForBlockDecision)
-         if((g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15) || // Muito ruim
-            (g_stateVisits[state] >= MinVisitsForBlockDecision && winRate == 0.0) ||  // Nunca ganhou
-            (g_stateVisits[state] > MinVisitsForBlockDecision && winRate < 0.25))    // Histórico longo ruim
-         {
-            // Reset completo
-            g_stateVisits[state] = 0;
-            g_stateWins[state] = 0;
-            g_stateLosses[state] = 0;
-            // ✅ NÃO desbloquear estado ruim - preservar bloqueio
-            // g_stateBlocked[state] permanece inalterado
-            
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[state * NUM_ACTIONS + a] = 0.0;
-            }
-            
-            statesReset++;
-         }
-         // ✅ RESET PARCIAL PARA ESTADOS MÉDIOS
-         else if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.30)
-         {
-            // Manter 30% da memória
-            g_stateVisits[state] = (int)(g_stateVisits[state] * 0.3);
-            g_stateWins[state] = (int)(g_stateWins[state] * 0.3);
-            g_stateLosses[state] = (int)(g_stateLosses[state] * 0.3);
-            
-            // Garantir mínimos
-            if(g_stateVisits[state] < 1) g_stateVisits[state] = 1;
-            if(g_stateWins[state] < 0) g_stateWins[state] = 0;
-            if(g_stateLosses[state] < 0) g_stateLosses[state] = 0;
-            
-            // Reduzir Q-values
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[state * NUM_ACTIONS + a] *= 0.3;
-            }
-            
-            statesRetained++;
-         }
-         else
-         {
-            statesRetained++;
-         }
-      }
-   }
-   
-   // Recalcular estados ativos
-   g_activeStatesCount = 0;
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         if(g_activeStatesCount < MaxMemoryStates)
-         {
-            g_activeStates[g_activeStatesCount] = state;
-            g_activeStatesCount++;
-         }
-      }
-   }
-   
-   Print("📊 RESULTADO DO RESET:");
-   Print("   Estados resetados completamente: ", statesReset);
-   Print("   Estados mantidos (com redução): ", statesRetained);
-   Print("   Total estados ativos após reset: ", g_activeStatesCount);
-   
-   g_memoryDirty = true;
-   SaveState();
-}
 
-// ======================================================================
-// ✅✅✅ FUNÇÃO: OTIMIZAR PARÂMETROS DINAMICAMENTE
-// ======================================================================
-void OptimizeParametersDynamically()
-{
-   Print("⚙️ OTIMIZANDO PARÂMETROS DINAMICAMENTE");
-   
-   // ✅ AJUSTAR EXPLORAÇÃO BASEADO NA PERFORMANCE
-   double currentWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
-   
-   // ✅ Ajuste adaptativo apenas se habilitado
-   if(EnableAdaptiveExploration)
-   {
-      if(currentWinRate < 0.25)
-      {
-         // Performance ruim, aumentar exploração
-         g_currentExplorationRate = MathMin(g_currentExplorationRate * 1.2, 0.8);
-         Print("📈 Aumentando exploração para ", DoubleToString(g_currentExplorationRate*100,1), 
-               "% (win rate baixa: ", DoubleToString(currentWinRate*100,1), "%)");
-      }
-      else if(currentWinRate > 0.35)
-      {
-         // Performance boa, reduzir exploração
-         g_currentExplorationRate = MathMax(g_currentExplorationRate * 0.9, MinExplorationRate);
-         Print("📉 Reduzindo exploração para ", DoubleToString(g_currentExplorationRate*100,1), 
-               "% (win rate boa: ", DoubleToString(currentWinRate*100,1), "%)");
-      }
-   }
-   
-   // ✅ AJUSTAR LEARNING RATE
-   if(g_totalTrades > 500)
-   {
-      LearningRate = 0.01; // Reduzir após muitos trades
-      Print("🎓 Learning rate ajustado para 0.01 (maturidade do sistema)");
-   }
-   
-   // ✅ AJUSTAR LIMITES DE BLOQUEIO
-   // Mantém sempre MinVisitsForBlockDecision = 30 (não ajusta mais para 8)
-   // Garantia: Estados NUNCA bloqueados com menos de 30 visitas
-   
-   g_memoryDirty = true;
-}
+
+
 
 // ======================================================================
 // ✅ HUD LEVE - FUNÇÕES OTIMIZADAS
@@ -3147,22 +2811,23 @@ void CreateHUDObjects()
       ObjectSetInteger(0, "HUD_Blocked", OBJPROP_SELECTABLE, false);
       ObjectSetString(0, "HUD_Blocked", OBJPROP_TEXT, "   Bloqueados: 0 (0.0%)");
       hudObjects[hudObjectCount++] = "HUD_Blocked";
-      currentY += lineHeight + 5;
+      currentY += lineHeight;
    }
    
-   if(ObjectCreate(0, "HUD_DecayInfo", OBJ_LABEL, 0, 0, 0))
+   // ✅ NOVO: Exibir classificação de qualidade dos estados
+   if(ObjectCreate(0, "HUD_Quality", OBJ_LABEL, 0, 0, 0))
    {
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_XDISTANCE, HUD_X);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_YDISTANCE, currentY);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_COLOR, clrYellow);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_FONTSIZE, 9);
-      ObjectSetString(0, "HUD_DecayInfo", OBJPROP_FONT, "Arial");
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_BACK, false);
-      ObjectSetInteger(0, "HUD_DecayInfo", OBJPROP_SELECTABLE, false);
-      ObjectSetString(0, "HUD_DecayInfo", OBJPROP_TEXT, "   Decay: Ativo | Ciclos: 0");
-      hudObjects[hudObjectCount++] = "HUD_DecayInfo";
-      currentY += lineHeight;
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_XDISTANCE, HUD_X);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_YDISTANCE, currentY);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_COLOR, HUD_TextColor);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, "HUD_Quality", OBJPROP_FONT, "Arial");
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_BACK, false);
+      ObjectSetInteger(0, "HUD_Quality", OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, "HUD_Quality", OBJPROP_TEXT, "   Qualidade: ELITE=0 | BONS=0 | NEUTROS=0 | RUINS=0 | BLOQ=0");
+      hudObjects[hudObjectCount++] = "HUD_Quality";
+      currentY += lineHeight + 5;
    }
    
    if(ObjectCreate(0, "HUD_Direction", OBJ_LABEL, 0, 0, 0))
@@ -3436,10 +3101,23 @@ void UpdateHUDLight()
    ObjectSetInteger(0, "HUD_Blocked", OBJPROP_COLOR, blockedColor);
    ObjectSetString(0, "HUD_Blocked", OBJPROP_TEXT, newBlocked);
    
-   string decayInfo = StringFormat("   Decay: %s | Ciclos: %d", 
-                                   EnableMemoryDecay ? "Ativo" : "Inativo",
-                                   g_totalDecayCycles);
-   ObjectSetString(0, "HUD_DecayInfo", OBJPROP_TEXT, decayInfo);
+   // ✅ ATUALIZAR CONTADORES DE QUALIDADE
+   // Atualizar contadores apenas a cada 30 segundos para otimização
+   static datetime lastQualityUpdate = 0;
+   if(TimeCurrent() - lastQualityUpdate > 30 || lastQualityUpdate == 0)
+   {
+      UpdateQualityCounts();
+      lastQualityUpdate = TimeCurrent();
+   }
+   
+   // ✅ EXIBIR CLASSIFICAÇÃO DE QUALIDADE NO HUD
+   string qualityText = StringFormat("   Qualidade: ELITE=%d | BONS=%d | NEUTROS=%d | RUINS=%d | BLOQ=%d",
+                                     g_eliteStatesCount,
+                                     g_goodStatesCount,
+                                     g_neutralStatesCount,
+                                     g_badStatesCount,
+                                     g_blockedStatesCount);
+   ObjectSetString(0, "HUD_Quality", OBJPROP_TEXT, qualityText);
    
    string directionIcon = GetDirectionIconFast(currentDir);
    string directionText = (currentDir == 1) ? "BUY" : (currentDir == 2) ? "SELL" : "NEUTRO";
@@ -3500,7 +3178,7 @@ void UpdateHUDLight()
       cachedVolume = g_volumeMultiplier;
    }
    
-   double explorationRatePercent = g_currentExplorationRate * 100;
+   double explorationRatePercent = ExplorationRate * 100;
    // ⚠️ GARANTIR QUE NÃO PASSE DE 100%
    if(explorationRatePercent > 100.0) explorationRatePercent = 100.0;
    string newExploration = StringFormat("Exploração: %.0f%%", explorationRatePercent);
@@ -3715,26 +3393,46 @@ void ManageDynamicTrailingStop()
       double newSL = currentSL;
       double newTP = currentTP;
       
+      // ✅ PRIORIDADE 1: BREAKEVEN (ativa primeiro para proteger o trade)
       if(UseBreakevenStop && !g_trailingBreakevenActivated[trailIndex] && 
          MathAbs(currentProfit) >= BreakevenTriggerPoints)
       {
+         // ✅ Breakeven configurável: pode ser puro (0 a 0) ou com margem
          double breakevenPrice = entryPrice;
          
-         if(isBuy) breakevenPrice += point * 10;
-         else breakevenPrice -= point * 10;
+         // Adiciona margem de segurança se configurado (padrão: 0 = breakeven puro)
+         if(BreakevenAddPoints > 0)
+         {
+            if(isBuy) breakevenPrice += point * BreakevenAddPoints;
+            else breakevenPrice -= point * BreakevenAddPoints;
+         }
          
+         // Verifica se já moveu o suficiente para ativar breakeven
          if((isBuy && currentPrice > breakevenPrice) || 
             (!isBuy && currentPrice < breakevenPrice))
          {
             newSL = breakevenPrice;
             g_trailingBreakevenActivated[trailIndex] = true;
             shouldAdjust = true;
+            
+            double breakevenPips = SafeDivide(MathAbs(newSL - entryPrice), point, 0.0);
             Print("💰 BREAKEVEN ativado para posição #", ticket, 
-                  " | SL ajustado para: ", newSL);
+                  " | SL ajustado para: ", newSL,
+                  " (entrada ", (BreakevenAddPoints > 0 ? "+" : ""), 
+                  BreakevenAddPoints, " pontos = ", breakevenPips, " pontos)");
          }
       }
       
-      if(MathAbs(currentProfit) >= TrailingStartPoints)
+      // ✅ PRIORIDADE 2: TRAILING STOP (só ativa depois do breakeven se BreakevenBeforeTrailing = true)
+      bool canStartTrailing = true;
+      
+      // Se BreakevenBeforeTrailing está ativo, só permite trailing após breakeven ser ativado
+      if(BreakevenBeforeTrailing && UseBreakevenStop && !g_trailingBreakevenActivated[trailIndex])
+      {
+         canStartTrailing = false;
+      }
+      
+      if(canStartTrailing && MathAbs(currentProfit) >= TrailingStartPoints)
       {
          // ✅ SEMPRE usa trailing fixo em pontos configurados
          double trailingDistancePoints = TrailingStopPoints;
@@ -3808,7 +3506,10 @@ void ManageDynamicTrailingStop()
                double tpPoints = SafeDivide(MathAbs(newTP - entryPrice), point, 0.0);
                
                // ✅ Trailing sempre usa pontos fixos
+               string breakevenStatus = g_trailingBreakevenActivated[trailIndex] ? 
+                  " (após BREAKEVEN)" : "";
                Print("📈 TRAILING STOP (Fixo) ajustado para posição #", ticket,
+                     breakevenStatus,
                      " | Novo SL: ", newSL, " (", slPoints, " pontos)",
                      " | Novo TP: ", newTP, " (", tpPoints, " pontos)",
                      " | Lucro atual: ", currentProfit, " pontos");
@@ -3902,46 +3603,19 @@ void UpdateQ(int state, int action, double reward)
    // ✅ FIX BUG #1: REMOVIDO - Contadores agora só incrementam em OnTradeTransaction
    // Evita dupla contagem (aqui + OnTradeTransaction)
    
-   // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
-   if(EnableUnifiedBlockingSystem && g_stateVisits[state] >= MinVisitsForBlockDecision)
-   {
-      double winRate = CalculateWinRate(state);
-      
-      // Só bloquear se realmente for muito ruim - SEM verificação adicional de visitas
-      if(winRate < 0.25)
-      {
-         g_stateBlocked[state] = true;
-         Print("⛔ Estado ", state, " bloqueado - Win rate muito baixa: ", 
-               DoubleToString(winRate*100,1), "%");
-      }
-      else if(g_stateBlocked[state] && winRate >= 0.40)
-      {
-         g_stateBlocked[state] = false;
-         Print("✅ Estado ", state, " desbloqueado - Win rate melhorou: ", 
-               DoubleToString(winRate*100,1), "%");
-      }
-   }
+   // 🚨 FIX CRÍTICO: REMOVIDA toda lógica de bloqueio/desbloqueio de UpdateQ
+   // MOTIVO: UpdateQ é responsável APENAS por atualizar Q-values (aprendizado)
+   // BLOQUEIO/DESBLOQUEIO = responsabilidade de EvaluateAndUpdateBlockState()
+   // PROBLEMA ANTERIOR: UpdateQ desbloqueava estados ignorando EnableAutoUnblocking
+   // e criava conflito com lógica principal de bloqueio
+   
+   // ⚠️ LÓGICA DE BLOQUEIO REMOVIDA DAQUI - Ver EvaluateAndUpdateBlockState()
+   // Bloqueio agora acontece APENAS em:
+   // 1. OnTradeTransaction → EvaluateAndUpdateBlockState (após cada trade)
+   // 2. EvaluateAllActiveStates (avaliação periódica)
+   // 3. Ambos respeitam EnableAutoUnblocking
    
    g_memoryDirty = true;
-   
-   // ✅ EXPLORAÇÃO DINÂMICA BASEADA EM PERFORMANCE (apenas se habilitado)
-   if(EnableAdaptiveExploration)
-   {
-      if(reward > 0)
-      {
-         // Reduzir exploração após vitória
-         g_currentExplorationRate *= ExplorationDecay;
-      }
-      else if(reward < -1.0)
-      {
-         // ✅ CORRIGIDO: Aumentar exploração após perda grande, mas respeitar InitialExplorationRate como máximo
-         g_currentExplorationRate = MathMin(g_currentExplorationRate * 1.1, InitialExplorationRate);
-      }
-   }
-   
-   // ✅ GARANTIR LIMITES
-   if(g_currentExplorationRate > 1.0) g_currentExplorationRate = 1.0;
-   if(g_currentExplorationRate < MinExplorationRate) g_currentExplorationRate = MinExplorationRate;
    
    g_qUpdatesSinceSave++;
    g_totalQUpdates++;
@@ -3957,6 +3631,82 @@ void UpdateQ(int state, int action, double reward)
    }
    
    // ✅ Correções periódicas removidas (FixStuckStatesProblem desabilitada)
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🎯 FUNÇÃO: Obter sinal simplificado usando apenas RSI + MACD
+// ══════════════════════════════════════════════════════════════════════
+// Retorna: 0=NOP, 1=BUY, 2=SELL
+// Usa apenas RSI para zona e MACD para direção/confirmação
+int GetSimplifiedSignal()
+{
+   // Obter parâmetros atuais (podem vir da pesquisa automática ou inputs)
+   int    currentRSIPeriod      = RSIPeriod;
+   double currentRSIOverbought  = RSI_Overbought;
+   double currentRSIOversold    = RSI_Oversold;
+   int    currentMACDFast       = MACD_Fast;
+   int    currentMACDSlow       = MACD_Slow;
+   int    currentMACDSignal     = MACD_Signal;
+   
+   // Se pesquisa automática estiver ativa, usar config atual
+   if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+   {
+      currentRSIOverbought = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].rsiOverbought;
+      currentRSIOversold   = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].rsiOversold;
+      currentMACDFast      = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].macdFast;
+      currentMACDSlow      = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].macdSlow;
+      currentMACDSignal    = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].macdSignal;
+   }
+   else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
+   {
+      // Usar melhor config encontrada
+      currentRSIOverbought = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOverbought;
+      currentRSIOversold   = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOversold;
+      currentMACDFast      = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdFast;
+      currentMACDSlow      = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSlow;
+      currentMACDSignal    = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSignal;
+   }
+   
+   // Obter valores dos indicadores
+   double rsi[1];
+   double macdMain[1];
+   double macdSignal[1];
+   
+   if(CopyBuffer(g_rsiHandle, 0, 0, 1, rsi) < 1)
+   {
+      Print("❌ Erro ao copiar RSI");
+      return 0; // NOP
+   }
+   
+   if(CopyBuffer(g_macdHandle, 0, 0, 1, macdMain) < 1)
+   {
+      Print("❌ Erro ao copiar MACD Main");
+      return 0; // NOP
+   }
+   
+   if(CopyBuffer(g_macdHandle, 1, 0, 1, macdSignal) < 1)
+   {
+      Print("❌ Erro ao copiar MACD Signal");
+      return 0; // NOP
+   }
+   
+   // Lógica simplificada de sinal
+   bool rsiBuyZone   = (rsi[0] < currentRSIOversold);
+   bool rsiSellZone  = (rsi[0] > currentRSIOverbought);
+   bool macdBuyBias  = (macdMain[0] > macdSignal[0]);
+   bool macdSellBias = (macdMain[0] < macdSignal[0]);
+   
+   // Decisão final
+   if(rsiBuyZone && macdBuyBias)
+   {
+      return 1; // BUY
+   }
+   else if(rsiSellZone && macdSellBias)
+   {
+      return 2; // SELL
+   }
+   
+   return 0; // NOP - sem sinal claro
 }
 
 // ======================================================================
@@ -3996,12 +3746,28 @@ int ChooseAction(int state)
       return 0;
    }
    
-   if(IsStateBlocked(state))
+   // ✅ NOVO: Usar lógica simplificada RSI+MACD se habilitada
+   if(UseSimplifiedSignalLogic)
    {
-      Print("⛔ Estado ", state, " bloqueado pelo sistema corrigido");
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (sistema corrigido)", state);
-      return 0;
+      int simplifiedSignal = GetSimplifiedSignal();
+      
+      // 🚨 FIX CRÍTICO: REMOVER verificações de bloqueio duplicadas
+      // OnTick já verifica IsStateBlocked antes de chamar ChooseAction
+      // Verificações aqui causavam paradas mesmo com estado OK
+      
+      if(simplifiedSignal == 1)
+         g_statusMessage = "📈 SINAL SIMPLIFICADO: BUY (RSI+MACD)";
+      else if(simplifiedSignal == 2)
+         g_statusMessage = "📉 SINAL SIMPLIFICADO: SELL (RSI+MACD)";
+      else
+         g_statusMessage = "⏸️ SINAL SIMPLIFICADO: NOP (sem sinal claro)";
+      
+      Print("🎯 Sinal simplificado: ", (simplifiedSignal==0?"NOP":(simplifiedSignal==1?"BUY":"SELL")));
+      return simplifiedSignal;
    }
+   
+   // 🚨 FIX CRÍTICO: REMOVER verificação de bloqueio duplicada
+   // OnTick já verifica antes de chamar esta função
    
    if(ArraySize(g_Q) <= state * NUM_ACTIONS + 2)
    {
@@ -4012,32 +3778,18 @@ int ChooseAction(int state)
    
    if(g_consecutiveLosses >= 12)
    {
-      // ✅ Reset apenas se adaptativo estiver habilitado
-      if(EnableAdaptiveExploration)
-      {
-         // ✅ CORRIGIDO: Reseta para InitialExplorationRate SEM multiplicar ou forçar mínimo
-         g_currentExplorationRate = InitialExplorationRate;
-         Print("♻️ Reset de exploração após ", g_consecutiveLosses, " perdas consecutivas para ", DoubleToString(g_currentExplorationRate*100,1), "%");
-      }
    }
    
-   // ⚠️ CORREÇÃO: REDUZIR EXPLORAÇÃO DRAMATICAMENTE
+   // 🚨 FIX CRÍTICO: EXPLORAÇÃO FORÇADA PARA ESTADOS NOVOS (100%)
+   // Estados com 0 visitas SEMPRE exploram para garantir primeira visita
+   // Sem isso, estado pode ficar preso em NOP e nunca ser descoberto
    if(g_stateVisits[state] < MinStateVisitsToTrade)
    {
-      double eps = 0.8; // 80% de exploração para estados novos
-      
-      if(((double)MathRand() / 32767.0) < eps) 
-      {
-         int randomAction = 1 + (MathRand() % 2);
-         Print("🔍 EXPLORAÇÃO (estado novo): Ação aleatória ", randomAction, " | Estado: ", state);
-         g_statusMessage = "🔍 Exploração (estado novo)";
-         return randomAction;
-      }
-      else
-      {
-         Print("🤔 Estado novo, mas escolhendo NOP (20% chance)");
-         return 0;
-      }
+      // 100% exploração - SEMPRE opera em estados novos
+      int randomAction = 1 + (MathRand() % 2);  // BUY ou SELL aleatório
+      Print("🔍 EXPLORAÇÃO FORÇADA (estado novo ", state, " com ", g_stateVisits[state], " visitas): Ação ", randomAction);
+      g_statusMessage = StringFormat("🔍 Exploração forçada (estado %d novo)", state);
+      return randomAction;
    }
    
    // Para estados conhecidos, usar taxa de exploração normal
@@ -4075,19 +3827,19 @@ int ChooseAction(int state)
    
    // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
    double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)  // ✅ REDUZIDO: 15% ao invés de 30%
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)  // ✅ REDUZIDO: 10% ao invés de 15% (apenas estados PÉSSIMOS)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (estado muito ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
       g_statusMessage = "NOP (estado muito ruim)";
    }
-   else if(nopQ > best * 5.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 5x melhor ao invés de 1.5x
+   else if(nopQ > best * 8.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 8x melhor ao invés de 5x (favorecer trades)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (superioridade: ", nopQ, " vs ", best, ")");
       g_statusMessage = "NOP (melhor opção)";
    }
-   else if(best <= -50.0)  // ✅ REDUZIDO: -50 ao invés de -20 (ações precisam estar MUITO ruins)
+   else if(best <= -50.0)  // ✅ MANTIDO: -50 (ações precisam estar MUITO ruins)
    {
       bestA = 0;
       Print("🤔 NOP escolhido (ações de trade muito ruins: ", best, ")");
@@ -4109,6 +3861,14 @@ int ChooseAction(int state)
          " | Visitas: ", g_stateVisits[state],
          " | Win Rate: ", DoubleToString(winRate*100,1), "%");
    
+   // 🚨 VERIFICAÇÃO CRÍTICA: Alertar se Q-values parecem não estar sendo usados
+   if(g_stateVisits[state] >= 20 && MathAbs(best) < 0.01 && MathAbs(nopQ) < 0.01)
+   {
+      Print("⚠️⚠️⚠️ ALERTA: Estado ", state, " com 20+ visitas mas Q-values próximos de zero!");
+      Print("   Isso indica que UpdateQ pode não estar sendo chamado ou rewards são muito pequenos");
+      Print("   Q[BUY]: ", g_Q[state*NUM_ACTIONS+1], " | Q[SELL]: ", g_Q[state*NUM_ACTIONS+2], " | Q[NOP]: ", nopQ);
+   }
+   
    return bestA;
 }
 
@@ -4127,13 +3887,19 @@ void ExecuteAction(int action, int state)
          " | Perdas REAIS: ", g_stateLosses[state],
          " | Vitórias REAIS: ", g_stateWins[state]);
    
-   if(IsStateBlocked(state))
-   {
-      Print("⛔⛔⛔ BLOQUEIO CONFIRMADO - Estado ", state, " bloqueado pelo sistema corrigido - trade CANCELADO");
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (sistema corrigido)", state);
-      UpdateQ_NOP(state);
-      return;
-   }
+   // 🚨 VERIFICAÇÃO CRÍTICA: Registrar estado na abertura
+   // Isso permite verificar se o mesmo estado é usado no fechamento
+   Print("📝 Estado na ABERTURA: ", state);
+   
+   // 🚨 FIX DEFINITIVO: REMOVIDA verificação IsStateBlocked daqui
+   // OnTick JÁ verifica IsStateBlocked antes de chamar ChooseAction e ExecuteAction
+   // Esta verificação duplicada causava paradas indevidas mesmo após passar no OnTick
+   // CONFIAMOS na verificação do OnTick - NÃO verificamos novamente aqui
+   
+   // ✅ OPCIONAL: Reduzir lote para estados RUINS (BAD)
+   // Se o estado for classificado como RUIM, podemos optar por não operar
+   // ou reduzir o lote. Por padrão, apenas bloqueamos estados BLOCKED.
+   // Estados BAD ainda podem operar mas com lote reduzido via GetStateQualityScore
    
    if(UseRealVolumeFilter)
    {
@@ -4182,7 +3948,7 @@ void ExecuteAction(int action, int state)
    
    if(EnableSmartLot)
    {
-      quality = GetStateQuality(state);
+      quality = GetStateQualityScore(state);
       
       // 🔍 DEBUG SMART LOT: Log detalhado para diagnóstico
       int visits = (state >= 0 && state < ArraySize(g_stateVisits)) ? g_stateVisits[state] : 0;
@@ -4362,7 +4128,7 @@ void ExecuteAction(int action, int state)
    string commentType = "NORMAL";
    
    // quality já foi declarada anteriormente na linha 4169
-   quality = GetStateQuality(state);
+   quality = GetStateQualityScore(state);
    
    // ✅ FIX BUG #12: Validar quality após GetStateQuality
    if(quality != quality) quality = 0.0; // NaN check
@@ -4377,14 +4143,13 @@ void ExecuteAction(int action, int state)
       else commentType = "NEUTRO";
    }
    
-   string comment = StringFormat("PHX307F_CORRIGIDO_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f_DECAY%d", 
+   string comment = StringFormat("PHX307F_QL_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f", 
                    isBuy ? "BUY" : "SELL",
                    commentType,
                    pyramidLevel,
                    FixedSL_Points, FixedTP_Points,
                    g_volumeMultiplier,
-                   quality,
-                   g_totalDecayCycles);
+                   quality);
    
    // ✅ CORREÇÃO: Atribuir string diretamente ao campo comment
    req.comment = comment;
@@ -4438,15 +4203,14 @@ void ExecuteAction(int action, int state)
       else lotTypeMsg = "📊 NEUTRO ";
    }
    
-   g_statusMessage = StringFormat("✅ %s%s #%d executado (VOL: %.1fx, Q: %.2f, Decay: %d)", 
+   g_statusMessage = StringFormat("✅ %s%s #%d executado (VOL: %.1fx, Q: %.2f)", 
                                   lotTypeMsg, 
                                   isBuy ? "BUY" : "SELL", 
                                   pyramidLevel, 
                                   g_volumeMultiplier, 
-                                  quality,
-                                  g_totalDecayCycles);
+                                  quality);
    
-   Print("🎯 TRADE EXECUTADO COM SUCESSO - SISTEMA CORRIGIDO COM DECAY: ",
+   Print("🎯 TRADE EXECUTADO - Q-LEARNING: ",
          lotTypeMsg,
          isBuy ? "BUY" : "SELL", " #", pyramidLevel,
          " | Estado: ", state,
@@ -4455,8 +4219,7 @@ void ExecuteAction(int action, int state)
          " | Lote: ", desiredLot, " (", DoubleToString(desiredLot/LotSize, 1), "x)",
          " | SL: ", DoubleToString(slPoints, 0), " pts",
          " | TP: ", DoubleToString(tpPoints, 0), " pts",
-         " | Preço: ", DoubleToString(price, 5),
-         " | Ciclos Decay: ", g_totalDecayCycles);
+         " | Preço: ", DoubleToString(price, 5));
    
    Print("📊 AGUARDANDO FECHAMENTO: Trade executado, visitas/perdas serão atualizadas apenas após fechamento...");
 }
@@ -4486,9 +4249,11 @@ double ComputeRewardFromTrade(double profit)
 }
 
 // ======================================================================
-// ✅✅✅ FUNÇÃO GetStateQuality - VERSÃO MELHORADA
+// ✅✅✅ FUNÇÃO GetStateQualityScore - Cálculo numérico de qualidade
 // ======================================================================
-double GetStateQuality(int state)
+// Retorna um score numérico (-2.0 a 2.0) para uso em multiplicadores de lote
+// Esta função mantém a lógica original baseada em Q-values e win rate
+double GetStateQualityScore(int state)
 {
    if(state < 0 || state >= NUM_STATES) return 0.0;
    if(ArraySize(g_stateVisits) <= state) return 0.0;
@@ -4532,6 +4297,207 @@ double GetStateQuality(int state)
    return quality;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🎯 FUNÇÃO GetStateQuality - Classificação por categorias
+// ══════════════════════════════════════════════════════════════════════
+// Retorna a categoria de qualidade de um estado (BLOCKED/BAD/NEUTRAL/GOOD/ELITE)
+// 
+// FLUXO DE CLASSIFICAÇÃO:
+// 1. Se estado bloqueado E sistema de bloqueio ativo → STATE_QUALITY_BLOCKED
+// 2. Se visitas < MinVisitsForQualityDecision → STATE_QUALITY_NEUTRAL (dados insuficientes)
+// 3. Com base no win rate:
+//    - >= EliteWinRateThreshold (70%) → STATE_QUALITY_ELITE
+//    - >= GoodWinRateThreshold (55%) → STATE_QUALITY_GOOD
+//    - >= BadWinRateThreshold (35%) → STATE_QUALITY_NEUTRAL
+//    - < BadWinRateThreshold (35%) → STATE_QUALITY_BAD
+//
+// IMPORTANTE: Estados bloqueados são SEMPRE classificados como BLOCKED,
+// independentemente do número de visitas, garantindo que apareçam nas estatísticas
+ENUM_STATE_QUALITY GetStateQuality(int state)
+{
+   // Validações básicas
+   if(state < 0 || state >= NUM_STATES) return STATE_QUALITY_NEUTRAL;
+   if(ArraySize(g_stateVisits) <= state) return STATE_QUALITY_NEUTRAL;
+   
+   // ✅ PRIORIDADE 1: Verificar bloqueio ANTES de qualquer outra condição
+   // Estados bloqueados são SEMPRE classificados como BLOCKED, mesmo com poucas visitas
+   if(EnableUnifiedBlockingSystem && g_stateBlocked[state])
+   {
+      return STATE_QUALITY_BLOCKED;
+   }
+   
+   // ✅ PRIORIDADE 2: Verificar se há visitas suficientes para classificação
+   // Estados não bloqueados com poucas visitas são considerados NEUTRAL
+   int visits = g_stateVisits[state];
+   if(visits < MinVisitsForQualityDecision)
+   {
+      return STATE_QUALITY_NEUTRAL;
+   }
+   
+   // ✅ PRIORIDADE 3: Classificar com base no win rate
+   double winRate = CalculateWinRate(state);
+   
+   if(winRate >= EliteWinRateThreshold)
+   {
+      return STATE_QUALITY_ELITE;  // >= 70%
+   }
+   else if(winRate >= GoodWinRateThreshold)
+   {
+      return STATE_QUALITY_GOOD;   // >= 55%
+   }
+   else if(winRate >= BadWinRateThreshold)
+   {
+      return STATE_QUALITY_NEUTRAL; // >= 35%
+   }
+   else
+   {
+      return STATE_QUALITY_BAD;     // < 35%
+   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Obter nome da categoria de qualidade
+// ══════════════════════════════════════════════════════════════════════
+string GetStateQualityName(ENUM_STATE_QUALITY quality)
+{
+   switch(quality)
+   {
+      case STATE_QUALITY_ELITE:    return "ELITE";
+      case STATE_QUALITY_GOOD:     return "BOM";
+      case STATE_QUALITY_NEUTRAL:  return "NEUTRO";
+      case STATE_QUALITY_BAD:      return "RUIM";
+      case STATE_QUALITY_BLOCKED:  return "BLOQUEADO";
+      default:                     return "DESCONHECIDO";
+   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Atualizar contadores de qualidade de estados
+// ══════════════════════════════════════════════════════════════════════
+// Conta quantos estados existem em cada categoria de qualidade
+// Esta função deve ser chamada periodicamente para atualizar o HUD
+void UpdateQualityCounts()
+{
+   g_eliteStatesCount = 0;
+   g_goodStatesCount = 0;
+   g_neutralStatesCount = 0;
+   g_badStatesCount = 0;
+   g_blockedStatesCount = 0;
+   
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      ENUM_STATE_QUALITY quality = GetStateQuality(i);
+      
+      switch(quality)
+      {
+         case STATE_QUALITY_ELITE:
+            g_eliteStatesCount++;
+            break;
+         case STATE_QUALITY_GOOD:
+            g_goodStatesCount++;
+            break;
+         case STATE_QUALITY_NEUTRAL:
+            g_neutralStatesCount++;
+            break;
+         case STATE_QUALITY_BAD:
+            g_badStatesCount++;
+            break;
+         case STATE_QUALITY_BLOCKED:
+            g_blockedStatesCount++;
+            break;
+      }
+   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Atualizar ranking de melhores e piores estados
+// ══════════════════════════════════════════════════════════════════════
+// Identifica os TOP 10 melhores e piores estados baseado em desempenho
+void UpdateStateRankings()
+{
+   // Array temporário para armazenar todos os estados elegíveis
+   StateRankInfo allStates[];
+   int validCount = 0;
+   
+   ArrayResize(allStates, NUM_STATES);
+   
+   // Coletar todos os estados com visitas suficientes
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] >= MinVisitsForQualityDecision)
+      {
+         allStates[validCount].state = i;
+         allStates[validCount].winRate = CalculateWinRate(i);
+         allStates[validCount].visits = g_stateVisits[i];
+         allStates[validCount].profit = (ArraySize(g_stateAvgProfit) > i) ? g_stateAvgProfit[i] * g_stateVisits[i] : 0.0;
+         allStates[validCount].quality = GetStateQuality(i);
+         validCount++;
+      }
+      // Incluir estados bloqueados mesmo com poucas visitas
+      else if(g_stateBlocked[i] && g_stateVisits[i] > 0)
+      {
+         allStates[validCount].state = i;
+         allStates[validCount].winRate = CalculateWinRate(i);
+         allStates[validCount].visits = g_stateVisits[i];
+         allStates[validCount].profit = (ArraySize(g_stateAvgProfit) > i) ? g_stateAvgProfit[i] * g_stateVisits[i] : 0.0;
+         allStates[validCount].quality = STATE_QUALITY_BLOCKED;
+         validCount++;
+      }
+   }
+   
+   if(validCount == 0) return;
+   
+   // Ordenar por win rate (decrescente) para encontrar os melhores
+   for(int i = 0; i < validCount - 1; i++)
+   {
+      for(int j = i + 1; j < validCount; j++)
+      {
+         if(allStates[j].winRate > allStates[i].winRate)
+         {
+            StateRankInfo temp = allStates[i];
+            allStates[i] = allStates[j];
+            allStates[j] = temp;
+         }
+      }
+   }
+   
+   // Copiar TOP 10 melhores
+   int bestCount = MathMin(10, validCount);
+   for(int i = 0; i < bestCount; i++)
+   {
+      g_bestStates[i] = allStates[i];
+   }
+   // Zerar slots vazios
+   for(int i = bestCount; i < 10; i++)
+   {
+      g_bestStates[i].state = -1;
+      g_bestStates[i].visits = 0;
+   }
+   
+   // Inverter ordem para pegar os piores
+   for(int i = 0; i < validCount / 2; i++)
+   {
+      StateRankInfo temp = allStates[i];
+      allStates[i] = allStates[validCount - 1 - i];
+      allStates[validCount - 1 - i] = temp;
+   }
+   
+   // Copiar TOP 10 piores
+   int worstCount = MathMin(10, validCount);
+   for(int i = 0; i < worstCount; i++)
+   {
+      g_worstStates[i] = allStates[i];
+   }
+   // Zerar slots vazios
+   for(int i = worstCount; i < 10; i++)
+   {
+      g_worstStates[i].state = -1;
+      g_worstStates[i].visits = 0;
+   }
+   
+   g_lastRankingUpdate = TimeCurrent();
+}
+
 // ======================================================================
 // ✅✅✅ FUNÇÕES PARA CALCULAR ESTADO
 // ======================================================================
@@ -4553,20 +4519,9 @@ int GetMADistanceBucket(double maDistance)
    else return 2;                        // Acima da MA
 }
 
-// ✅ Função para calcular bucket ADX
-int GetADXBucket(double adxValue)
-{
-   if(adxValue < 20) return 0;           // Tendência fraca
-   else return 1;                        // Tendência forte
-}
+// ✅ REMOVIDO: GetADXBucket() (indicador ADX removido)
 
-// ✅ Função para calcular bucket Bollinger Bands
-int GetBBBucket(double bbPosition)
-{
-   if(bbPosition < 0.3) return 0;        // Próximo da banda inferior
-   else if(bbPosition < 0.7) return 1;   // No meio
-   else return 2;                        // Próximo da banda superior
-}
+// ✅ REMOVIDO: GetBBBucket() (indicador BB removido)
 
 // ✅ Função para calcular bucket volatilidade
 int GetVolatilityBucket(double atrCurrent, double atrPrevious)
@@ -4577,16 +4532,17 @@ int GetVolatilityBucket(double atrCurrent, double atrPrevious)
    else return 1;                        // Volatilidade estável/aumentando
 }
 
-// ✅ Função para calcular bucket volume
+// ✅ Função para calcular bucket volume (3 níveis)
 int GetVolumeBucket()
 {
-   if(!UseRealVolumeFilter) return 1;    // Volume normal (default)
+   if(!UseRealVolumeFilter) return 1;    // Volume médio (default)
    
-   if(g_volumeMultiplier < 0.7) return 0;  // Volume baixo
-   else return 1;                         // Volume normal/alto
+   if(g_volumeMultiplier < 0.5) return 0;      // Volume baixo
+   else if(g_volumeMultiplier < 1.2) return 1; // Volume médio
+   else return 2;                              // Volume alto
 }
 
-// ✅ Função para calcular bucket de tempo
+// ✅ Função para calcular bucket de tempo (4 períodos)
 int GetTimeBucket()
 {
    MqlDateTime timeStruct;
@@ -4594,8 +4550,10 @@ int GetTimeBucket()
    
    int hour = timeStruct.hour;
    
-   if(hour >= 0 && hour < 12) return 0;      // Manhã/Madrugada
-   else return 1;                            // Tarde/Noite
+   if(hour >= 0 && hour < 6) return 0;       // Madrugada (0-6h)
+   else if(hour >= 6 && hour < 12) return 1; // Manhã (6-12h)
+   else if(hour >= 12 && hour < 18) return 2; // Tarde (12-18h)
+   else return 3;                            // Noite (18-24h)
 }
 
 // ======================================================================
@@ -4603,12 +4561,10 @@ int GetTimeBucket()
 // ======================================================================
 int GetCurrentState()
 {
-   double ma[], rsi[], adx[], bb_upper[], bb_lower[], atr[];
+   // ✅ SIMPLIFICADO: Removidos arrays adx[], bb_upper[], bb_lower[] (indicadores removidos)
+   double ma[], rsi[], atr[];
    ArraySetAsSeries(ma, true);
    ArraySetAsSeries(rsi, true);
-   ArraySetAsSeries(adx, true);
-   ArraySetAsSeries(bb_upper, true);
-   ArraySetAsSeries(bb_lower, true);
    ArraySetAsSeries(atr, true);
    
    if(CopyBuffer(g_maHandle, 0, 0, 1, ma) < 1) 
@@ -4621,21 +4577,8 @@ int GetCurrentState()
       Print("❌ Erro ao copiar RSI");
       return -1;
    }
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) 
-   {
-      Print("❌ Erro ao copiar ADX");
-      return -1;
-   }
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) 
-   {
-      Print("❌ Erro ao copiar BB Upper");
-      return -1;
-   }
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) 
-   {
-      Print("❌ Erro ao copiar BB Lower");
-      return -1;
-   }
+   // ✅ REMOVIDO: CopyBuffer para ADX (indicador removido)
+   // ✅ REMOVIDO: CopyBuffer para BB Upper e Lower (indicador removido)
    if(CopyBuffer(g_atrHandle, 0, 0, 2, atr) < 2) 
    {
       Print("❌ Erro ao copiar ATR");
@@ -4657,39 +4600,30 @@ int GetCurrentState()
    else
       maDistance = SafeDivide(price - ma[0], point * 10, 0.0);
    
-   // ✅ Cálculo da posição nas Bollinger Bands
-   double bbPosition = 0;
-   double bbRange = bb_upper[0] - bb_lower[0];
-   if(bbRange > 0)
-      bbPosition = SafeDivide(price - bb_lower[0], bbRange, BB_NEUTRAL_POSITION);
-   else
-      bbPosition = BB_NEUTRAL_POSITION;  // Usar posição neutra se range inválido
+   // ✅ REMOVIDO: Cálculo da posição nas Bollinger Bands (indicador removido)
    
-   // ✅ Calcular buckets otimizados
+   // ✅ Calcular buckets otimizados (SEM ADX e BB)
    int maBucket = GetMADistanceBucket(maDistance);
    int rsiBucket = GetRSIBucket(rsi[0]);
-   int adxBucket = GetADXBucket(adx[0]);
-   int bbBucket = GetBBBucket(bbPosition);
+   // ✅ REMOVIDO: adxBucket (indicador ADX removido)
+   // ✅ REMOVIDO: bbBucket (indicador BB removido)
    int volBucket = GetVolatilityBucket(atr[0], atr[1]);
    int volumeBucket = GetVolumeBucket();
    int timeBucket = GetTimeBucket();
    
-   // ✅ Proteção contra overflow
+   // ✅ Proteção contra overflow (SEM ADX e BB)
    maBucket = (int)MathMod(maBucket, BINS_MA_DIST);
    rsiBucket = (int)MathMod(rsiBucket, BINS_RSI);
-   adxBucket = (int)MathMod(adxBucket, BINS_ADX);
-   bbBucket = (int)MathMod(bbBucket, BINS_BBPOS);
    volBucket = (int)MathMod(volBucket, BINS_VOLATILITY);
    volumeBucket = (int)MathMod(volumeBucket, BINS_VOLUME);
    timeBucket = (int)MathMod(timeBucket, BINS_TIME);
    
-   // ✅ CORREÇÃO: Método correto - multiplicar na ordem inversa
+   // ✅ SIMPLIFICADO: Cálculo de estado sem ADX e BB
+   // Nova fórmula: state = (((time * VOLUME + volume) * VOLATILITY + vol) * RSI + rsi) * MA_DIST + ma
    int state_idx = 0;
    
-   // Método correto - multiplicar na ordem inversa
-   state_idx = (((((timeBucket * BINS_VOLUME + volumeBucket) * BINS_VOLATILITY + volBucket) * 
-                  BINS_BBPOS + bbBucket) * BINS_ADX + adxBucket) * 
-                  BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket;
+   state_idx = (((timeBucket * BINS_VOLUME + volumeBucket) * BINS_VOLATILITY + volBucket) * 
+                 BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket;
    
    // ✅ VERIFICAÇÃO DE SEGURANÇA
    if(state_idx < 0) state_idx = 0;
@@ -4699,13 +4633,13 @@ int GetCurrentState()
       state_idx = state_idx % NUM_STATES; // Forçar dentro dos limites
    }
    
-   // ✅ DEBUG para verificar cálculo
+   // ✅ DEBUG para verificar cálculo (SEM ADX e BB)
    static int debugCounter = 0;
    if(debugCounter++ % 100 == 0)
    {
       Print("DEBUG Estado: idx=", state_idx, 
-            " | ma=", maBucket, " rsi=", rsiBucket, " adx=", adxBucket,
-            " bb=", bbBucket, " vol=", volBucket, " volM=", volumeBucket, " time=", timeBucket);
+            " | ma=", maBucket, " rsi=", rsiBucket,
+            " vol=", volBucket, " volM=", volumeBucket, " time=", timeBucket);
    }
    
    // ✅ PROTEÇÃO CONTRA ESTADO CONGELADO
@@ -4742,9 +4676,9 @@ int GetCurrentState()
    if((state_idx != lastLoggedState && (currentTime - lastLogTime) > 300) || 
       g_totalTrades % 50 == 0)
    {
-      PrintFormat("📊 Estado calculado: %d | RSI=%.1f(%d) | MA_dist=%.2f(%d) | ADX=%.1f(%d) | BB=%.2f(%d) | Vol=%d | Time=%d",
-                  state_idx, rsi[0], rsiBucket, maDistance, maBucket, adx[0], adxBucket, 
-                  bbPosition, bbBucket, volBucket, timeBucket);
+      PrintFormat("📊 Estado calculado: %d | RSI=%.1f(%d) | MA_dist=%.2f(%d) | Vol=%d | VolM=%d | Time=%d",
+                  state_idx, rsi[0], rsiBucket, maDistance, maBucket, 
+                  volBucket, volumeBucket, timeBucket);
       lastLoggedState = state_idx;
       lastLogTime = currentTime;
    }
@@ -4949,6 +4883,48 @@ double CalculateSLByPoints(bool isBuy, double entryPrice)
 {
    if(!UseFixedSL) return 0.0;
    
+   // ✅ NOVO: Se usar lógica simplificada, calcular SL baseado em ATR
+   if(UseSimplifiedSignalLogic)
+   {
+      // Obter parâmetros atuais (podem vir da pesquisa automática)
+      int    currentATRPeriod  = ATRPeriod;
+      double currentATRStopMult = ATR_StopMult;
+      
+      if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+      {
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrStopMult;
+      }
+      else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
+      {
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult;
+      }
+      
+      double atr[1];
+      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1)
+      {
+         Print("❌ Erro ao copiar ATR para SL");
+         return 0.0;
+      }
+      
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double slDistance = currentATRStopMult * atr[0];
+      
+      double slPrice = 0.0;
+      if(isBuy)
+         slPrice = entryPrice - slDistance;
+      else
+         slPrice = entryPrice + slDistance;
+      
+      Print("✅ SL ATR-based: ", (isBuy?"BUY":"SELL"), " | ATR=", DoubleToString(atr[0], 5),
+            " | Mult=", currentATRStopMult, " | Distance=", DoubleToString(slDistance, 5),
+            " | SL=", DoubleToString(slPrice, 5));
+      
+      return slPrice;
+   }
+   
+   // Lógica original baseada em pontos fixos
    int slPoints = FixedSL_Points;
    if(slPoints <= 0) return 0.0;
    
@@ -4975,6 +4951,49 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
 {
    if(!UseFixedTP) return 0.0;
    
+   // ✅ NOVO: Se usar lógica simplificada, calcular TP baseado em ATR
+   if(UseSimplifiedSignalLogic)
+   {
+      // Obter parâmetros atuais (podem vir da pesquisa automática)
+      int    currentATRPeriod  = ATRPeriod;
+      double currentATRStopMult = ATR_StopMult;
+      
+      if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+      {
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].atrStopMult;
+      }
+      else if(EnableRSIAtrMacdParamSearch && g_rsiAtrMacdSearchCompleted && UseBestRSIAtrMacdConfigAfterTest)
+      {
+         currentATRPeriod  = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod;
+         currentATRStopMult = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult;
+      }
+      
+      double atr[1];
+      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) < 1)
+      {
+         Print("❌ Erro ao copiar ATR para TP");
+         return 0.0;
+      }
+      
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      // TP pode ser mesmo multiplicador ou maior (ex: 2x ou 3x do SL)
+      double tpDistance = currentATRStopMult * atr[0];
+      
+      double tpPrice = 0.0;
+      if(isBuy)
+         tpPrice = entryPrice + tpDistance;
+      else
+         tpPrice = entryPrice - tpDistance;
+      
+      Print("✅ TP ATR-based: ", (isBuy?"BUY":"SELL"), " | ATR=", DoubleToString(atr[0], 5),
+            " | Mult=", currentATRStopMult, " | Distance=", DoubleToString(tpDistance, 5),
+            " | TP=", DoubleToString(tpPrice, 5));
+      
+      return tpPrice;
+   }
+   
+   // Lógica original baseada em pontos fixos
    int tpPoints = FixedTP_Points;
    if(tpPoints <= 0) return 0.0;
    
@@ -5169,107 +5188,9 @@ bool ValidateWithRSI(bool isBuy)
    }
 }
 
-bool ValidateWithBollingerBands(bool isBuy)
-{
-   if(!UseBBValidation) return true;
-   
-   double bb_upper[], bb_lower[];
-   ArraySetAsSeries(bb_upper, true);
-   ArraySetAsSeries(bb_lower, true);
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) return false;
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) return false;
-   
-   double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   double bb_range = bb_upper[0] - bb_lower[0];
-   
-   if(bb_range <= 0) return false;
-   
-   double bb_position = SafeDivide(price - bb_lower[0], bb_range, BB_NEUTRAL_POSITION);
-   
-   if(isBuy)
-   {
-      if(bb_position <= 0.7)
-      {
-         if(bb_position <= BB_LowerThreshold)
-         {
-            Print("✅ BB EXCELENTE para BUY: posição ", DoubleToString(bb_position*100, 1), "% (próximo da banda inferior)");
-         }
-         else if(bb_position <= 0.5)
-         {
-            Print("✅ BB BOM para BUY: posição ", DoubleToString(bb_position*100, 1), "% (faixa inferior)");
-         }
-         else
-         {
-            Print("✅ BB ACEITÁVEL para BUY: posição ", DoubleToString(bb_position*100, 1), "% (metade inferior)");
-         }
-         return true;
-      }
-      else if(bb_position <= 0.9)
-      {
-         Print("⚠️ BB NEUTRO para BUY: posição ", DoubleToString(bb_position*100, 1), "% (cuidado)");
-         return true;
-      }
-      else
-      {
-         Print("❌ BB muito alto para BUY: posição ", DoubleToString(bb_position*100, 1), "% (acima de 90%)");
-         return false;
-      }
-   }
-   else
-   {
-      if(bb_position >= 0.3)
-      {
-         if(bb_position >= BB_UpperThreshold)
-         {
-            Print("✅ BB EXCELENTE para SELL: posição ", DoubleToString(bb_position*100, 1), "% (próximo da banda superior)");
-         }
-         else if(bb_position >= 0.5)
-         {
-            Print("✅ BB BOM para SELL: posição ", DoubleToString(bb_position*100, 1), "% (faixa superior)");
-         }
-         else
-         {
-            Print("✅ BB ACEITÁVEL para SELL: posição ", DoubleToString(bb_position*100, 1), "% (metade superior)");
-         }
-         return true;
-      }
-      else if(bb_position >= 0.1)
-      {
-         Print("⚠️ BB NEUTRO para SELL: posição ", DoubleToString(bb_position*100, 1), "% (cuidado)");
-         return true;
-      }
-      else
-      {
-         Print("❌ BB muito baixo para SELL: posição ", DoubleToString(bb_position*100, 1), "% (abaixo de 10%)");
-         return false;
-      }
-   }
-}
+// ✅ REMOVIDO: ValidateWithBollingerBands() (indicador BB removido)
 
-bool ValidateWithADX()
-{
-   if(!UseADXValidation) return true;
-   
-   double adx[];
-   ArraySetAsSeries(adx, true);
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) return false;
-   
-   if(adx[0] >= MinADXStrength)
-   {
-      Print("✅ ADX válido: ", DoubleToString(adx[0], 1), " (força suficiente)");
-      return true;
-   }
-   else if(adx[0] >= 15)
-   {
-      Print("⚠️ ADX moderado aceito: ", DoubleToString(adx[0], 1), " (abaixo do ideal, mas aceitável)");
-      return true;
-   }
-   else
-   {
-      Print("❌ ADX muito fraco: ", DoubleToString(adx[0], 1), " (mínimo aceitável: 15)");
-      return false;
-   }
-}
+// ✅ REMOVIDO: ValidateWithADX() (indicador ADX removido)
 
 bool ValidateWithTrend(bool isBuy)
 {
@@ -5367,17 +5288,9 @@ bool ValidateAllIndicators(bool isBuy)
       return false;
    }
    
-   if(!ValidateWithBollingerBands(isBuy))
-   {
-      Print("❌ VALIDAÇÃO FALHOU: Bollinger Bands");
-      return false;
-   }
+   // ✅ REMOVIDO: ValidateWithBollingerBands (indicador BB removido)
    
-   if(!ValidateWithADX())
-   {
-      Print("❌ VALIDAÇÃO FALHOU: ADX");
-      return false;
-   }
+   // ✅ REMOVIDO: ValidateWithADX (indicador ADX removido)
    
    if(!ValidateWithTrend(isBuy))
    {
@@ -5545,13 +5458,64 @@ void InitializeLearningSystem()
    ArrayResize(g_stateAvgProfit, NUM_STATES);
    ArrayInitialize(g_stateAvgProfit, 0.0);
    
-   g_stateResets = 0;
-   g_stateDecays = 0;
-   g_lastDecayTradeCount = 0;
-   g_totalDecayCycles = 0;
-   g_totalBadStateResets = 0;
+   Print("🧠 Sistema de Q-learning puro inicializado");
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🧪 FUNÇÃO: Inicializar configurações de pesquisa automática RSI+ATR+MACD
+// ══════════════════════════════════════════════════════════════════════
+void InitRSIAtrMacdConfigs()
+{
+   // Config 0 - base (padrões clássicos)
+   g_RSIAtrMacdConfigs[0].rsiOverbought = 70;
+   g_RSIAtrMacdConfigs[0].rsiOversold   = 30;
+   g_RSIAtrMacdConfigs[0].atrPeriod     = 14;
+   g_RSIAtrMacdConfigs[0].atrStopMult   = 2.0;
+   g_RSIAtrMacdConfigs[0].macdFast      = 12;
+   g_RSIAtrMacdConfigs[0].macdSlow      = 26;
+   g_RSIAtrMacdConfigs[0].macdSignal    = 9;
+   g_RSIAtrMacdConfigs[0].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[0].totalTrades   = 0;
+
+   // Config 1 - mais rápida (sinais mais frequentes)
+   g_RSIAtrMacdConfigs[1].rsiOverbought = 68;
+   g_RSIAtrMacdConfigs[1].rsiOversold   = 32;
+   g_RSIAtrMacdConfigs[1].atrPeriod     = 14;
+   g_RSIAtrMacdConfigs[1].atrStopMult   = 1.8;
+   g_RSIAtrMacdConfigs[1].macdFast      = 8;
+   g_RSIAtrMacdConfigs[1].macdSlow      = 21;
+   g_RSIAtrMacdConfigs[1].macdSignal    = 5;
+   g_RSIAtrMacdConfigs[1].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[1].totalTrades   = 0;
+
+   // Config 2 - mais lenta (sinais mais seletivos, stops maiores)
+   g_RSIAtrMacdConfigs[2].rsiOverbought = 72;
+   g_RSIAtrMacdConfigs[2].rsiOversold   = 28;
+   g_RSIAtrMacdConfigs[2].atrPeriod     = 20;
+   g_RSIAtrMacdConfigs[2].atrStopMult   = 2.5;
+   g_RSIAtrMacdConfigs[2].macdFast      = 16;
+   g_RSIAtrMacdConfigs[2].macdSlow      = 32;
+   g_RSIAtrMacdConfigs[2].macdSignal    = 9;
+   g_RSIAtrMacdConfigs[2].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[2].totalTrades   = 0;
+
+   // Config 3 - RSI mais solto (permite mais entradas)
+   g_RSIAtrMacdConfigs[3].rsiOverbought = 65;
+   g_RSIAtrMacdConfigs[3].rsiOversold   = 35;
+   g_RSIAtrMacdConfigs[3].atrPeriod     = 10;
+   g_RSIAtrMacdConfigs[3].atrStopMult   = 2.2;
+   g_RSIAtrMacdConfigs[3].macdFast      = 10;
+   g_RSIAtrMacdConfigs[3].macdSlow      = 24;
+   g_RSIAtrMacdConfigs[3].macdSignal    = 7;
+   g_RSIAtrMacdConfigs[3].totalProfit   = 0.0;
+   g_RSIAtrMacdConfigs[3].totalTrades   = 0;
+
+   g_currentRSIAtrMacdConfigIndex    = 0;
+   g_tradesInCurrentRSIAtrMacdConfig = 0;
+   g_rsiAtrMacdSearchCompleted       = false;
+   g_bestRSIAtrMacdConfigIndex       = 0;
    
-   Print("🧠 Sistema de aprendizado inteligente inicializado (memória otimizada com decay)");
+   Print("🧪 Configurações de pesquisa RSI+ATR+MACD inicializadas (4 configs)");
 }
 
 double CalculateStateAverageProfit(int state)
@@ -5559,7 +5523,7 @@ double CalculateStateAverageProfit(int state)
    if(state < 0 || state >= NUM_STATES) return 0.0;
    if(g_stateVisits[state] < 5) return 0.0;
    
-   double quality = GetStateQuality(state);
+   double quality = GetStateQualityScore(state);
    
    double estimatedProfit = quality * 100.0;
    
@@ -5684,6 +5648,81 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    
    // ✅ NOVO: Atualizar estatísticas mensais
    UpdateMonthlyStats(net_profit);
+   
+   // ✅ NOVO: Atualizar pesquisa automática de parâmetros RSI+ATR+MACD
+   if(EnableRSIAtrMacdParamSearch && !g_rsiAtrMacdSearchCompleted)
+   {
+      g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].totalProfit  += net_profit;
+      g_RSIAtrMacdConfigs[g_currentRSIAtrMacdConfigIndex].totalTrades  += 1;
+      g_tradesInCurrentRSIAtrMacdConfig++;
+      
+      // ✅ Gerar relatório a cada X trades
+      if(EnableParamSearchReport && ParamSearchReportIntervalTrades > 0)
+      {
+         if(g_totalTrades % ParamSearchReportIntervalTrades == 0)
+         {
+            ExportParamSearchReport();
+         }
+      }
+
+      if(g_tradesInCurrentRSIAtrMacdConfig >= TradesPerRSIAtrMacdConfig)
+      {
+         g_currentRSIAtrMacdConfigIndex++;
+         g_tradesInCurrentRSIAtrMacdConfig = 0;
+
+         if(g_currentRSIAtrMacdConfigIndex >= MAX_RSIAtrMacd_CONFIGS)
+         {
+            g_currentRSIAtrMacdConfigIndex = 0;
+            g_rsiAtrMacdSearchCompleted    = true;
+
+            double bestScore = -DBL_MAX;
+            int    bestIndex = 0;
+
+            for(int i = 0; i < MAX_RSIAtrMacd_CONFIGS; i++)
+            {
+               double avgProfitPerTrade = 0.0;
+               if(g_RSIAtrMacdConfigs[i].totalTrades > 0)
+                  avgProfitPerTrade = g_RSIAtrMacdConfigs[i].totalProfit /
+                                      (double)g_RSIAtrMacdConfigs[i].totalTrades;
+
+               double score = avgProfitPerTrade; // pode trocar critério depois
+
+               if(score > bestScore)
+               {
+                  bestScore = score;
+                  bestIndex = i;
+               }
+            }
+
+            g_bestRSIAtrMacdConfigIndex = bestIndex;
+
+            if(UseBestRSIAtrMacdConfigAfterTest)
+               g_currentRSIAtrMacdConfigIndex = g_bestRSIAtrMacdConfigIndex;
+
+            Print("🧪 Pesquisa RSI+ATR+MACD concluída. Melhor config index=",
+                  g_bestRSIAtrMacdConfigIndex,
+                  " | RSI OB=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOverbought,
+                  " | RSI OS=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOversold,
+                  " | ATRPeriod=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod,
+                  " | ATRMult=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult,
+                  " | MACD Fast=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdFast,
+                  " | Slow=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSlow,
+                  " | Signal=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSignal,
+                  " | LucroTotal=", DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalProfit, 2),
+                  " | Trades=", g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalTrades);
+            
+            // ✅ Gerar relatório final quando pesquisa concluir
+            ExportParamSearchReport();
+         }
+         else
+         {
+            Print("🧪 Mudando para próxima config RSI+ATR+MACD. Index=", g_currentRSIAtrMacdConfigIndex);
+            
+            // ✅ Gerar relatório ao mudar de config
+            ExportParamSearchReport();
+         }
+      }
+   }
    
    // ⚠️ DIAGNÓSTICO DETALHADO
    Print("DIAGNÓSTICO DETALHADO:");
@@ -6103,6 +6142,272 @@ bool ExportMonthlyReport()
    return true;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🏆 FUNÇÃO: Exportar melhores e piores estados para arquivo
+// ══════════════════════════════════════════════════════════════════════
+void ExportBestAndWorstStates(int fileHandle)
+{
+   if(fileHandle == INVALID_HANDLE) return;
+   
+   // Atualizar rankings se necessário
+   datetime currentTime = TimeCurrent();
+   if(currentTime - g_lastRankingUpdate > g_rankingUpdateIntervalMinutes * 60 || g_lastRankingUpdate == 0)
+   {
+      UpdateStateRankings();
+   }
+   
+   FileWrite(fileHandle, "");
+   FileWrite(fileHandle, "🏆═══════════════════════════════════════════════════════════════");
+   FileWrite(fileHandle, "   RANKING DE ESTADOS - TOP 10 MELHORES E PIORES");
+   FileWrite(fileHandle, "═══════════════════════════════════════════════════════════════");
+   FileWrite(fileHandle, "");
+   
+   // ✅ TOP 10 MELHORES ESTADOS
+   FileWrite(fileHandle, "🥇 TOP 10 MELHORES ESTADOS (ELITE/BONS):");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   FileWrite(fileHandle, "Estado | Win Rate | Visitas | Lucro Total | Qualidade");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   
+   int bestCount = 0;
+   for(int i = 0; i < 10; i++)
+   {
+      if(g_bestStates[i].visits == 0) break;
+      
+      string qualityName = GetStateQualityName(g_bestStates[i].quality);
+      string line = StringFormat("%6d | %7.2f%% | %7d | %11.2f | %s",
+                                 g_bestStates[i].state,
+                                 g_bestStates[i].winRate * 100.0,
+                                 g_bestStates[i].visits,
+                                 g_bestStates[i].profit,
+                                 qualityName);
+      FileWrite(fileHandle, line);
+      bestCount++;
+   }
+   
+   if(bestCount == 0)
+   {
+      FileWrite(fileHandle, "   (Nenhum estado com dados suficientes)");
+   }
+   
+   FileWrite(fileHandle, "");
+   
+   // ✅ TOP 10 PIORES ESTADOS (RUINS/BLOQUEADOS)
+   FileWrite(fileHandle, "🔴 TOP 10 PIORES ESTADOS (RUINS/BLOQUEADOS):");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   FileWrite(fileHandle, "Estado | Win Rate | Visitas | Lucro Total | Qualidade");
+   FileWrite(fileHandle, "─────────────────────────────────────────────────────────────");
+   
+   int worstCount = 0;
+   for(int i = 0; i < 10; i++)
+   {
+      if(g_worstStates[i].visits == 0) break;
+      
+      string qualityName = GetStateQualityName(g_worstStates[i].quality);
+      string line = StringFormat("%6d | %7.2f%% | %7d | %11.2f | %s",
+                                 g_worstStates[i].state,
+                                 g_worstStates[i].winRate * 100.0,
+                                 g_worstStates[i].visits,
+                                 g_worstStates[i].profit,
+                                 qualityName);
+      FileWrite(fileHandle, line);
+      worstCount++;
+   }
+   
+   if(worstCount == 0)
+   {
+      FileWrite(fileHandle, "   (Nenhum estado com dados suficientes)");
+   }
+   
+   FileWrite(fileHandle, "");
+   FileWrite(fileHandle, "═══════════════════════════════════════════════════════════════");
+}
+
+// ======================================================================
+// ✅ NOVA FUNÇÃO: EXPORTAR RELATÓRIO DE PESQUISA DE PARÂMETROS
+// ======================================================================
+void ExportParamSearchReport()
+{
+   if(!EnableRSIAtrMacdParamSearch) return;
+   if(!EnableParamSearchReport) return;
+   
+   string filename = "Phoenix_Files/Text_Logs/Phoenix_ParamSearch_" + _Symbol + "_" + 
+                     EnumToString((ENUM_TIMEFRAMES)_Period) + ".txt";
+   
+   if(!CreateDirectoryForFile(filename)) return;
+   
+   int file_handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(file_handle == INVALID_HANDLE)
+   {
+      Print("❌ Erro ao criar relatório de pesquisa: ", filename);
+      return;
+   }
+   
+   // Cabeçalho
+   FileWrite(file_handle, "╔══════════════════════════════════════════════════════════════════════╗");
+   FileWrite(file_handle, "║     RELATÓRIO DE PESQUISA AUTOMÁTICA DE PARÂMETROS                   ║");
+   FileWrite(file_handle, "║     RSI + MACD + ATR - Phoenix Trader                                ║");
+   FileWrite(file_handle, "╚══════════════════════════════════════════════════════════════════════╝");
+   FileWrite(file_handle, "");
+   FileWrite(file_handle, "📅 Data/Hora: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+   FileWrite(file_handle, "📊 Símbolo: " + _Symbol);
+   FileWrite(file_handle, "⏱️ Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
+   FileWrite(file_handle, "");
+   
+   // Status geral
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "📌 STATUS GERAL DA PESQUISA");
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "");
+   
+   string statusText = g_rsiAtrMacdSearchCompleted ? "✅ CONCLUÍDA" : "🔄 EM ANDAMENTO";
+   FileWrite(file_handle, "Status: " + statusText);
+   
+   if(!g_rsiAtrMacdSearchCompleted)
+   {
+      FileWrite(file_handle, "Config Atual: #" + IntegerToString(g_currentRSIAtrMacdConfigIndex));
+      int tradesRestantes = TradesPerRSIAtrMacdConfig - g_tradesInCurrentRSIAtrMacdConfig;
+      double progressoPct = ((double)g_tradesInCurrentRSIAtrMacdConfig / TradesPerRSIAtrMacdConfig) * 100.0;
+      FileWrite(file_handle, "Progresso Config Atual: " + 
+                IntegerToString(g_tradesInCurrentRSIAtrMacdConfig) + "/" + 
+                IntegerToString(TradesPerRSIAtrMacdConfig) + " trades (" +
+                DoubleToString(progressoPct, 1) + "%)");
+      FileWrite(file_handle, "Trades Restantes: " + IntegerToString(tradesRestantes));
+      
+      int totalProgress = 0;
+      for(int i = 0; i < MAX_RSIAtrMacd_CONFIGS; i++)
+      {
+         totalProgress += g_RSIAtrMacdConfigs[i].totalTrades;
+      }
+      int totalTrades = MAX_RSIAtrMacd_CONFIGS * TradesPerRSIAtrMacdConfig;
+      double totalPct = ((double)totalProgress / totalTrades) * 100.0;
+      FileWrite(file_handle, "Progresso Total: " + IntegerToString(totalProgress) + "/" + 
+                IntegerToString(totalTrades) + " trades (" + 
+                DoubleToString(totalPct, 1) + "%)");
+   }
+   else
+   {
+      FileWrite(file_handle, "🏆 Melhor Config: #" + IntegerToString(g_bestRSIAtrMacdConfigIndex));
+      FileWrite(file_handle, "Usando Melhor Config: " + (UseBestRSIAtrMacdConfigAfterTest ? "SIM" : "NÃO"));
+   }
+   
+   FileWrite(file_handle, "");
+   
+   // Tabela de configurações
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "📊 DETALHES DE TODAS AS CONFIGURAÇÕES");
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "");
+   
+   // Cabeçalho da tabela
+   FileWrite(file_handle, "┌────────┬───────────────────────────────────────────────────────────────────┐");
+   FileWrite(file_handle, "│ Config │ Parâmetros e Resultados                                           │");
+   FileWrite(file_handle, "├────────┼───────────────────────────────────────────────────────────────────┤");
+   
+   for(int i = 0; i < MAX_RSIAtrMacd_CONFIGS; i++)
+   {
+      string configName = "";
+      if(i == 0) configName = "CLÁSSICA";
+      else if(i == 1) configName = "RÁPIDA";
+      else if(i == 2) configName = "LENTA";
+      else if(i == 3) configName = "SOLTO";
+      
+      string statusIcon = "";
+      if(g_rsiAtrMacdSearchCompleted)
+      {
+         statusIcon = (i == g_bestRSIAtrMacdConfigIndex) ? "🏆" : "  ";
+      }
+      else
+      {
+         if(i < g_currentRSIAtrMacdConfigIndex)
+            statusIcon = "✅";
+         else if(i == g_currentRSIAtrMacdConfigIndex)
+            statusIcon = "🔄";
+         else
+            statusIcon = "⏳";
+      }
+      
+      FileWrite(file_handle, "│ " + statusIcon + " #" + IntegerToString(i) + "   │ " + configName + 
+                StringFormat(" (RSI: %.0f/%.0f | ATR: %d×%.1f | MACD: %d/%d/%d)",
+                             g_RSIAtrMacdConfigs[i].rsiOverbought,
+                             g_RSIAtrMacdConfigs[i].rsiOversold,
+                             g_RSIAtrMacdConfigs[i].atrPeriod,
+                             g_RSIAtrMacdConfigs[i].atrStopMult,
+                             g_RSIAtrMacdConfigs[i].macdFast,
+                             g_RSIAtrMacdConfigs[i].macdSlow,
+                             g_RSIAtrMacdConfigs[i].macdSignal) + 
+                StringFormat("%*s│", 
+                             70 - StringLen(configName) - 50, ""));
+      
+      double avgProfit = 0.0;
+      if(g_RSIAtrMacdConfigs[i].totalTrades > 0)
+         avgProfit = g_RSIAtrMacdConfigs[i].totalProfit / (double)g_RSIAtrMacdConfigs[i].totalTrades;
+      
+      string tradesStr = StringFormat("      Trades: %d/%d", 
+                                      g_RSIAtrMacdConfigs[i].totalTrades,
+                                      TradesPerRSIAtrMacdConfig);
+      FileWrite(file_handle, "│        │ " + tradesStr + 
+                StringFormat("%*s│", 70 - StringLen(tradesStr) - 1, ""));
+      
+      string profitStr = StringFormat("      Lucro Total: %.2f", 
+                                     g_RSIAtrMacdConfigs[i].totalProfit);
+      FileWrite(file_handle, "│        │ " + profitStr + 
+                StringFormat("%*s│", 70 - StringLen(profitStr) - 1, ""));
+      
+      string avgStr = StringFormat("      Lucro Médio/Trade: %.2f", avgProfit);
+      FileWrite(file_handle, "│        │ " + avgStr + 
+                StringFormat("%*s│", 70 - StringLen(avgStr) - 1, ""));
+      
+      if(i < MAX_RSIAtrMacd_CONFIGS - 1)
+         FileWrite(file_handle, "├────────┼───────────────────────────────────────────────────────────────────┤");
+   }
+   
+   FileWrite(file_handle, "└────────┴───────────────────────────────────────────────────────────────────┘");
+   FileWrite(file_handle, "");
+   
+   // Legenda
+   FileWrite(file_handle, "Legenda: 🏆 Melhor | ✅ Concluído | 🔄 Testando | ⏳ Aguardando");
+   FileWrite(file_handle, "");
+   
+   // Resultado final (se concluído)
+   if(g_rsiAtrMacdSearchCompleted)
+   {
+      FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      FileWrite(file_handle, "🏆 RESULTADO FINAL - MELHOR CONFIGURAÇÃO");
+      FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      FileWrite(file_handle, "");
+      FileWrite(file_handle, "Config Vencedora: #" + IntegerToString(g_bestRSIAtrMacdConfigIndex));
+      FileWrite(file_handle, "");
+      FileWrite(file_handle, "📊 Parâmetros Ótimos:");
+      FileWrite(file_handle, "   RSI Overbought: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOverbought, 0));
+      FileWrite(file_handle, "   RSI Oversold: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].rsiOversold, 0));
+      FileWrite(file_handle, "   ATR Period: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrPeriod));
+      FileWrite(file_handle, "   ATR Stop Multiplier: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].atrStopMult, 1));
+      FileWrite(file_handle, "   MACD Fast: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdFast));
+      FileWrite(file_handle, "   MACD Slow: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSlow));
+      FileWrite(file_handle, "   MACD Signal: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].macdSignal));
+      FileWrite(file_handle, "");
+      FileWrite(file_handle, "💰 Performance:");
+      FileWrite(file_handle, "   Trades Realizados: " + IntegerToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalTrades));
+      FileWrite(file_handle, "   Lucro Total: " + DoubleToString(g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalProfit, 2));
+      double bestAvg = g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalProfit / 
+                       (double)g_RSIAtrMacdConfigs[g_bestRSIAtrMacdConfigIndex].totalTrades;
+      FileWrite(file_handle, "   Lucro Médio/Trade: " + DoubleToString(bestAvg, 2));
+      FileWrite(file_handle, "");
+   }
+   
+   // Rodapé
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   FileWrite(file_handle, "Relatório gerado automaticamente pelo Phoenix Trader v" + 
+             DoubleToString(3.08, 2));
+   FileWrite(file_handle, "Próxima atualização em " + IntegerToString(ParamSearchReportIntervalTrades) + 
+             " trades ou quando pesquisa finalizar");
+   FileWrite(file_handle, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   
+   FileClose(file_handle);
+   
+   Print("📊 Relatório de pesquisa de parâmetros atualizado: ", filename);
+}
+
 // ======================================================================
 // ✅✅✅ FUNÇÃO: CRIAR RELATÓRIO RESUMIDO DIÁRIO
 // ======================================================================
@@ -6126,30 +6431,48 @@ void CreateDailySummaryReport()
    FileWrite(file_handle, "Data: " + TimeToString(TimeCurrent(), TIME_DATE));
    FileWrite(file_handle, "================================================================");
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "📈 RESUMO DO DIA (SISTEMA SUPER CORRIGIDO)");
+   FileWrite(file_handle, "📈 RESUMO DO DIA (Q-LEARNING PURO)");
    FileWrite(file_handle, "----------------------------------------");
    FileWrite(file_handle, "Trades REAIS Realizados: " + IntegerToString(g_tradesToday));
    FileWrite(file_handle, "Estados Ativos: " + IntegerToString(g_activeStatesCount));
    FileWrite(file_handle, "Estados Bloqueados: " + IntegerToString(CountBlockedStates()));
    FileWrite(file_handle, "Volume Médio Multiplicador: " + DoubleToString(g_volumeMultiplier, 2) + "x");
-   FileWrite(file_handle, "Ciclos de Decay: " + IntegerToString(g_totalDecayCycles));
-   FileWrite(file_handle, "Estados Resetados: " + IntegerToString(g_totalBadStateResets));
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "🧠 PROGRESSO DO APRENDIZADO (SISTEMA SUPER CORRIGIDO)");
+   FileWrite(file_handle, "🧠 PROGRESSO DO APRENDIZADO");
    FileWrite(file_handle, "----------------------------------------");
    double discoveryPercent = (double)g_activeStatesCount/NUM_STATES*100;
    FileWrite(file_handle, "Estados Descobertos: " + IntegerToString(g_activeStatesCount) + "/" + 
             IntegerToString(NUM_STATES) + " (" + DoubleToString(discoveryPercent, 1) + "%)");
-   FileWrite(file_handle, "Taxa de Exploração: " + DoubleToString(g_currentExplorationRate * 100, 1) + "%");
+   FileWrite(file_handle, "Taxa de Exploração: " + DoubleToString(ExplorationRate * 100, 1) + "%");
    FileWrite(file_handle, "Contagem Corrigida: " + IntegerToString(g_totalTrades) + " trades REAIS");
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "🛡️ CORREÇÕES IMPLEMENTADAS:");
-   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (576 estados)");
-   FileWrite(file_handle, "2. ✅ Reset automático funcionando");
-   FileWrite(file_handle, "3. ✅ Estados não travam mais em 10 visitas");
-   FileWrite(file_handle, "4. ✅ Regras de bloqueio mais agressivas");
-   FileWrite(file_handle, "5. ✅ Debug de estados travados implementado");
+   FileWrite(file_handle, "🛡️ SISTEMA:");
+   FileWrite(file_handle, "1. ✅ Q-learning puro sem decay");
+   FileWrite(file_handle, "2. ✅ Block bad states (never unblock)");
+   FileWrite(file_handle, "3. ✅ Fixed exploration rate");
+   FileWrite(file_handle, "4. ✅ Regras de bloqueio agressivas");
    FileWrite(file_handle, "");
+   
+   // ✅ NOVO: Exportar ranking de melhores e piores estados
+   ExportBestAndWorstStates(file_handle);
+   
+   FileWrite(file_handle, "");
+   FileWrite(file_handle, "📊 ANÁLISE DE DISTRIBUIÇÃO DE ESTADOS");
+   FileWrite(file_handle, "----------------------------------------");
+   
+   // Contar estados visitados
+   int visitedCount = 0;
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] > 0) visitedCount++;
+   }
+   double visitedPct = (visitedCount * 100.0) / NUM_STATES;
+   
+   FileWrite(file_handle, "Estados visitados: " + IntegerToString(visitedCount) + "/" + 
+            IntegerToString(NUM_STATES) + " (" + DoubleToString(visitedPct, 1) + "%)");
+   FileWrite(file_handle, "(Ver log do terminal para análise detalhada)");
+   FileWrite(file_handle, "");
+   
    FileWrite(file_handle, "================================================================");
    FileWrite(file_handle, "FIM DO RELATÓRIO - SISTEMA SUPER CORRIGIDO v307F");
    FileWrite(file_handle, "================================================================");
@@ -6157,6 +6480,9 @@ void CreateDailySummaryReport()
    FileClose(file_handle);
    
    Print("📋 Relatório diário criado: ", filename);
+   
+   // ✅ NOVO: Exibir análise de distribuição de estados no terminal
+   LogStateDistributionAnalysis();
 }
 
 // ======================================================================
@@ -6247,39 +6573,24 @@ void OnTick()
          if(badPerformanceCounter >= 5)
          {
             Print("🔥 ATIVAÇÃO DE CORREÇÃO DE EMERGÊNCIA");
-            EmergencyCounterFix();
-            OverhaulBlockingSystem();
             badPerformanceCounter = 0;
-         }
-      }
-      
-      // Verificar bloqueios excessivos (apenas após atingir limite mínimo)
-      // ✅ Verifica EnableIntelligentReset antes de resetar
-      if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
-      {
-         double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
-         if(blockedRatio > 0.7 && g_activeStatesCount > 50)
-         {
-            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
-            IntelligentPartialReset();
          }
       }
    }
 
-   // ✅ CHAMAR CORREÇÕES A CADA HORA
+   // ✅ CLEAN MEMORY PERIODICALLY
    static datetime lastMaintenanceCall = 0;
    if(TimeCurrent() - lastMaintenanceCall >= 3600)
    {
-      PerformMemoryMaintenance();
-      
-      // ✅ OTIMIZAÇÃO DINÂMICA
-      OptimizeParametersDynamically();
-      
-      // ✅ TESTE PERIÓDICO DE ESTADOS BLOQUEADOS
-      if(EnableUnifiedBlockingSystem)
+      // Clean memory if needed
+      if(AutoCleanMemory)
       {
-         TestBlockedStatesPeriodically();
+         CleanMemory();
       }
+      
+      // Save periodically
+      SaveBrain();
+      SaveState();
       
       lastMaintenanceCall = TimeCurrent();
    }
@@ -6308,12 +6619,6 @@ void OnTick()
       {
          DebugStuckStatesEnhanced();
       }
-      
-      // ✅ Desbloquear estados bons apenas após atingir limite mínimo de estados
-      if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset && debugCounter % 100 == 0)
-      {
-         UnblockGoodStates();
-      }
 
       MqlDateTime today,last;
       TimeToStruct(TimeCurrent(),today);
@@ -6331,89 +6636,53 @@ void OnTick()
          g_lastResetDate=TimeCurrent();
          cachedTradesToday = -1;
          
-         // ✅ DESBLOQUEIO PARCIAL apenas após atingir limite mínimo de estados
-         if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
-         {
-            UnblockGoodStates();
-         }
-         
          if(EnableTextExport)
          {
             CreateDailySummaryReport();
          }
       }
 
+      // 🚨 FIX CRÍTICO: Limites não devem impedir o código de executar
+      // Apenas logar, mas sempre tentar operar
       if(g_tradesToday >= MaxTradesPerDay)
       {
-         g_statusMessage = StringFormat("⛔ Limite diário (%d) atingido", MaxTradesPerDay);
+         g_statusMessage = StringFormat("⚠️ Limite diário (%d) atingido (operando mesmo assim)", MaxTradesPerDay);
       }
       else if(g_consecutiveLosses >= ConsecutiveLossLimit)
       {
-         g_statusMessage = StringFormat("⛔ %d perdas consecutivas", ConsecutiveLossLimit);
+         g_statusMessage = StringFormat("⚠️ %d perdas consecutivas (operando mesmo assim)", ConsecutiveLossLimit);
       }
       else
       {
          g_statusMessage = "Analisando (Sistema Corrigido v2)";
-            
-         int s = GetCurrentState();
-         if(s < 0)
+      }
+      
+      // ✅ SEMPRE executar lógica de trade (não usar else)
+      int s = GetCurrentState();
+      if(s < 0)
+      {
+         g_statusMessage = "Aguardando dados dos indicadores";
+      }
+      else
+      {
+         // ✅ VERIFICAÇÃO DE BLOQUEIO - ÚNICO PONTO
+         if(IsStateBlocked(s))
          {
-            g_statusMessage = "Aguardando dados dos indicadores";
+            g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
+            UpdateQ_NOP(s);
+            return;
+         }
+         
+         int a = ChooseAction(s);
+         
+         if(a == 0)
+         {
+            g_statusMessage = "NOP (Análise)";
+            UpdateQ_NOP(s);
          }
          else
          {
-            // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
-            if(g_currentExplorationRate <= 0.0)
-            {
-               bool stateInActiveList = false;
-               for(int i = 0; i < g_activeStatesCount; i++)
-               {
-                  if(g_activeStates[i] == s)
-                  {
-                     stateInActiveList = true;
-                     break;
-                  }
-               }
-               
-               if(!stateInActiveList)
-               {
-                  // Estado novo mas exploração = 0% → NÃO usar este estado
-                  g_statusMessage = StringFormat("⏸️ Estado %d desconhecido (exploração 0%%)", s);
-                  return;  // ✅ BLOQUEIA uso de estados novos
-               }
-            }
-            
-            // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
-            if(IsStateBlocked(s))
-            {
-               double winRate = CalculateWinRate(s);
-               
-               // Auto-desbloqueio se performance melhorou
-               if(winRate >= 0.35 && g_stateVisits[s] >= 5)
-               {
-                  g_stateBlocked[s] = false;
-                  Print("🔄 AUTO-DESBLOQUEIO Estado ", s, 
-                        " | Win Rate: ", DoubleToString(winRate*100,1), "%");
-               }
-               else
-               {
-                  g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
-                  UpdateQ_NOP(s);
-                  return;
-               }
-            }
-            
-            int a = ChooseAction(s);
-            
-            if(a == 0)
-            {
-               g_statusMessage = "NOP (Análise)";
-               UpdateQ_NOP(s);
-            }
-            else
-            {
-               ExecuteAction(a,s);
-            }
+            ExecuteAction(a,s);
          }
       }
    }
@@ -6477,7 +6746,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    FileWrite(file_handle, "6. ✅ Reset de emergência disponível");
    FileWrite(file_handle, "");
    
-   string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)";
+   string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×4 = 288)";
    FileWrite(file_handle, systemInfo);
    
    string activeInfo = "Estados ativos na memória: " + IntegerToString(g_activeStatesCount);
@@ -6490,12 +6759,6 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    double discoveryRate = (double)g_activeStatesCount / NUM_STATES * 100;
    string discoveryInfo = "Taxa de descoberta: " + DoubleToString(discoveryRate, 1) + "%";
    FileWrite(file_handle, discoveryInfo);
-   
-   string decayInfo = "Ciclos de decay: " + IntegerToString(g_totalDecayCycles);
-   FileWrite(file_handle, decayInfo);
-   
-   string resetInfo = "Estados resetados: " + IntegerToString(g_totalBadStateResets);
-   FileWrite(file_handle, resetInfo);
    
    if(IncludeStatistics)
    {
@@ -6542,7 +6805,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       FileWrite(file_handle, consecutiveLosses);
       
       // ⚠️ GARANTIR QUE EXPLORAÇÃO NÃO PASSE DE 100%
-      double exploration = MathMin(g_currentExplorationRate * 100, 100.0);
+      double exploration = MathMin(ExplorationRate * 100, 100.0);
       string explorationStr = "Taxa Exploração: " + DoubleToString(exploration, 1) + "%";
       FileWrite(file_handle, explorationStr);
    }
@@ -6688,9 +6951,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    Print("📄 Memória exportada para texto: ", filename, 
          " | Estados: ", g_activeStatesCount,
          " | Bloqueados: ", blockedCount,
-         " | Trades reais: ", g_totalTrades,
-         " | Ciclos decay: ", g_totalDecayCycles,
-         " | Resets: ", g_totalBadStateResets);
+         " | Trades reais: ", g_totalTrades);
    
    return true;
 }
@@ -6707,18 +6968,21 @@ int OnInit()
    MathSrand((int)GetTickCount64());
 
    g_maHandle      = iMA(_Symbol, _Period, MAPeriod, 0, MAMethod, PRICE_CLOSE);
-   g_adxHandle     = iADX(_Symbol, _Period, 20);
+   // ✅ REMOVIDO: g_adxHandle (indicador ADX removido)
    g_rsiHandle     = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
-   g_bbHandle      = iBands(_Symbol, _Period, BBPeriod, 0, BBDeviation, PRICE_CLOSE);
+   // ✅ REMOVIDO: g_bbHandle (indicador BB removido)
    g_atrHandle     = iATR(_Symbol, _Period, ATRPeriod);
+   g_macdHandle    = iMACD(_Symbol, _Period, MACD_Fast, MACD_Slow, MACD_Signal, PRICE_CLOSE);
 
-   if(g_maHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
-      g_rsiHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
-      g_atrHandle == INVALID_HANDLE)
+   if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
+      g_atrHandle == INVALID_HANDLE || g_macdHandle == INVALID_HANDLE)
    {
       Print("❌ Falha ao criar indicadores");
       return INIT_FAILED;
    }
+   
+   // ✅ Inicializar configurações de pesquisa automática RSI+ATR+MACD
+   InitRSIAtrMacdConfigs();
 
    // ✅ CORREÇÃO CRÍTICA V2: Força reload completo SEMPRE
    // Evita perda de memória ao mudar data/período no testador
@@ -6753,8 +7017,6 @@ int OnInit()
       ArrayResize(g_stateBlocked, NUM_STATES);
    if(ArraySize(g_stateLastBlockTime) != NUM_STATES)
       ArrayResize(g_stateLastBlockTime, NUM_STATES);
-   if(ArraySize(g_stateLastUnblockTime) != NUM_STATES)
-      ArrayResize(g_stateLastUnblockTime, NUM_STATES);
    if(ArraySize(g_stateWasBlockedBefore) != NUM_STATES)
       ArrayResize(g_stateWasBlockedBefore, NUM_STATES);
    if(ArraySize(g_stateBlockTime) != NUM_STATES)
@@ -6816,14 +7078,34 @@ int OnInit()
       ArrayInitialize(g_stateLastUpdate, 0);
       ArrayInitialize(g_stateBlocked, false);
       ArrayInitialize(g_stateLastBlockTime, 0);
-      ArrayInitialize(g_stateLastUnblockTime, 0);
       ArrayInitialize(g_stateWasBlockedBefore, false);
       ArrayInitialize(g_stateBlockTime, 0);
       ArrayInitialize(g_stateBlockCount, 0);
+      
+      // ✅ BUG FIX: Inicializar arrays de estatísticas derivadas
+      ArrayInitialize(g_stateProfitSum, 0.0);
+      ArrayInitialize(g_stateProfitSqSum, 0.0);
+      ArrayInitialize(g_stateWinRate, 0.0);
+      ArrayInitialize(g_stateAvgProfit, 0.0);
+      
+      // ✅ BUG FIX: Inicializar arrays de ranking de estados
+      for(int i = 0; i < 10; i++)
+      {
+         g_bestStates[i].state = -1;
+         g_bestStates[i].visits = 0;
+         g_bestStates[i].winRate = 0.0;
+         g_bestStates[i].profit = 0.0;
+         g_bestStates[i].quality = STATE_QUALITY_NEUTRAL;
+         
+         g_worstStates[i].state = -1;
+         g_worstStates[i].visits = 0;
+         g_worstStates[i].winRate = 0.0;
+         g_worstStates[i].profit = 0.0;
+         g_worstStates[i].quality = STATE_QUALITY_NEUTRAL;
+      }
+      
       g_activeStatesCount = 0;
       
-      // ✅ SEMPRE usa taxa configurada - SEM forçar mínimo
-      g_currentExplorationRate = InitialExplorationRate;
       g_memoryInitialized = true;
       SaveBrain();
       Print("✅ Novo cérebro criado (Sistema Super Corrigido v309)");
@@ -6833,13 +7115,9 @@ int OnInit()
       // ✅ Arquivo carregado - memória preservada!
       g_memoryInitialized = true;
       
-      // ✅ SEMPRE usa taxa de exploração configurada em InitialExplorationRate
-      // Permite testar aprendizado com diferentes taxas de exploração
-      g_currentExplorationRate = InitialExplorationRate;
-      
       Print("✅ Cérebro existente carregado (Sistema Super Corrigido v309)");
       Print("📊 Estados ativos preservados: ", g_activeStatesCount);
-      Print("⚙️ Taxa de exploração configurada: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
+      Print("⚙️ Taxa de exploração configurada: ", DoubleToString(ExplorationRate * 100, 1), "%");
       
       // ✅ Verificação final: Confirma que dados foram carregados corretamente
       if(g_activeStatesCount > 0)
@@ -6879,6 +7157,9 @@ int OnInit()
    g_lastBarProcessed = 0;
    g_lastExportTime = 0;
    g_exportCount = 0;
+   
+   // ✅ Inicializar taxa de exploração atual
+   g_currentExplorationRate = ExplorationRate;
    g_currentDirection = 0;
    g_positionsCount = 0;
 
@@ -6891,33 +7172,35 @@ int OnInit()
       if(CloseOppositeOnNewSignal) CloseAllPositions();
    }
 
-   Print("🔥🔥🔥 INICIALIZANDO SISTEMA SUPER CORRIGIDO...");
+   Print("🔥🔥🔥 INICIALIZANDO SISTEMA OTIMIZADO...");
    Print("🔥🔥🔥 CONFIGURAÇÃO DE ESTADOS:");
    Print("🔥🔥🔥 Bins por indicador:");
    Print("🔥🔥🔥 MA Distance: ", BINS_MA_DIST);
    Print("🔥🔥🔥 RSI: ", BINS_RSI);
-   Print("🔥🔥🔥 ADX: ", BINS_ADX);
-   Print("🔥🔥🔥 BB Position: ", BINS_BBPOS);
+   // ✅ REMOVIDO: ADX (indicador removido)
+   // ✅ REMOVIDO: BB Position (indicador removido)
    Print("🔥🔥🔥 Volatilidade: ", BINS_VOLATILITY);
-   Print("🔥🔥🔥 Volume: ", BINS_VOLUME);
-   Print("🔥🔥🔥 Tempo: ", BINS_TIME);
-   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×3×2×2×2 = 576)");
+   Print("🔥🔥🔥 Volume: ", BINS_VOLUME, " (baixo, médio, alto)");
+   Print("🔥🔥🔥 Tempo: ", BINS_TIME, " (madrugada, manhã, tarde, noite)");
+   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×3×4 = 288) ✅");
    Print("🔥🔥🔥 MEMÓRIA MÁXIMA: ", MaxMemoryStates, " estados ativos");
-   Print("🔥🔥🔥 SISTEMA SUPER CORRIGIDO: ATIVADO");
+   Print("🔥🔥🔥 SISTEMA OTIMIZADO: 288 ESTADOS ATIVOS");
    
    // ✅ CONFIGURAÇÕES APLICADAS:
    Print("⚙️ Configurações aplicadas:");
-   Print("   • Exploration Rate: ", DoubleToString(g_currentExplorationRate * 100, 1), "%");
-   Print("   • MinVisitsToTrade: 2");
+   Print("   • Exploration Rate: ", DoubleToString(ExplorationRate * 100, 1), "% (FIXED rate)");
+   Print("   • MinVisitsToTrade: ", MinStateVisitsToTrade, " (permite trade imediato)");
+   Print("   • MinVisitsForQualityDecision: ", MinVisitsForQualityDecision, " (classificação mais rápida)");
    Print("   • BadStateMinVisits: 20");
    Print("   • BadStateLossThreshold: 60%");
-   Print("   • MinStatesBeforeReset: 150 (previne resets e decay prematuros)");
    
+   // Simple Q-learning: block bad states, never unblock
    if(EnableUnifiedBlockingSystem)
    {
-      AutoUnblockGoodStates();
-      TestBlockedStatesPeriodically();
+      Print("✅ Bloqueio: ATIVADO");
+      Print("   ⚠️ Estados bloqueados NUNCA são desbloqueados (simple Q-learning)");
    }
+
 
    if(EnableMemoryExport) ExportAllMemoryFiles();
 
@@ -6931,11 +7214,10 @@ int OnInit()
    Print("   4. ✅ Correção automática de estados travados");
    Print("   5. ✅ Sistema anti-bloqueio-erroneo ativado");
    Print("   6. ✅ Teste periódico de estados bloqueados (a cada 30 dias)");
-   Print("🔥 NOVAS FUNÇÕES ADICIONADAS:");
-   Print("   • EmergencyCounterFix() - Correção emergencial de contadores");
-   Print("   • OverhaulBlockingSystem() - Revisão completa do bloqueio");
-   Print("   • IntelligentPartialReset() - Reset parcial inteligente");
-   Print("   • OptimizeParametersDynamically() - Otimização dinâmica");
+   Print("🔥 SIMPLIFIED Q-LEARNING:");
+   Print("   • Fixed exploration rate (no decay)");
+   Print("   • Block bad states (never unblock)");
+   Print("   • Simple UpdateQ and ChooseAction");
    Print("===============================================================");
    Print("💾 CONFIGURAÇÃO DE BACKUP (ANTI-PERDA DE DADOS):");
    Print("   • Salvamento após cada trade: ", (SaveAfterEachTrade ? "ATIVO ✅" : "DESATIVADO ❌"));
@@ -7028,10 +7310,11 @@ void OnDeinit(const int reason)
    Print("💾 Processo de salvamento concluído");
    
    IndicatorRelease(g_maHandle);
-   IndicatorRelease(g_adxHandle);
+   // ✅ REMOVIDO: IndicatorRelease(g_adxHandle) (indicador ADX removido)
    IndicatorRelease(g_rsiHandle);
-   IndicatorRelease(g_bbHandle);
+   // ✅ REMOVIDO: IndicatorRelease(g_bbHandle) (indicador BB removido)
    IndicatorRelease(g_atrHandle);
+   IndicatorRelease(g_macdHandle);
 
    RemoveHUD();
 }
