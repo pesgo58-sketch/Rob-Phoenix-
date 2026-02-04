@@ -722,6 +722,20 @@ void BlockState(int state)
     {
         return;
     }
+    
+    // 🚨 PROTEÇÃO CRÍTICA: Nunca bloquear se já temos muitos estados bloqueados
+    // Isso previne DEADLOCK TOTAL onde robô fica sem estados disponíveis
+    int currentBlocked = CountBlockedStates();
+    double blockedPercentage = SafeDivide((double)currentBlocked, (double)NUM_STATES, 0.0);
+    
+    if(blockedPercentage >= 0.80)  // 80% ou mais bloqueados
+    {
+        Print("⚠️ PROTEÇÃO ANTI-DEADLOCK: NÃO bloqueando estado ", state);
+        Print("   Já existem ", currentBlocked, " estados bloqueados (", 
+              DoubleToString(blockedPercentage*100, 1), "% de ", NUM_STATES, ")");
+        Print("   Limite de segurança: 80%");
+        return;  // NÃO BLOQUEAR - prevenir travamento total
+    }
 
     int visits = g_stateVisits[state];
     int losses = g_stateLosses[state];
@@ -6570,6 +6584,23 @@ void OnTick()
             Print("🔥 ATIVAÇÃO DE CORREÇÃO DE EMERGÊNCIA");
             badPerformanceCounter = 0;
          }
+      }
+      
+      // 🚨 NOVO: Monitorar estados bloqueados para evitar deadlock
+      int blockedCount = CountBlockedStates();
+      double blockedPercentage = SafeDivide((double)blockedCount, (double)NUM_STATES, 0.0);
+      
+      if(blockedPercentage >= 0.70)  // 70% ou mais
+      {
+         Print("🚨🚨🚨 ALERTA CRÍTICO: ", blockedCount, " estados bloqueados (",
+               DoubleToString(blockedPercentage*100, 1), "% de ", NUM_STATES, ")");
+         Print("   ⚠️ Sistema próximo do DEADLOCK TOTAL (limite: 80%)");
+         Print("   📊 Estados disponíveis: ", NUM_STATES - blockedCount);
+      }
+      else if(blockedPercentage >= 0.50)  // 50% ou mais
+      {
+         Print("⚠️ AVISO: ", blockedCount, " estados bloqueados (",
+               DoubleToString(blockedPercentage*100, 1), "%)");
       }
    }
 
