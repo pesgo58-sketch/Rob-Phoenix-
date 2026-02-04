@@ -17,7 +17,7 @@ O robô apresentava dois problemas principais:
 - Exploração mínima absoluta de 5% garantida (mesmo que usuário configure 0%)
 - Boost automático para 15% se exploração cair abaixo de 5%
 - Removido bloqueio duro de novos estados quando exploração baixa
-- Código em: `UpdateQ()` linha 3962, `OnTick()` linha 6382
+- Código em: `UpdateQ()` linha 3974, `OnTick()` linha 6395
 
 #### 2. Critério Secundário de Bloqueio ✅
 **Problema**: Estados muito ruins precisavam de 30 visitas para serem bloqueados, permitindo muitas perdas.
@@ -26,7 +26,7 @@ O robô apresentava dois problemas principais:
 - Critério adicional: bloqueia estados com 10+ visitas e 90%+ perdas
 - Não precisa mais esperar 30 visitas para estados consistentemente ruins
 - Log detalhado quando bloqueio antecipado ocorre
-- Código em: `ShouldBlockState()` linha 894
+- Código em: `ShouldBlockState()` linha 906
 
 #### 3. Bypass de Validações em Q-Values Altos ✅
 **Problema**: Filtros de indicadores redundantes bloqueavam trades que o sistema Q-learning identificou como bons.
@@ -45,7 +45,7 @@ O robô apresentava dois problemas principais:
 **Solução**:
 - Threshold aumentado de 35% para 45% win rate mínimo
 - Estados precisam demonstrar performance razoável antes de serem desbloqueados
-- Código em: `UnblockGoodStates()` linha 596
+- Código em: `UnblockGoodStates()` linha 604
 
 #### 5. Auto-Desbloqueio em OnTick Removido ✅
 **Problema**: Auto-desbloqueio direto em OnTick criava loops de bloqueio/desbloqueio.
@@ -134,12 +134,12 @@ Procure por estas mensagens nos logs:
 ### Arquivos Modificados
 
 - `robo phoenix` (arquivo principal do EA)
-  - Linha 894: `ShouldBlockState()` - Critério secundário
-  - Linha 3962: `UpdateQ()` - Exploração mínima garantida
+  - Linha 906: `ShouldBlockState()` - Critério secundário
+  - Linha 3974: `UpdateQ()` - Exploração mínima garantida
   - Linha 4150: `DiagnoseWhyNotTrading()` - Nova função
   - Linha 5483: `ValidateAllIndicators()` - Sistema de bypass
-  - Linha 596: `UnblockGoodStates()` - Threshold corrigido
-  - Linha 6382: `OnTick()` - Exploração e bloqueio corrigidos
+  - Linha 604: `UnblockGoodStates()` - Threshold corrigido
+  - Linha 6395: `OnTick()` - Exploração e bloqueio corrigidos
 
 ### Suporte
 
