@@ -845,7 +845,39 @@ bool ShouldBlockState(int state)
 // ✅✅✅ 4️⃣ FUNÇÃO PARA VERIFICAR SE UM ESTADO DEVE SER DESBLOQUEADO (CORRIGIDA)
 bool ShouldUnblockState(int state)
 {
-    // States are never unblocked once blocked
+    if(state < 0 || state >= NUM_STATES) return false;
+    
+    if(!g_stateBlocked[state]) return false;  // Ja esta desbloqueado
+    
+    int visits = g_stateVisits[state];
+    int wins = g_stateWins[state];
+    
+    // CORRECAO: Permitir desbloquear estados se performance melhorar
+    // Criterio 1: Win rate >= 50% com pelo menos 20 visitas
+    if(visits >= 20)
+    {
+        double winRate = SafeDivide((double)wins, (double)visits, 0.0);
+        if(winRate >= 0.50)
+        {
+            Print("✅ DESBLOQUEIO: Estado ", state, " melhorou (WR=", 
+                  DoubleToString(winRate*100,1), "%)");
+            return true;
+        }
+    }
+    
+    // Criterio 2: Desbloquear apos 7 dias para dar nova chance
+    datetime currentTime = TimeCurrent();
+    datetime blockTime = g_stateLastBlockTime[state];
+    if(blockTime > 0)
+    {
+        int daysSinceBlock = (int)((currentTime - blockTime) / 86400);
+        if(daysSinceBlock >= 7)
+        {
+            Print("🔄 TESTE: Estado ", state, " desbloqueado apos ", daysSinceBlock, " dias");
+            return true;
+        }
+    }
+    
     return false;
 }
 
@@ -911,12 +943,14 @@ void EvaluateAllActiveStates()
     lastFullEvaluation = TimeCurrent();
     
     int blocked = 0;
+    int unblocked = 0;
     
     for(int i = 0; i < g_activeStatesCount; i++)
     {
         int state = g_activeStates[i];
         
         bool shouldBeBlocked = ShouldBlockState(state);
+        bool shouldBeUnblocked = ShouldUnblockState(state);
         bool currentlyBlocked = g_stateBlocked[state];
         
         if(shouldBeBlocked && !currentlyBlocked)
@@ -924,11 +958,16 @@ void EvaluateAllActiveStates()
             BlockState(state);
             blocked++;
         }
+        else if(shouldBeUnblocked && currentlyBlocked)
+        {
+            UnblockState(state);
+            unblocked++;
+        }
     }
     
-    if(blocked > 0)
+    if(blocked > 0 || unblocked > 0)
     {
-      Print("📊 Avaliação periódica de estados: ", blocked, " bloqueados");
+      Print("📊 Avaliacao periodica de estados: ", blocked, " bloqueados, ", unblocked, " desbloqueados");
       Print("📊 Total estados bloqueados: ", CountBlockedStates());
     }
 }
@@ -6665,12 +6704,29 @@ void OnTick()
       }
       else
       {
+         // CORRECAO: Garantir exploracao minima antes de verificar bloqueio
+         if(g_currentExplorationRate < 0.05)
+         {
+            g_currentExplorationRate = 0.15;  // Boost para 15%
+            Print("⚠️ BOOST: Exploracao muito baixa, aumentando para 15%");
+         }
+         
          // ✅ VERIFICAÇÃO DE BLOQUEIO - ÚNICO PONTO
+         // CORRECAO: Se estado bloqueado, desbloquear periodicamente
          if(IsStateBlocked(s))
          {
-            g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
-            UpdateQ_NOP(s);
-            return;
+            // Tentar desbloquear se criterios atendidos
+            if(ShouldUnblockState(s))
+            {
+               UnblockState(s);
+               Print("✅ Estado ", s, " foi desbloqueado - dando nova chance");
+            }
+            else
+            {
+               g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
+               UpdateQ_NOP(s);
+               return;
+            }
          }
          
          int a = ChooseAction(s);
@@ -7159,7 +7215,13 @@ int OnInit()
    g_exportCount = 0;
    
    // ✅ Inicializar taxa de exploração atual
-   g_currentExplorationRate = ExplorationRate;
+   // CORRECAO: Garantir minimo de 5% para nunca travar
+   g_currentExplorationRate = MathMax(ExplorationRate, 0.05);
+   if(g_currentExplorationRate < 0.05)
+   {
+      g_currentExplorationRate = 0.05;
+      Print("⚠️ CORRECAO: Exploracao ajustada para minimo de 5%");
+   }
    g_currentDirection = 0;
    g_positionsCount = 0;
 
