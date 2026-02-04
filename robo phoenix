@@ -1550,20 +1550,17 @@ void AddActiveState(int state)
       }
    }
    
-   // ✅ NOVO: Se exploração = 0%, NÃO adicionar novos estados
-   // Com 0% exploração, usar APENAS estados já conhecidos
-   if(g_currentExplorationRate <= 0.0)
-   {
-      // Estado novo mas exploração = 0% → NÃO adicionar
-      // Sistema deve usar SOMENTE estados já na lista ativa
-      return;
-   }
+   // 🚨 FIX: REMOVIDA verificação de exploração
+   // Motivo: Exploração mínima já garantida em OnInit (5%) e OnTick (boost para 15%)
+   // AddActiveState deve SEMPRE aceitar novos estados descobertos
+   // A decisão de explorar ou não é feita em ChooseAction, não aqui
    
-   // ✅ Adicionar novo estado (exploração > 0%)
+   // ✅ Adicionar novo estado
    if(g_activeStatesCount < MaxMemoryStates)
    {
       g_activeStates[g_activeStatesCount] = state;
       g_activeStatesCount++;
+      Print("✨ NOVO ESTADO DESCOBERTO: ", state, " | Total estados ativos: ", g_activeStatesCount);
    }
    else
    {
@@ -6704,6 +6701,12 @@ void OnTick()
       }
       else
       {
+         // 🚨 FIX CRÍTICO: Adicionar estado à lista ativa IMEDIATAMENTE
+         // Problema: AddActiveState era chamado apenas em UpdateQ (após trade)
+         // Se trade falhasse, estado nunca era registrado e ficava preso
+         // Solução: Registrar estado assim que descoberto, antes de qualquer validação
+         AddActiveState(s);
+         
          // CORRECAO: Garantir exploracao minima antes de verificar bloqueio
          if(g_currentExplorationRate < 0.05)
          {
