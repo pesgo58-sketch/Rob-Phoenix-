@@ -262,7 +262,7 @@ double LearningRate                   = 0.03;         // Taxa de aprendizado (fi
 
 input group "──── 🎲 EXPLORAÇÃO ────";
 input bool   DisableExploration       = false;        // Desabilitar exploração completamente (usar apenas Q-learning)
-input double ExplorationRate          = 0.20;         // Taxa de exploração fixa (20%)
+input double ExplorationRate          = 0.35;         // Taxa de exploração fixa (35%)
 input int    MinStateVisitsToTrade    = 1;            // Visitas mínimas para operar (1 - permite trade imediato)
 
 input group "──── 🔄 SISTEMA HÍBRIDO ────";
@@ -3917,7 +3917,7 @@ void ExecuteAction(int action, int state)
    if(isExploringState)
    {
       Print("🔍 MODO EXPLORAÇÃO: Estado ", state, " com ", g_stateVisits[state], 
-            " visitas - PULANDO validações de indicadores");
+            " visitas - PULANDO validações restritivas");
    }
    
    if(UseRealVolumeFilter)
@@ -3929,18 +3929,30 @@ void ExecuteAction(int action, int state)
       }
    }
    
-   if(!CanOpenNewPosition(isBuy))
+   // ✅ SKIP para estados em exploração - permitir trades mesmo com restrições de direção
+   if(!isExploringState && !CanOpenNewPosition(isBuy))
    {
       g_statusMessage = "⛔ Não pode abrir nova posição na direção";
       UpdateQ_NOP(state);
       return;
    }
+   else if(isExploringState && !CanOpenNewPosition(isBuy))
+   {
+      Print("🔍 MODO EXPLORAÇÃO: Ignorando restrição de direção para testar estado");
+      // Continua mesmo assim
+   }
    
-   if(!CanTradeBasedOnTime())
+   // ✅ SKIP para estados em exploração - permitir trades mesmo com restrição de tempo
+   if(!isExploringState && !CanTradeBasedOnTime())
    {
       g_statusMessage = "⏳ Aguardando tempo entre trades";
       UpdateQ_NOP(state);
       return;
+   }
+   else if(isExploringState && !CanTradeBasedOnTime())
+   {
+      Print("🔍 MODO EXPLORAÇÃO: Ignorando intervalo de tempo para testar estado");
+      // Continua mesmo assim
    }
    
    // ✅ SKIP para estados em exploração (poucas visitas)
