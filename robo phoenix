@@ -3294,6 +3294,41 @@ int CountStatesWithMinVisits(int minVisits)
 // ======================================================================
 void EmergencyCounterFix()
 {
+   // 🚨 FIX CRÍTICO: Verificar EnableAutoUnblocking antes de qualquer desbloqueio
+   // Esta função pode desbloquear estados, então deve respeitar a configuração
+   if(!EnableAutoUnblocking)
+   {
+      Print("🚫 EmergencyCounterFix: Desbloqueio de estados BLOQUEADO (EnableAutoUnblocking=false)");
+      Print("   Função executará apenas correções de contadores, sem desbloquear estados.");
+      Print("   Estados bloqueados permanecerão bloqueados conforme configuração.");
+      
+      // Ainda pode corrigir contadores corrompidos sem desbloquear
+      int corruptedStates = 0;
+      for(int state = 0; state < NUM_STATES; state++)
+      {
+         if(g_stateVisits[state] > 0)
+         {
+            // Corrigir contadores inconsistentes
+            if(g_stateWins[state] > g_stateVisits[state])
+            {
+               Print("❌ Estado ", state, " com contadores corrompidos - corrigindo");
+               double estimatedWinRate = 0.3;
+               g_stateWins[state] = (int)(g_stateVisits[state] * estimatedWinRate);
+               g_stateLosses[state] = g_stateVisits[state] - g_stateWins[state];
+               corruptedStates++;
+            }
+         }
+      }
+      
+      if(corruptedStates > 0)
+      {
+         Print("✅ Corrigidos ", corruptedStates, " estados com contadores corrompidos");
+         Print("   (Nenhum estado foi desbloqueado)");
+      }
+      
+      return;  // Não desbloqueia estados
+   }
+   
    Print("🔥🔥🔥 CORREÇÃO DE EMERGÊNCIA DOS CONTADORES");
    
    int fixedStates = 0;
@@ -3387,6 +3422,37 @@ void EmergencyCounterFix()
 // ======================================================================
 void OverhaulBlockingSystem()
 {
+   // 🚨 FIX CRÍTICO: Verificar EnableAutoUnblocking antes de desbloquear estados
+   if(!EnableAutoUnblocking)
+   {
+      Print("🚫 OverhaulBlockingSystem: Desbloqueio de estados BLOQUEADO (EnableAutoUnblocking=false)");
+      Print("   Função executará apenas análise e bloqueio, sem desbloquear estados.");
+      
+      // Ainda pode bloquear estados ruins
+      int newlyBlocked = 0;
+      for(int state = 0; state < NUM_STATES; state++)
+      {
+         if(g_stateVisits[state] >= MinVisitsForBlockDecision && !g_stateBlocked[state])
+         {
+            double winRate = CalculateWinRate(state);
+            if(winRate < StateBlockThreshold)
+            {
+               g_stateBlocked[state] = true;
+               newlyBlocked++;
+            }
+         }
+      }
+      
+      if(newlyBlocked > 0)
+      {
+         Print("✅ Bloqueados ", newlyBlocked, " estados ruins");
+         Print("   (Nenhum estado foi desbloqueado - EnableAutoUnblocking=false)");
+         g_memoryDirty = true;
+      }
+      
+      return;
+   }
+   
    Print("🔄 REVISÃO COMPLETA DO SISTEMA DE BLOQUEIO");
    
    int blockedBefore = CountBlockedStates();
