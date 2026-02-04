@@ -3970,8 +3970,8 @@ void UpdateQ(int state, int action, double reward)
    
    // ✅ GARANTIR LIMITES
    if(g_currentExplorationRate > 1.0) g_currentExplorationRate = 1.0;
-   // ✅ FIX: Garantir exploração mínima absoluta de 5%, mesmo que usuário configure 0%
-   double absoluteMinExploration = 0.05;  // 5% mínimo absoluto
+   // ✅ FIX: Garantir exploração minima absoluta de 5%, mesmo que usuario configure 0%
+   double absoluteMinExploration = 0.05;  // 5% minimo absoluto
    double effectiveMinExploration = MathMax(MinExplorationRate, absoluteMinExploration);
    if(g_currentExplorationRate < effectiveMinExploration) g_currentExplorationRate = effectiveMinExploration;
    
@@ -5497,7 +5497,7 @@ bool ValidateAllIndicators(bool isBuy, int state = -1)
       
       if(qValue >= HighQBypassThreshold)
       {
-         Print("🚀 BYPASS DE VALIDAÇÕES: Q-value alto (", DoubleToString(qValue, 2), 
+         Print("[BYPASS] Validacoes ignoradas: Q-value alto (", DoubleToString(qValue, 2), 
                " >= ", DoubleToString(HighQBypassThreshold, 2), ") - Sistema confiante!");
          return true;
       }
