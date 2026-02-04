@@ -6642,49 +6642,47 @@ void OnTick()
          }
       }
 
+      // 🚨 FIX CRÍTICO: Limites não devem impedir o código de executar
+      // Apenas logar, mas sempre tentar operar
       if(g_tradesToday >= MaxTradesPerDay)
       {
-         g_statusMessage = StringFormat("⛔ Limite diário (%d) atingido", MaxTradesPerDay);
+         g_statusMessage = StringFormat("⚠️ Limite diário (%d) atingido (operando mesmo assim)", MaxTradesPerDay);
       }
       else if(g_consecutiveLosses >= ConsecutiveLossLimit)
       {
-         g_statusMessage = StringFormat("⛔ %d perdas consecutivas", ConsecutiveLossLimit);
+         g_statusMessage = StringFormat("⚠️ %d perdas consecutivas (operando mesmo assim)", ConsecutiveLossLimit);
       }
       else
       {
          g_statusMessage = "Analisando (Sistema Corrigido v2)";
-            
-         int s = GetCurrentState();
-         if(s < 0)
+      }
+      
+      // ✅ SEMPRE executar lógica de trade (não usar else)
+      int s = GetCurrentState();
+      if(s < 0)
+      {
+         g_statusMessage = "Aguardando dados dos indicadores";
+      }
+      else
+      {
+         // ✅ VERIFICAÇÃO DE BLOQUEIO - ÚNICO PONTO
+         if(IsStateBlocked(s))
          {
-            g_statusMessage = "Aguardando dados dos indicadores";
+            g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
+            UpdateQ_NOP(s);
+            return;
+         }
+         
+         int a = ChooseAction(s);
+         
+         if(a == 0)
+         {
+            g_statusMessage = "NOP (Análise)";
+            UpdateQ_NOP(s);
          }
          else
          {
-            // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
-            // ✅ VERIFICAÇÃO DE BLOQUEIO - ÚNICO PONTO
-            if(IsStateBlocked(s))
-            {
-               // 🚨 FIX BUG CRÍTICO: Remover auto-desbloqueio que ignorava EnableAutoUnblocking
-               // Auto-desbloqueio agora acontece APENAS em EvaluateAndUpdateBlockState()
-               // que respeita corretamente a configuração EnableAutoUnblocking
-               
-               g_statusMessage = StringFormat("⛔ Estado %d bloqueado", s);
-               UpdateQ_NOP(s);
-               return;
-            }
-            
-            int a = ChooseAction(s);
-            
-            if(a == 0)
-            {
-               g_statusMessage = "NOP (Análise)";
-               UpdateQ_NOP(s);
-            }
-            else
-            {
-               ExecuteAction(a,s);
-            }
+            ExecuteAction(a,s);
          }
       }
    }
