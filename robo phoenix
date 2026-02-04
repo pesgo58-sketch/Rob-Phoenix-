@@ -3891,17 +3891,10 @@ void ExecuteAction(int action, int state)
    // Isso permite verificar se o mesmo estado é usado no fechamento
    Print("📝 Estado na ABERTURA: ", state);
    
-   if(IsStateBlocked(state))
-   {
-      Print("⛔⛔⛔ BLOQUEIO CONFIRMADO - Estado ", state, " bloqueado pelo sistema corrigido - trade CANCELADO");
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (sistema corrigido)", state);
-      UpdateQ_NOP(state);
-      return;
-   }
-   
-   // 🚨 FIX CRÍTICO: REMOVER verificação de qualidade BLOCKED
-   // OnTick já verifica IsStateBlocked antes de chamar esta função
-   // Esta verificação duplicada causava paradas indevidas
+   // 🚨 FIX DEFINITIVO: REMOVIDA verificação IsStateBlocked daqui
+   // OnTick JÁ verifica IsStateBlocked antes de chamar ChooseAction e ExecuteAction
+   // Esta verificação duplicada causava paradas indevidas mesmo após passar no OnTick
+   // CONFIAMOS na verificação do OnTick - NÃO verificamos novamente aqui
    
    // ✅ OPCIONAL: Reduzir lote para estados RUINS (BAD)
    // Se o estado for classificado como RUIM, podemos optar por não operar
