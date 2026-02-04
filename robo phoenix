@@ -3910,6 +3910,16 @@ void ExecuteAction(int action, int state)
    // ou reduzir o lote. Por padrão, apenas bloqueamos estados BLOCKED.
    // Estados BAD ainda podem operar mas com lote reduzido via GetStateQualityScore
    
+   // 🎯 NOVO: Modo Exploração - Estados novos têm menos restrições
+   // Se estado tem poucas visitas (< 3), está em fase de exploração
+   // Neste caso, pulamos validações de indicadores para GARANTIR que seja testado
+   bool isExploringState = (g_stateVisits[state] < 3);
+   if(isExploringState)
+   {
+      Print("🔍 MODO EXPLORAÇÃO: Estado ", state, " com ", g_stateVisits[state], 
+            " visitas - PULANDO validações de indicadores");
+   }
+   
    if(UseRealVolumeFilter)
    {
       bool volumeOk = CheckRealVolume();
@@ -3933,14 +3943,16 @@ void ExecuteAction(int action, int state)
       return;
    }
    
-   if(!CheckVolatility())
+   // ✅ SKIP para estados em exploração (poucas visitas)
+   if(!isExploringState && !CheckVolatility())
    {
       g_statusMessage = "⛔ Volatilidade alta";
       UpdateQ_NOP(state);
       return;
    }
    
-   if(!ValidateAllIndicators(isBuy))
+   // ✅ SKIP para estados em exploração (poucas visitas)
+   if(!isExploringState && !ValidateAllIndicators(isBuy))
    {
       g_statusMessage = "⛔ Indicadores não confirmam";
       UpdateQ_NOP(state);
@@ -4003,12 +4015,18 @@ void ExecuteAction(int action, int state)
       {
          lotDecision = "⚠️ NEGATIVE";
          Print("⚠️⚠️ SETUP NEGATIVO DETECTADO - Considerando cancelar trade");
-         if(quality < -0.5)
+         
+         // ✅ SKIP para estados em exploração - permitir mesmo com qualidade baixa
+         if(!isExploringState && quality < -0.5)
          {
             Print("⛔ TRADE CANCELADO - Qualidade muito baixa: ", quality);
             g_statusMessage = "⛔ Setup Negativo - Trade Cancelado";
             UpdateQ_NOP(state);
             return;
+         }
+         else if(isExploringState)
+         {
+            Print("🔍 MODO EXPLORAÇÃO: Permitindo trade apesar de qualidade baixa (", quality, ")");
          }
       }
       else
