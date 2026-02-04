@@ -6695,29 +6695,7 @@ void OnTick()
          else
          {
             // ✅ NOVO: Se exploração = 0%, só usar estados já na lista ativa
-            if(g_currentExplorationRate <= 0.0)
-            {
-               bool stateInActiveList = false;
-               for(int i = 0; i < g_activeStatesCount; i++)
-               {
-                  if(g_activeStates[i] == s)
-                  {
-                     stateInActiveList = true;
-                     break;
-                  }
-               }
-               
-               if(!stateInActiveList)
-               {
-                  // 🚨 FIX BUG: Atualizar Q-value de NOP antes de retornar
-                  // Estado novo mas exploração = 0% → NÃO usar este estado, mas registrar decisão
-                  g_statusMessage = StringFormat("⏸️ Estado %d desconhecido (exploração 0%%)", s);
-                  UpdateQ_NOP(s);  // ✅ CORREÇÃO: Registra NOP no Q-learning
-                  return;
-               }
-            }
-            
-            // ✅ VERIFICAÇÃO DE BLOQUEIO MAIS INTELIGENTE
+            // ✅ VERIFICAÇÃO DE BLOQUEIO - ÚNICO PONTO
             if(IsStateBlocked(s))
             {
                // 🚨 FIX BUG CRÍTICO: Remover auto-desbloqueio que ignorava EnableAutoUnblocking
