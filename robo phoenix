@@ -4216,6 +4216,16 @@ void ExecuteAction(int action, int state)
    g_lastLotUsed     = desiredLot;
    g_tradesToday++;
    
+   // 🚨 FIX CRÍTICO: Incrementar visitas IMEDIATAMENTE ao abrir trade
+   // Não esperar OnTradeTransaction que pode ser assíncrono ou falhar
+   // Isso garante que estados descobertos tenham contabilidade correta
+   if(state >= 0 && state < NUM_STATES)
+   {
+      g_stateVisits[state]++;
+      g_stateLastUpdate[state] = g_totalTrades;
+      Print("📊 VISITA REGISTRADA: Estado ", state, " agora tem ", g_stateVisits[state], " visitas");
+   }
+   
    g_currentDirection = isBuy ? 1 : 2;
    g_positionsCount = GetTotalPositions();
    cachedPositions = -1;
@@ -5780,7 +5790,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       // ⚠️ CORREÇÃO DEFINITIVA: Contar APENAS se foi trade real (BUY/SELL)
       if(g_lastTradeAction == 1 || g_lastTradeAction == 2) // BUY ou SELL
       {
-         g_stateVisits[g_lastTradeState]++;
+         // 🚨 NOTA: g_stateVisits já foi incrementado em ExecuteAction
+         // Aqui apenas atualizamos wins/losses baseado no resultado
+         
+         // NÃO incrementar visitas novamente (já feito em ExecuteAction)
+         // g_stateVisits[g_lastTradeState]++;  // REMOVIDO - evita dupla contagem
+         
          g_stateLastUpdate[g_lastTradeState] = g_totalTrades;
          
          // Atualizar dados para Sharpe Ratio
