@@ -3751,24 +3751,9 @@ int ChooseAction(int state)
    {
       int simplifiedSignal = GetSimplifiedSignal();
       
-      // Ainda verificar bloqueio de estado
-      if(IsStateBlocked(state))
-      {
-         Print("⛔ Estado ", state, " bloqueado - ignorando sinal simplificado");
-         g_statusMessage = StringFormat("⛔ Estado %d bloqueado", state);
-         return 0;
-      }
-      
-      // Verificar qualidade do estado se tiver visitas suficientes
-      if(g_stateVisits[state] >= MinVisitsForQualityDecision)
-      {
-         ENUM_STATE_QUALITY quality = GetStateQuality(state);
-         if(quality == STATE_QUALITY_BLOCKED)
-         {
-            Print("⛔ Estado ", state, " com qualidade BLOCKED - ignorando sinal");
-            return 0;
-         }
-      }
+      // 🚨 FIX CRÍTICO: REMOVER verificações de bloqueio duplicadas
+      // OnTick já verifica IsStateBlocked antes de chamar ChooseAction
+      // Verificações aqui causavam paradas mesmo com estado OK
       
       if(simplifiedSignal == 1)
          g_statusMessage = "📈 SINAL SIMPLIFICADO: BUY (RSI+MACD)";
@@ -3781,13 +3766,8 @@ int ChooseAction(int state)
       return simplifiedSignal;
    }
    
-   // ✅ Continuar com lógica Q-learning padrão se não usar sinal simplificado
-   if(IsStateBlocked(state))
-   {
-      Print("⛔ Estado ", state, " bloqueado pelo sistema corrigido");
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (sistema corrigido)", state);
-      return 0;
-   }
+   // 🚨 FIX CRÍTICO: REMOVER verificação de bloqueio duplicada
+   // OnTick já verifica antes de chamar esta função
    
    if(ArraySize(g_Q) <= state * NUM_ACTIONS + 2)
    {
@@ -3919,15 +3899,9 @@ void ExecuteAction(int action, int state)
       return;
    }
    
-   // ✅ NOVO: Verificar qualidade do estado antes de permitir trade
-   ENUM_STATE_QUALITY stateQuality = GetStateQuality(state);
-   if(stateQuality == STATE_QUALITY_BLOCKED)
-   {
-      Print("⛔ FILTRO DE QUALIDADE: Estado ", state, " classificado como BLOQUEADO - trade CANCELADO");
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (qualidade)", state);
-      UpdateQ_NOP(state);
-      return;
-   }
+   // 🚨 FIX CRÍTICO: REMOVER verificação de qualidade BLOCKED
+   // OnTick já verifica IsStateBlocked antes de chamar esta função
+   // Esta verificação duplicada causava paradas indevidas
    
    // ✅ OPCIONAL: Reduzir lote para estados RUINS (BAD)
    // Se o estado for classificado como RUIM, podemos optar por não operar
