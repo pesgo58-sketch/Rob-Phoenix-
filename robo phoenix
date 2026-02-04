@@ -2608,7 +2608,7 @@ void DebugTradeCounting()
    
    int estadosComProblema = 0;
    int totalVisitas = 0;
-   int totalVitórias = 0;
+   int totalVitorias = 0;
    int totalPerdas = 0;
    
    for(int s = 0; s < NUM_STATES; s++)
@@ -2616,7 +2616,7 @@ void DebugTradeCounting()
       if(g_stateVisits[s] > 0)
       {
          totalVisitas += g_stateVisits[s];
-         totalVitórias += g_stateWins[s];
+         totalVitorias += g_stateWins[s];
          totalPerdas += g_stateLosses[s];
          
          if(g_stateWins[s] == 0 && g_stateLosses[s] == 0 && g_stateVisits[s] >= 3)
@@ -2659,10 +2659,10 @@ void DebugTradeCounting()
    Print("Estados ativos: ", g_activeStatesCount);
    Print("Estados com problema: ", estadosComProblema);
    Print("Total visitas em todos estados: ", totalVisitas);
-   Print("Total vitórias em todos estados: ", totalVitórias);
+   Print("Total vitorias em todos estados: ", totalVitorias);
    Print("Total perdas em todos estados: ", totalPerdas);
-   Print("Taxa de vitória global estados: ", totalVisitas > 0 ? 
-         DoubleToString(SafeDivide((double)totalVitórias, (double)totalVisitas, 0.0)*100, 1) : "0.0", "%");
+   Print("Taxa de vitoria global estados: ", totalVisitas > 0 ? 
+         DoubleToString(SafeDivide((double)totalVitorias, (double)totalVisitas, 0.0)*100, 1) : "0.0", "%");
    
    if(estadosComProblema > 0)
    {
