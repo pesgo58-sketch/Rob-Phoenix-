@@ -3800,23 +3800,16 @@ int ChooseAction(int state)
    {
    }
    
-   // ⚠️ CORREÇÃO: EXPLORAÇÃO BALANCEADA PARA ESTADOS NOVOS
+   // 🚨 FIX CRÍTICO: EXPLORAÇÃO FORÇADA PARA ESTADOS NOVOS (100%)
+   // Estados com 0 visitas SEMPRE exploram para garantir primeira visita
+   // Sem isso, estado pode ficar preso em NOP e nunca ser descoberto
    if(g_stateVisits[state] < MinStateVisitsToTrade)
    {
-      double eps = 0.5; // 50% de exploração para estados novos (REDUZIDO de 80% para mais trades)
-      
-      if(((double)MathRand() / 32767.0) < eps) 
-      {
-         int randomAction = 1 + (MathRand() % 2);
-         Print("🔍 EXPLORAÇÃO (estado novo): Ação aleatória ", randomAction, " | Estado: ", state);
-         g_statusMessage = "🔍 Exploração (estado novo)";
-         return randomAction;
-      }
-      else
-      {
-         Print("🤔 Estado novo, mas escolhendo NOP (50% chance)");
-         return 0;
-      }
+      // 100% exploração - SEMPRE opera em estados novos
+      int randomAction = 1 + (MathRand() % 2);  // BUY ou SELL aleatório
+      Print("🔍 EXPLORAÇÃO FORÇADA (estado novo ", state, " com ", g_stateVisits[state], " visitas): Ação ", randomAction);
+      g_statusMessage = StringFormat("🔍 Exploração forçada (estado %d novo)", state);
+      return randomAction;
    }
    
    // Para estados conhecidos, usar taxa de exploração normal
