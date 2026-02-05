@@ -1658,38 +1658,53 @@ bool SaveBrainToFile(string filename)
    int h = FileOpen(filename, FILE_WRITE|FILE_BIN|FILE_COMMON);
    if(h == INVALID_HANDLE) return false;
 
+   // 🚨 FIX CRÍTICO: Salvar TODOS os estados com visitas > 0, não apenas g_activeStates[]
+   // Isso garante que estados descobertos não sejam perdidos quando removidos do cache
+   
+   // Primeiro, contar quantos estados têm visitas
+   int totalStatesToSave = 0;
+   for(int s = 0; s < NUM_STATES; s++)
+   {
+      if(g_stateVisits[s] > 0)
+      {
+         totalStatesToSave++;
+      }
+   }
+   
    // 🔧 REGRA 1 — Sempre converter explicitamente
    FileWriteInteger(h, (int)FILE_MAGIC);
    FileWriteInteger(h, (int)FILE_VERSION);
-   FileWriteInteger(h, (int)g_activeStatesCount);
+   FileWriteInteger(h, (int)totalStatesToSave);  // Salva TOTAL, não g_activeStatesCount
    
-   for(int i = 0; i < g_activeStatesCount; i++)
+   // Salvar TODOS os estados com visitas > 0
+   for(int s = 0; s < NUM_STATES; s++)
    {
-      int state = g_activeStates[i];
-      
-      FileWriteInteger(h, (int)state);
-      FileWriteInteger(h, (int)g_stateVisits[state]);
-      FileWriteInteger(h, (int)g_stateLosses[state]);
-      FileWriteInteger(h, (int)g_stateWins[state]);
-      FileWriteInteger(h, (int)g_stateLastUpdate[state]);
-      FileWriteInteger(h, (int)g_stateBlocked[state]);
-      FileWriteLong(h, (long)g_stateLastBlockTime[state]);
-      
-      // Validação ao salvar: garante que contador está entre 0-10
-      int blockCountToSave = g_stateBlockCount[state];
-      if(blockCountToSave < 0 || blockCountToSave > 10)
+      if(g_stateVisits[s] > 0)
       {
-         Print("⚠️ ALERTA: Contador de bloqueios corrompido detectado para estado ", state, 
-               " (valor: ", blockCountToSave, "). Corrigindo para 0.");
-         blockCountToSave = 0;
-         g_stateBlockCount[state] = 0;  // Corrige na memória também
-      }
-      FileWriteInteger(h, blockCountToSave);
-      
-      for(int a = 0; a < NUM_ACTIONS; a++)
-      {
-         double qValue = CompressQValue(g_Q[state * NUM_ACTIONS + a]);
-         FileWriteDouble(h, qValue);
+         FileWriteInteger(h, (int)s);
+         FileWriteInteger(h, (int)g_stateVisits[s]);
+         FileWriteInteger(h, (int)g_stateLosses[s]);
+         FileWriteInteger(h, (int)g_stateWins[s]);
+         FileWriteInteger(h, (int)g_stateLastUpdate[s]);
+         FileWriteInteger(h, (int)g_stateBlocked[s]);
+         FileWriteLong(h, (long)g_stateLastBlockTime[s]);
+         
+         // Validação ao salvar: garante que contador está entre 0-10
+         int blockCountToSave = g_stateBlockCount[s];
+         if(blockCountToSave < 0 || blockCountToSave > 10)
+         {
+            Print("⚠️ ALERTA: Contador de bloqueios corrompido detectado para estado ", s, 
+                  " (valor: ", blockCountToSave, "). Corrigindo para 0.");
+            blockCountToSave = 0;
+            g_stateBlockCount[s] = 0;  // Corrige na memória também
+         }
+         FileWriteInteger(h, blockCountToSave);
+         
+         for(int a = 0; a < NUM_ACTIONS; a++)
+         {
+            double qValue = CompressQValue(g_Q[s * NUM_ACTIONS + a]);
+            FileWriteDouble(h, qValue);
+         }
       }
    }
    
@@ -1916,7 +1931,61 @@ bool LoadBrainFromFile(string filename)
    
    FileClose(h);
    
-   Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos");
+   // 🚨 FIX CRÍTICO: Reconstruir g_activeStates[] com os estados mais recentes
+   // g_activeStatesCount foi setado pelo arquivo (total de estados salvos)
+   // Mas pode ser maior que MaxMemoryStates
+   // Então precisamos reconstruir o cache com os estados mais recentes
+   
+   int totalStatesLoaded = g_activeStatesCount;
+   
+   if(g_activeStatesCount > MaxMemoryStates)
+   {
+      Print("⚠️ Arquivo contém ", g_activeStatesCount, " estados, mas MaxMemoryStates=", MaxMemoryStates);
+      Print("🔄 Reconstruindo cache com estados mais recentes...");
+      
+      // Encontrar os MaxMemoryStates estados mais recentes
+      // Usar insertion sort parcial para eficiência
+      g_activeStatesCount = 0;
+      
+      for(int s = 0; s < NUM_STATES; s++)
+      {
+         if(g_stateVisits[s] > 0)
+         {
+            // Se ainda há espaço, adiciona direto
+            if(g_activeStatesCount < MaxMemoryStates)
+            {
+               g_activeStates[g_activeStatesCount] = s;
+               g_activeStatesCount++;
+            }
+            else
+            {
+               // Encontrar estado mais antigo no cache e substituir se este for mais recente
+               int oldestIdx = 0;
+               int oldestTime = g_stateLastUpdate[g_activeStates[0]];
+               
+               for(int i = 1; i < MaxMemoryStates; i++)
+               {
+                  if(g_stateLastUpdate[g_activeStates[i]] < oldestTime)
+                  {
+                     oldestTime = g_stateLastUpdate[g_activeStates[i]];
+                     oldestIdx = i;
+                  }
+               }
+               
+               // Se este estado é mais recente que o mais antigo no cache, substitui
+               if(g_stateLastUpdate[s] > oldestTime)
+               {
+                  g_activeStates[oldestIdx] = s;
+               }
+            }
+         }
+      }
+      
+      Print("✅ Cache reconstruído com ", g_activeStatesCount, " estados mais recentes");
+   }
+   
+   Print("✅ Memória carregada: ", g_activeStatesCount, " estados ativos (cache)");
+   Print("   Total de estados descobertos preservados: ", totalStatesLoaded);
    Print("📊 Estados bloqueados: ", CountBlockedStates());
    Print("📊 Total de trades: ", g_totalTrades, " (Wins: ", g_totalWins, ", Losses: ", g_totalLosses, ")");
    Print("💰 Lucro Total carregado: ", DoubleToString(g_sumProfit, 2));
