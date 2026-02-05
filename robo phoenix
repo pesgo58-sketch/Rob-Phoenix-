@@ -249,6 +249,11 @@ input double MinSharpeToUnblock       = 0.8;          // Sharpe mínimo para des
 input double MaxSharpeToBlock         = 0.3;          // Sharpe máximo para bloquear
 input int    MinTradesForSharpe       = 30;           // Trades mínimos para calcular Sharpe
 
+input group "──── 🧪 TESTE DE CONFIGURAÇÕES RSI+ATR+MACD ────";
+input bool   EnableConfigSearch       = false;        // ✅ Ativar teste de configurações completas
+input int    TradesPerConfig          = 300;          // Trades por configuração
+input bool   UseBestConfigAfterTest   = true;         // Usar melhor config após teste
+
 // ──────────────────────────────────────────────────────────────────────
 // 📤 7. EXPORTAÇÃO E LOGS
 // ──────────────────────────────────────────────────────────────────────
@@ -388,6 +393,42 @@ int g_paramOptimizationInterval = 100;      // Avaliar a cada N trades
 int g_minTradesForParamChange = 50;         // Mínimo de trades antes de mudar parâmetro
 datetime g_lastParamOptimization = 0;       // Última otimização
 int g_paramChangeCount = 0;                 // Contador de mudanças de parâmetros
+
+// ✅ NOVO: Sistema de Teste de Configurações Completas (RSI+ATR+MACD)
+// ──────────────────────────────────────────────────────────────────────
+#define MAX_RSI_ATR_MACD_CONFIGS 4
+
+struct RSIAtrMacdConfig
+{
+   // Parâmetros RSI
+   double rsiOverbought;
+   double rsiOversold;
+   
+   // Parâmetros ATR
+   int atrPeriod;
+   double atrStopMult;
+   
+   // Parâmetros MACD
+   int macdFast;
+   int macdSlow;
+   int macdSignal;
+   
+   // Rastreamento de performance
+   double totalProfit;
+   int totalTrades;
+   double avgProfitPerTrade;
+   int wins;
+   double winRate;
+};
+
+RSIAtrMacdConfig g_rsiAtrMacdConfigs[MAX_RSI_ATR_MACD_CONFIGS];
+int g_currentConfigIndex = 0;
+int g_tradesInCurrentConfig = 0;
+bool g_configSearchCompleted = false;
+int g_bestConfigIndex = 0;
+bool g_enableConfigSearch = false;        // Controlado por input
+int g_tradesPerConfig = 300;             // Controlado por input
+bool g_useBestConfigAfterTest = true;    // Controlado por input
 
 // ──────────────────────────────────────────────────────────────────────
 // 💰 4. CONTROLE DE TRADES E POSIÇÕES
@@ -3377,6 +3418,225 @@ void OptimizeIndicatorParameters()
 }
 
 // ======================================================================
+// ✅✅✅ SISTEMA DE TESTE DE CONFIGURAÇÕES RSI+ATR+MACD
+// ======================================================================
+
+// Inicializar configurações de teste
+void InitRSIAtrMacdConfigs()
+{
+   if(!EnableConfigSearch) return;
+   
+   Print("🧪 === INICIALIZANDO CONFIGURAÇÕES DE TESTE RSI+ATR+MACD ===");
+   
+   // Config 0 - Base/Clássica
+   g_rsiAtrMacdConfigs[0].rsiOverbought   = 70;
+   g_rsiAtrMacdConfigs[0].rsiOversold     = 30;
+   g_rsiAtrMacdConfigs[0].atrPeriod       = 14;
+   g_rsiAtrMacdConfigs[0].atrStopMult     = 2.0;
+   g_rsiAtrMacdConfigs[0].macdFast        = 12;
+   g_rsiAtrMacdConfigs[0].macdSlow        = 26;
+   g_rsiAtrMacdConfigs[0].macdSignal      = 9;
+   g_rsiAtrMacdConfigs[0].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[0].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[0].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[0].wins            = 0;
+   g_rsiAtrMacdConfigs[0].winRate         = 0.0;
+   
+   // Config 1 - Agressiva/Rápida
+   g_rsiAtrMacdConfigs[1].rsiOverbought   = 68;
+   g_rsiAtrMacdConfigs[1].rsiOversold     = 32;
+   g_rsiAtrMacdConfigs[1].atrPeriod       = 14;
+   g_rsiAtrMacdConfigs[1].atrStopMult     = 1.8;
+   g_rsiAtrMacdConfigs[1].macdFast        = 8;
+   g_rsiAtrMacdConfigs[1].macdSlow        = 21;
+   g_rsiAtrMacdConfigs[1].macdSignal      = 5;
+   g_rsiAtrMacdConfigs[1].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[1].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[1].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[1].wins            = 0;
+   g_rsiAtrMacdConfigs[1].winRate         = 0.0;
+   
+   // Config 2 - Conservadora/Filtrada
+   g_rsiAtrMacdConfigs[2].rsiOverbought   = 72;
+   g_rsiAtrMacdConfigs[2].rsiOversold     = 28;
+   g_rsiAtrMacdConfigs[2].atrPeriod       = 20;
+   g_rsiAtrMacdConfigs[2].atrStopMult     = 2.5;
+   g_rsiAtrMacdConfigs[2].macdFast        = 16;
+   g_rsiAtrMacdConfigs[2].macdSlow        = 32;
+   g_rsiAtrMacdConfigs[2].macdSignal      = 9;
+   g_rsiAtrMacdConfigs[2].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[2].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[2].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[2].wins            = 0;
+   g_rsiAtrMacdConfigs[2].winRate         = 0.0;
+   
+   // Config 3 - Solta/Ampla
+   g_rsiAtrMacdConfigs[3].rsiOverbought   = 65;
+   g_rsiAtrMacdConfigs[3].rsiOversold     = 35;
+   g_rsiAtrMacdConfigs[3].atrPeriod       = 10;
+   g_rsiAtrMacdConfigs[3].atrStopMult     = 2.2;
+   g_rsiAtrMacdConfigs[3].macdFast        = 12;
+   g_rsiAtrMacdConfigs[3].macdSlow        = 26;
+   g_rsiAtrMacdConfigs[3].macdSignal      = 5;
+   g_rsiAtrMacdConfigs[3].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[3].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[3].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[3].wins            = 0;
+   g_rsiAtrMacdConfigs[3].winRate         = 0.0;
+   
+   g_currentConfigIndex = 0;
+   g_tradesInCurrentConfig = 0;
+   g_configSearchCompleted = false;
+   g_bestConfigIndex = 0;
+   
+   g_enableConfigSearch = EnableConfigSearch;
+   g_tradesPerConfig = TradesPerConfig;
+   g_useBestConfigAfterTest = UseBestConfigAfterTest;
+   
+   Print("✅ 4 configurações de teste inicializadas");
+   Print("   Trades por config: ", g_tradesPerConfig);
+   Print("   Config inicial: 0 (Base/Clássica)");
+   Print("🧪 === FIM DA INICIALIZAÇÃO ===");
+}
+
+// Atualizar performance da configuração atual após trade
+void UpdateConfigPerformance(bool wasWin, double profit)
+{
+   if(!g_enableConfigSearch || g_configSearchCompleted) return;
+   
+   RSIAtrMacdConfig &cfg = g_rsiAtrMacdConfigs[g_currentConfigIndex];
+   cfg.totalProfit += profit;
+   cfg.totalTrades++;
+   if(wasWin) cfg.wins++;
+   
+   if(cfg.totalTrades > 0)
+   {
+      cfg.avgProfitPerTrade = cfg.totalProfit / (double)cfg.totalTrades;
+      cfg.winRate = SafeDivide((double)cfg.wins, (double)cfg.totalTrades, 0.0);
+   }
+   
+   g_tradesInCurrentConfig++;
+   
+   // Verificar se deve mudar de configuração
+   if(g_tradesInCurrentConfig >= g_tradesPerConfig)
+   {
+      Print("📊 Config ", g_currentConfigIndex, " testada: ",
+            " Trades=", cfg.totalTrades,
+            " | Lucro=", DoubleToString(cfg.totalProfit, 2),
+            " | Win Rate=", DoubleToString(cfg.winRate*100, 1), "%",
+            " | Avg/Trade=", DoubleToString(cfg.avgProfitPerTrade, 2));
+      
+      g_currentConfigIndex++;
+      g_tradesInCurrentConfig = 0;
+      
+      // Se completou todas as configs, selecionar a melhor
+      if(g_currentConfigIndex >= MAX_RSI_ATR_MACD_CONFIGS)
+      {
+         g_currentConfigIndex = 0;
+         g_configSearchCompleted = true;
+         
+         // Encontrar melhor configuração
+         double bestScore = -DBL_MAX;
+         int bestIndex = 0;
+         
+         Print("🧪 === ANÁLISE DE CONFIGURAÇÕES ===");
+         for(int i = 0; i < MAX_RSI_ATR_MACD_CONFIGS; i++)
+         {
+            double score = g_rsiAtrMacdConfigs[i].avgProfitPerTrade;
+            
+            Print("   Config ", i, ": Avg=", DoubleToString(g_rsiAtrMacdConfigs[i].avgProfitPerTrade, 2),
+                  " | WR=", DoubleToString(g_rsiAtrMacdConfigs[i].winRate*100, 1), "%",
+                  " | Trades=", g_rsiAtrMacdConfigs[i].totalTrades);
+            
+            if(score > bestScore)
+            {
+               bestScore = score;
+               bestIndex = i;
+            }
+         }
+         
+         g_bestConfigIndex = bestIndex;
+         
+         if(g_useBestConfigAfterTest)
+         {
+            g_currentConfigIndex = g_bestConfigIndex;
+         }
+         
+         RSIAtrMacdConfig &best = g_rsiAtrMacdConfigs[g_bestConfigIndex];
+         
+         Print("🏆 MELHOR CONFIGURAÇÃO: Index=", g_bestConfigIndex);
+         Print("   RSI: ", best.rsiOversold, "/", best.rsiOverbought);
+         Print("   ATR: Período=", best.atrPeriod, " | Mult=", DoubleToString(best.atrStopMult, 1));
+         Print("   MACD: ", best.macdFast, "/", best.macdSlow, "/", best.macdSignal);
+         Print("   Lucro Total: ", DoubleToString(best.totalProfit, 2));
+         Print("   Trades: ", best.totalTrades);
+         Print("   Win Rate: ", DoubleToString(best.winRate*100, 1), "%");
+         Print("   Avg/Trade: ", DoubleToString(best.avgProfitPerTrade, 2));
+         
+         if(g_useBestConfigAfterTest)
+         {
+            Print("✅ Sistema travado na melhor configuração");
+         }
+         else
+         {
+            Print("ℹ️ Sistema voltou para Config 0 (manual)");
+         }
+         
+         Print("🧪 === TESTE DE CONFIGURAÇÕES CONCLUÍDO ===");
+      }
+      else
+      {
+         RSIAtrMacdConfig &next = g_rsiAtrMacdConfigs[g_currentConfigIndex];
+         Print("🔄 Mudando para Config ", g_currentConfigIndex);
+         Print("   RSI: ", next.rsiOversold, "/", next.rsiOverbought,
+               " | ATR: ", next.atrPeriod, "/", DoubleToString(next.atrStopMult, 1),
+               " | MACD: ", next.macdFast, "/", next.macdSlow, "/", next.macdSignal);
+      }
+   }
+}
+
+// Obter parâmetros da configuração atual
+void GetCurrentConfigParams(double &rsiOB, double &rsiOS, int &atrPer, double &atrMult,
+                            int &macdF, int &macdS, int &macdSig)
+{
+   if(g_enableConfigSearch && !g_configSearchCompleted)
+   {
+      // Usar config atual em teste
+      RSIAtrMacdConfig &cfg = g_rsiAtrMacdConfigs[g_currentConfigIndex];
+      rsiOB = cfg.rsiOverbought;
+      rsiOS = cfg.rsiOversold;
+      atrPer = cfg.atrPeriod;
+      atrMult = cfg.atrStopMult;
+      macdF = cfg.macdFast;
+      macdS = cfg.macdSlow;
+      macdSig = cfg.macdSignal;
+   }
+   else if(g_enableConfigSearch && g_configSearchCompleted && g_useBestConfigAfterTest)
+   {
+      // Usar melhor config encontrada
+      RSIAtrMacdConfig &cfg = g_rsiAtrMacdConfigs[g_bestConfigIndex];
+      rsiOB = cfg.rsiOverbought;
+      rsiOS = cfg.rsiOversold;
+      atrPer = cfg.atrPeriod;
+      atrMult = cfg.atrStopMult;
+      macdF = cfg.macdFast;
+      macdS = cfg.macdSlow;
+      macdSig = cfg.macdSignal;
+   }
+   else
+   {
+      // Usar inputs padrão
+      rsiOB = RSI_Overbought;
+      rsiOS = RSI_Oversold;
+      atrPer = ATRPeriod;
+      atrMult = 2.0; // Padrão
+      macdF = MACDFastEMA;
+      macdS = MACDSlowEMA;
+      macdSig = MACDSignalSMA;
+   }
+}
+
+// ======================================================================
 // ✅ HUD LEVE - FUNÇÕES OTIMIZADAS
 // ======================================================================
 
@@ -5433,11 +5693,19 @@ bool ValidateWithRSI(bool isBuy)
    double currentRSI = rsi[0];
    double previousRSI = rsi[1];
    
+   // ✅ Obter parâmetros da configuração atual
+   double rsiOverbought, rsiOversold;
+   int atrPeriod;
+   double atrStopMult;
+   int macdFast, macdSlow, macdSignal;
+   GetCurrentConfigParams(rsiOverbought, rsiOversold, atrPeriod, atrStopMult, 
+                          macdFast, macdSlow, macdSignal);
+   
    if(isBuy)
    {
-      if(currentRSI < RSI_Oversold) 
+      if(currentRSI < rsiOversold) 
       {
-         Print("✅ RSI EXCELENTE para BUY: ", DoubleToString(currentRSI, 2), " (oversold)");
+         Print("✅ RSI EXCELENTE para BUY: ", DoubleToString(currentRSI, 2), " (oversold<", rsiOversold, ")");
          return true;
       }
       
@@ -5464,9 +5732,9 @@ bool ValidateWithRSI(bool isBuy)
    }
    else
    {
-      if(currentRSI > RSI_Overbought)
+      if(currentRSI > rsiOverbought)
       {
-         Print("✅ RSI EXCELENTE para SELL: ", DoubleToString(currentRSI, 2), " (sobrecomprado)");
+         Print("✅ RSI EXCELENTE para SELL: ", DoubleToString(currentRSI, 2), " (overbought>", rsiOverbought, ")");
          return true;
       }
       
@@ -5933,6 +6201,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             
             // ✅ NOVO: Atualizar performance dos parâmetros
             UpdateParameterPerformance(true, net_profit);
+            
+            // ✅ NOVO: Atualizar performance da configuração
+            UpdateConfigPerformance(true, net_profit);
          }
          else 
          {
@@ -5942,6 +6213,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             
             // ✅ NOVO: Atualizar performance dos parâmetros
             UpdateParameterPerformance(false, net_profit);
+            
+            // ✅ NOVO: Atualizar performance da configuração
+            UpdateConfigPerformance(false, net_profit);
          }
          
          // ✅ FIX: Avaliar bloqueio após QUALQUER trade (win ou loss), não só após perda
@@ -7122,6 +7396,9 @@ int OnInit()
    
    // ✅ NOVO: Inicializar sistema de otimização de parâmetros
    InitializeParameterOptimization();
+   
+   // ✅ NOVO: Inicializar sistema de teste de configurações
+   InitRSIAtrMacdConfigs();
    
    g_statusMessage = "Inicializando Sistema Super Corrigido v309...";
    
