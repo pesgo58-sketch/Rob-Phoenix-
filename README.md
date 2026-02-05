@@ -3,6 +3,43 @@ robô Phoenix
 
 ## 🔧 Recent Updates
 
+### 2026-02-05: TXT Export System & ATR Stops Removal 📄
+
+**NEW: Complete activity logging to TXT file for easy monitoring!**
+
+Changes made per user request:
+1. ✅ **Removed ATR-based adaptive stops** - Now ALWAYS uses fixed points (FixedSL_Points/FixedTP_Points)
+2. ✅ **Added comprehensive TXT export** - Logs all robot activity to readable text file
+
+📚 **[Read the TXT Export Guide →](TXT_EXPORT_GUIDE.md)**
+
+**Quick Start:**
+```
+EnableTxtExport = true             // Activate TXT logging
+TxtExportInterval = 10             // Summary every 10 trades
+```
+
+**Log file location:**
+```
+MQL5/Files/Phoenix_Activity_Log_[SYMBOL].txt
+```
+
+**What's logged:**
+- Every trade opening (direction, price, SL, TP, lot, state)
+- Every trade closing (result, profit, duration)
+- State blocking/unblocking events
+- Configuration changes
+- Periodic summaries
+
+**Benefits:**
+- 📊 Easy to import into Excel/Google Sheets
+- 🔍 Monitor robot in real-time
+- 📈 Analyze performance trends
+- 🐛 Debug issues quickly
+- 💾 Keep permanent history
+
+---
+
 ### 2026-02-05: RSI+ATR+MACD Configuration Testing System ✨
 
 **NEW: Intelligent configuration testing that finds the best parameter combinations!**
