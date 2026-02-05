@@ -3159,6 +3159,224 @@ void OptimizeParametersDynamically()
 }
 
 // ======================================================================
+// ✅✅✅ SISTEMA DE OTIMIZAÇÃO ADAPTATIVA DE PARÂMETROS
+// ======================================================================
+
+// Inicializar arrays de performance de parâmetros
+void InitializeParameterOptimization()
+{
+   if(!g_enableParamOptimization) return;
+   
+   // Configurar ranges de teste para RSI (10 a 30, step 2)
+   int rsiRange = 11; // 10,12,14,16,18,20,22,24,26,28,30
+   ArrayResize(g_rsiParamPerf, rsiRange);
+   for(int i = 0; i < rsiRange; i++)
+   {
+      g_rsiParamPerf[i].paramValue = 10 + (i * 2);
+      g_rsiParamPerf[i].trades = 0;
+      g_rsiParamPerf[i].wins = 0;
+      g_rsiParamPerf[i].totalProfit = 0.0;
+      g_rsiParamPerf[i].avgProfit = 0.0;
+      g_rsiParamPerf[i].winRate = 0.0;
+   }
+   
+   // Configurar ranges de teste para MACD Fast (8 a 15, step 1)
+   int macdFastRange = 8; // 8,9,10,11,12,13,14,15
+   ArrayResize(g_macdFastPerf, macdFastRange);
+   for(int i = 0; i < macdFastRange; i++)
+   {
+      g_macdFastPerf[i].paramValue = 8 + i;
+      g_macdFastPerf[i].trades = 0;
+      g_macdFastPerf[i].wins = 0;
+      g_macdFastPerf[i].totalProfit = 0.0;
+      g_macdFastPerf[i].avgProfit = 0.0;
+      g_macdFastPerf[i].winRate = 0.0;
+   }
+   
+   // Configurar ranges de teste para MACD Slow (20 a 30, step 2)
+   int macdSlowRange = 6; // 20,22,24,26,28,30
+   ArrayResize(g_macdSlowPerf, macdSlowRange);
+   for(int i = 0; i < macdSlowRange; i++)
+   {
+      g_macdSlowPerf[i].paramValue = 20 + (i * 2);
+      g_macdSlowPerf[i].trades = 0;
+      g_macdSlowPerf[i].wins = 0;
+      g_macdSlowPerf[i].totalProfit = 0.0;
+      g_macdSlowPerf[i].avgProfit = 0.0;
+      g_macdSlowPerf[i].winRate = 0.0;
+   }
+   
+   Print("✅ Sistema de otimização de parâmetros inicializado");
+   Print("   RSI: 10-30 (11 valores)");
+   Print("   MACD Fast: 8-15 (8 valores)");
+   Print("   MACD Slow: 20-30 (6 valores)");
+}
+
+// Atualizar performance do parâmetro após cada trade
+void UpdateParameterPerformance(bool wasWin, double profit)
+{
+   if(!g_enableParamOptimization) return;
+   
+   // Atualizar performance do RSI atual
+   for(int i = 0; i < ArraySize(g_rsiParamPerf); i++)
+   {
+      if(g_rsiParamPerf[i].paramValue == g_currentRSIPeriod)
+      {
+         g_rsiParamPerf[i].trades++;
+         if(wasWin) g_rsiParamPerf[i].wins++;
+         g_rsiParamPerf[i].totalProfit += profit;
+         g_rsiParamPerf[i].avgProfit = g_rsiParamPerf[i].totalProfit / g_rsiParamPerf[i].trades;
+         g_rsiParamPerf[i].winRate = SafeDivide((double)g_rsiParamPerf[i].wins, (double)g_rsiParamPerf[i].trades, 0.0);
+         break;
+      }
+   }
+   
+   // Atualizar performance do MACD Fast atual
+   for(int i = 0; i < ArraySize(g_macdFastPerf); i++)
+   {
+      if(g_macdFastPerf[i].paramValue == g_currentMACDFast)
+      {
+         g_macdFastPerf[i].trades++;
+         if(wasWin) g_macdFastPerf[i].wins++;
+         g_macdFastPerf[i].totalProfit += profit;
+         g_macdFastPerf[i].avgProfit = g_macdFastPerf[i].totalProfit / g_macdFastPerf[i].trades;
+         g_macdFastPerf[i].winRate = SafeDivide((double)g_macdFastPerf[i].wins, (double)g_macdFastPerf[i].trades, 0.0);
+         break;
+      }
+   }
+   
+   // Atualizar performance do MACD Slow atual
+   for(int i = 0; i < ArraySize(g_macdSlowPerf); i++)
+   {
+      if(g_macdSlowPerf[i].paramValue == g_currentMACDSlow)
+      {
+         g_macdSlowPerf[i].trades++;
+         if(wasWin) g_macdSlowPerf[i].wins++;
+         g_macdSlowPerf[i].totalProfit += profit;
+         g_macdSlowPerf[i].avgProfit = g_macdSlowPerf[i].totalProfit / g_macdSlowPerf[i].trades;
+         g_macdSlowPerf[i].winRate = SafeDivide((double)g_macdSlowPerf[i].wins, (double)g_macdSlowPerf[i].trades, 0.0);
+         break;
+      }
+   }
+}
+
+// Encontrar melhor parâmetro baseado em performance
+int FindBestParameter(ParameterPerformance &perfArray[], int minTrades)
+{
+   int bestIdx = -1;
+   double bestScore = -DBL_MAX;
+   
+   for(int i = 0; i < ArraySize(perfArray); i++)
+   {
+      if(perfArray[i].trades < minTrades) continue;
+      
+      // Score = winRate * 0.6 + avgProfit_normalized * 0.4
+      double score = perfArray[i].winRate * 0.6 + 
+                     (perfArray[i].avgProfit > 0 ? 0.4 : -0.4);
+      
+      if(score > bestScore)
+      {
+         bestScore = score;
+         bestIdx = i;
+      }
+   }
+   
+   return bestIdx;
+}
+
+// Otimizar parâmetros periodicamente
+void OptimizeIndicatorParameters()
+{
+   if(!g_enableParamOptimization) return;
+   
+   // Só otimizar após número mínimo de trades
+   if(g_totalTrades < g_minTradesForParamChange) return;
+   
+   // Só otimizar a cada N trades
+   if(g_totalTrades % g_paramOptimizationInterval != 0) return;
+   
+   // Cooldown entre otimizações (mínimo 1 hora)
+   if(TimeCurrent() - g_lastParamOptimization < 3600) return;
+   
+   Print("🔧 === OTIMIZAÇÃO DE PARÂMETROS ===");
+   Print("   Total de trades: ", g_totalTrades);
+   
+   bool paramsChanged = false;
+   
+   // Otimizar RSI
+   int bestRSI = FindBestParameter(g_rsiParamPerf, g_minTradesForParamChange / 4);
+   if(bestRSI >= 0 && g_rsiParamPerf[bestRSI].paramValue != g_currentRSIPeriod)
+   {
+      int oldRSI = g_currentRSIPeriod;
+      g_currentRSIPeriod = g_rsiParamPerf[bestRSI].paramValue;
+      
+      Print("📊 RSI otimizado: ", oldRSI, " → ", g_currentRSIPeriod);
+      Print("   Win Rate: ", DoubleToString(g_rsiParamPerf[bestRSI].winRate*100, 1), "%");
+      Print("   Avg Profit: ", DoubleToString(g_rsiParamPerf[bestRSI].avgProfit, 2));
+      Print("   Trades: ", g_rsiParamPerf[bestRSI].trades);
+      
+      // Recriar handle RSI com novo período
+      if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
+      g_rsiHandle = iRSI(_Symbol, _Period, g_currentRSIPeriod, PRICE_CLOSE);
+      
+      paramsChanged = true;
+      g_paramChangeCount++;
+   }
+   
+   // Otimizar MACD Fast
+   int bestMACDFast = FindBestParameter(g_macdFastPerf, g_minTradesForParamChange / 4);
+   if(bestMACDFast >= 0 && g_macdFastPerf[bestMACDFast].paramValue != g_currentMACDFast)
+   {
+      int oldFast = g_currentMACDFast;
+      g_currentMACDFast = g_macdFastPerf[bestMACDFast].paramValue;
+      
+      Print("📊 MACD Fast otimizado: ", oldFast, " → ", g_currentMACDFast);
+      Print("   Win Rate: ", DoubleToString(g_macdFastPerf[bestMACDFast].winRate*100, 1), "%");
+      Print("   Avg Profit: ", DoubleToString(g_macdFastPerf[bestMACDFast].avgProfit, 2));
+      Print("   Trades: ", g_macdFastPerf[bestMACDFast].trades);
+      
+      // Recriar handle MACD com novos parâmetros
+      if(g_macdHandle != INVALID_HANDLE) IndicatorRelease(g_macdHandle);
+      g_macdHandle = iMACD(_Symbol, _Period, g_currentMACDFast, g_currentMACDSlow, g_currentMACDSignal, PRICE_CLOSE);
+      
+      paramsChanged = true;
+      g_paramChangeCount++;
+   }
+   
+   // Otimizar MACD Slow
+   int bestMACDSlow = FindBestParameter(g_macdSlowPerf, g_minTradesForParamChange / 4);
+   if(bestMACDSlow >= 0 && g_macdSlowPerf[bestMACDSlow].paramValue != g_currentMACDSlow)
+   {
+      int oldSlow = g_currentMACDSlow;
+      g_currentMACDSlow = g_macdSlowPerf[bestMACDSlow].paramValue;
+      
+      Print("📊 MACD Slow otimizado: ", oldSlow, " → ", g_currentMACDSlow);
+      Print("   Win Rate: ", DoubleToString(g_macdSlowPerf[bestMACDSlow].winRate*100, 1), "%");
+      Print("   Avg Profit: ", DoubleToString(g_macdSlowPerf[bestMACDSlow].avgProfit, 2));
+      Print("   Trades: ", g_macdSlowPerf[bestMACDSlow].trades);
+      
+      // Recriar handle MACD com novos parâmetros
+      if(g_macdHandle != INVALID_HANDLE) IndicatorRelease(g_macdHandle);
+      g_macdHandle = iMACD(_Symbol, _Period, g_currentMACDFast, g_currentMACDSlow, g_currentMACDSignal, PRICE_CLOSE);
+      
+      paramsChanged = true;
+      g_paramChangeCount++;
+   }
+   
+   if(paramsChanged)
+   {
+      Print("✅ Parâmetros otimizados! Total de mudanças: ", g_paramChangeCount);
+      g_lastParamOptimization = TimeCurrent();
+   }
+   else
+   {
+      Print("ℹ️ Nenhuma mudança de parâmetro necessária");
+   }
+   
+   Print("🔧 === FIM DA OTIMIZAÇÃO ===");
+}
+
+// ======================================================================
 // ✅ HUD LEVE - FUNÇÕES OTIMIZADAS
 // ======================================================================
 
@@ -5712,12 +5930,18 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             g_totalWins++;
             g_stateWins[g_lastTradeState]++;
             Print("✅✅✅ VITÓRIA REGISTRADA para estado ", g_lastTradeState);
+            
+            // ✅ NOVO: Atualizar performance dos parâmetros
+            UpdateParameterPerformance(true, net_profit);
          }
          else 
          {
             g_totalLosses++;
             g_stateLosses[g_lastTradeState]++;
             Print("❌❌❌ PERDA REGISTRADA para estado ", g_lastTradeState);
+            
+            // ✅ NOVO: Atualizar performance dos parâmetros
+            UpdateParameterPerformance(false, net_profit);
          }
          
          // ✅ FIX: Avaliar bloqueio após QUALQUER trade (win ou loss), não só após perda
@@ -6286,6 +6510,9 @@ void OnTick()
       
       // ✅ OTIMIZAÇÃO DINÂMICA
       OptimizeParametersDynamically();
+      
+      // ✅ NOVO: Otimização de parâmetros de indicadores
+      OptimizeIndicatorParameters();
       
       // ✅ TESTE PERIÓDICO DE ESTADOS BLOQUEADOS
       if(EnableUnifiedBlockingSystem)
@@ -6892,6 +7119,9 @@ int OnInit()
    g_volumeStrength = 0.0;
    
    UpdateLearningStats();
+   
+   // ✅ NOVO: Inicializar sistema de otimização de parâmetros
+   InitializeParameterOptimization();
    
    g_statusMessage = "Inicializando Sistema Super Corrigido v309...";
    
