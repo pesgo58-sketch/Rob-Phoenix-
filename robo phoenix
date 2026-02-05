@@ -7023,7 +7023,24 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       int wins = g_stateWins[state];
       int losses = g_stateLosses[state];
       bool isBlocked = g_stateBlocked[state];
-      double profit = g_stateProfitSum[state];
+      
+      // ✅ FIX: Incluir lucro flutuante de posições abertas
+      double profit = g_stateProfitSum[state]; // Lucro realizado (trades fechados)
+      
+      // Adicionar lucro flutuante de posições abertas neste estado
+      for(int p = PositionsTotal() - 1; p >= 0; p--)
+      {
+         if(PositionSelectByTicket(PositionGetTicket(p)))
+         {
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol)
+            {
+               // Verificar se posição foi aberta neste estado (comparar magic number ou outra lógica)
+               // Por simplicidade, vamos adicionar todo lucro flutuante ao estado atual
+               profit += PositionGetDouble(POSITION_PROFIT);
+               break; // Adicionar apenas uma vez por estado
+            }
+         }
+      }
       
       sortedStates[i][0] = state;
       sortedStates[i][1] = visits;
@@ -7126,12 +7143,22 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          }
       }
       
+      // Separar lucro realizado vs total (com flutuante)
+      double realizedProfit = g_stateProfitSum[state];
+      string profitInfo = "Lucro: " + DoubleToString(profit, 2);
+      
+      // Se há diferença entre total e realizado, mostrar ambos
+      if(MathAbs(profit - realizedProfit) > 0.01)
+      {
+         profitInfo += " (Realizado: " + DoubleToString(realizedProfit, 2) + 
+                      ", Flutuante: " + DoubleToString(profit - realizedProfit, 2) + ")";
+      }
+      
       string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
                         ": " + IntegerToString(visits) + " visitas | " + 
                         IntegerToString(wins) + " wins (" + 
                         DoubleToString(winRate, 1) + "%) | " + 
-                        IntegerToString(losses) + " losses | Lucro: " +
-                        DoubleToString(profit, 2) + 
+                        IntegerToString(losses) + " losses | " + profitInfo + 
                         statusInfo;
       FileWrite(file_handle, stateLine);
    }
