@@ -5534,6 +5534,32 @@ double CalculateSLByPoints(bool isBuy, double entryPrice)
    if(!UseFixedSL) return 0.0;
    
    int slPoints = FixedSL_Points;
+   
+   // ✅ NOVO: Se config search ativo, usar ATR multiplicador
+   if(g_enableConfigSearch)
+   {
+      double rsiOB, rsiOS;
+      int atrPeriod;
+      double atrStopMult;
+      int macdF, macdS, macdSig;
+      GetCurrentConfigParams(rsiOB, rsiOS, atrPeriod, atrStopMult, macdF, macdS, macdSig);
+      
+      // Calcular ATR
+      double atr[];
+      ArraySetAsSeries(atr, true);
+      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1 && atr[0] > 0)
+      {
+         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         if(point > 0)
+         {
+            // SL baseado em ATR × multiplicador
+            slPoints = (int)((atr[0] * atrStopMult) / point);
+            Print("🎯 SL ATR-based: ATR=", DoubleToString(atr[0], 5), 
+                  " × ", DoubleToString(atrStopMult, 1), " = ", slPoints, " pontos");
+         }
+      }
+   }
+   
    if(slPoints <= 0) return 0.0;
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -5560,6 +5586,32 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
    if(!UseFixedTP) return 0.0;
    
    int tpPoints = FixedTP_Points;
+   
+   // ✅ NOVO: Se config search ativo, usar ATR multiplicador (mesmo mult que SL)
+   if(g_enableConfigSearch)
+   {
+      double rsiOB, rsiOS;
+      int atrPeriod;
+      double atrStopMult;
+      int macdF, macdS, macdSig;
+      GetCurrentConfigParams(rsiOB, rsiOS, atrPeriod, atrStopMult, macdF, macdS, macdSig);
+      
+      // Calcular ATR
+      double atr[];
+      ArraySetAsSeries(atr, true);
+      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1 && atr[0] > 0)
+      {
+         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         if(point > 0)
+         {
+            // TP baseado em ATR × multiplicador (pode usar mesmo ou maior)
+            tpPoints = (int)((atr[0] * atrStopMult) / point);
+            Print("🎯 TP ATR-based: ATR=", DoubleToString(atr[0], 5), 
+                  " × ", DoubleToString(atrStopMult, 1), " = ", tpPoints, " pontos");
+         }
+      }
+   }
+   
    if(tpPoints <= 0) return 0.0;
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
