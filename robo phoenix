@@ -6854,13 +6854,19 @@ void OnTick()
 
    UpdateHUDLight();
    
-   static datetime lastTextExportCheck = 0;
-   datetime currentTime = TimeCurrent();
-   if(currentTime - lastTextExportCheck >= 60)
-   {
-      lastTextExportCheck = currentTime;
-      ExportMemoryToTextFileFunc(false);
-   }
+   // ═══════════════════════════════════════════════════════════════════════════
+   // ❌ REMOVIDO: Exportação periódica de texto (bloqueava OnTick)
+   // ═══════════════════════════════════════════════════════════════════════════
+   // PROBLEMA: Chamava ExportMemoryToTextFileFunc() a cada 60s
+   //           Mesmo otimizado (8-12s), bloqueava OnTick durante exportação
+   //           Robô NÃO processava ticks → NENHUMA ENTRADA durante exportação
+   //
+   // SOLUÇÃO: Exportação APENAS em:
+   //          1. OnDeinit() - Ao fechar robô (automático se EnableTextExport=true)
+   //          2. ForceTextExport() - Manual quando usuário quiser
+   //
+   // BENEFÍCIO: OnTick() NUNCA bloqueado → Robô responde a 100% dos ticks
+   // ═══════════════════════════════════════════════════════════════════════════
 }
 
 // ======================================================================
