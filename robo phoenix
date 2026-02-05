@@ -215,9 +215,9 @@ input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
-input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
-input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input double BlockLossRateThreshold   = 0.70;         // ✅ AJUSTADO: Taxa perda para bloquear (era 0.80)
+input double UnblockWinRateThreshold  = 0.45;         // ✅ AJUSTADO: Taxa vitória para desbloquear (era 0.55)
+input int    MinVisitsForBlockDecision    = 20;       // ✅ AJUSTADO: Visitas mín. decisão bloqueio (era 30)
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
@@ -809,9 +809,11 @@ void BlockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return;
 
-    if(g_stateLastBlockTime[state] > 0 && TimeCurrent() - g_stateLastBlockTime[state] < 3600)
+    // ✅ AJUSTADO: Reduzir cooldown de 3600s (1h) para 1800s (30min)
+    if(g_stateLastBlockTime[state] > 0 && TimeCurrent() - g_stateLastBlockTime[state] < 1800)
     {
-        Print("⏳ Cooldown ativo para estado ", state, " - aguardando 1h");
+        // ✅ DEBUG: Log apenas se tentando bloquear frequentemente
+        // Print("⏳ Cooldown ativo para estado ", state, " - aguardando 30min");
         return;
     }
 
@@ -825,7 +827,8 @@ void BlockState(int state)
     
     if(visits < MinVisitsForBlockDecision)
     {
-        Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
+        // ✅ DEBUG: Reduzido log para evitar spam
+        // Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
         return;
     }
     
@@ -846,20 +849,16 @@ void BlockState(int state)
             g_stateBlockTime[state] = TimeCurrent();
         }
         
-        Print("⛔ ESTADO BLOQUEADO CORRETAMENTE: ", state, 
-              " | Visitas REAIS: ", visits, 
-              " | Perdas REAIS: ", losses, 
-              " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
-              " | Bloqueios totais: ", g_stateBlockCount[state]);
+        Print("⛔ ESTADO BLOQUEADO: ", state, 
+              " | Visitas: ", visits, 
+              " | Perdas: ", losses, 
+              " | Taxa perda: ", DoubleToString(lossRate*100, 1), "%",
+              " | Threshold: ", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+              " | Bloqueios: ", g_stateBlockCount[state],
+              " | Total bloq.: ", CountBlockedStates()+1, "/", g_activeStatesCount);
         
         g_memoryDirty = true;
         InvalidateHUDCache();
-    }
-    else
-    {
-        Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
-              DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
     }
 }
 
@@ -868,9 +867,11 @@ void UnblockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return;
 
-    if(g_stateLastUnblockTime[state] > 0 && TimeCurrent() - g_stateLastUnblockTime[state] < 3600)
+    // ✅ AJUSTADO: Reduzir cooldown de 3600s (1h) para 1800s (30min)
+    if(g_stateLastUnblockTime[state] > 0 && TimeCurrent() - g_stateLastUnblockTime[state] < 1800)
     {
-        Print("⏳ Cooldown ativo para estado ", state, " - aguardando 1h");
+        // ✅ DEBUG: Log apenas se tentando desbloquear frequentemente
+        // Print("⏳ Cooldown ativo para estado ", state, " - aguardando 30min");
         return;
     }
 
@@ -883,7 +884,8 @@ void UnblockState(int state)
               " | Visitas: ", g_stateVisits[state], 
               " | Vitórias: ", g_stateWins[state],
               " | Perdas: ", g_stateLosses[state],
-              " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
+              " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%",
+              " | Total bloq.: ", CountBlockedStates()-1, "/", g_activeStatesCount);
         
         g_memoryDirty = true;
         InvalidateHUDCache();
@@ -3998,8 +4000,21 @@ int ChooseAction(int state)
    
    if(IsStateBlocked(state))
    {
-      Print("⛔ Estado ", state, " bloqueado pelo sistema corrigido");
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (sistema corrigido)", state);
+      // ✅ MELHOR DEBUG: Mostrar estatísticas do estado bloqueado
+      int visits = g_stateVisits[state];
+      int wins = g_stateWins[state];
+      int losses = g_stateLosses[state];
+      double winRate = CalculateWinRate(state);
+      double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
+      
+      Print("⛔ Estado ", state, " BLOQUEADO | Visits=", visits, 
+            " | Wins=", wins, " | Losses=", losses,
+            " | WinRate=", DoubleToString(winRate*100,1), "%",
+            " | LossRate=", DoubleToString(lossRate*100,1), "%",
+            " | Total Bloqueados=", CountBlockedStates());
+      
+      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (WR: %.1f%%, %d/%d bloq.)", 
+                                      state, winRate*100, CountBlockedStates(), NUM_STATES);
       return 0;
    }
    
@@ -4075,19 +4090,19 @@ int ChooseAction(int state)
    
    // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
    double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)  // ✅ REDUZIDO: 15% ao invés de 30%
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)  // ✅ AJUSTADO: 10% ao invés de 15% - mais tolerante
    {
       bestA = 0;
       Print("🤔 NOP escolhido (estado muito ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
       g_statusMessage = "NOP (estado muito ruim)";
    }
-   else if(nopQ > best * 5.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 5x melhor ao invés de 1.5x
+   else if(nopQ > best * 8.0 && bestA > 0)  // ✅ AJUSTADO: NOP precisa ser 8x melhor - ainda mais exigente
    {
       bestA = 0;
       Print("🤔 NOP escolhido (superioridade: ", nopQ, " vs ", best, ")");
       g_statusMessage = "NOP (melhor opção)";
    }
-   else if(best <= -50.0)  // ✅ REDUZIDO: -50 ao invés de -20 (ações precisam estar MUITO ruins)
+   else if(best <= -100.0)  // ✅ AJUSTADO: -100 ao invés de -50 - muito mais tolerante
    {
       bestA = 0;
       Print("🤔 NOP escolhido (ações de trade muito ruins: ", best, ")");
@@ -6258,10 +6273,23 @@ void OnTick()
       if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
       {
          double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
-         if(blockedRatio > 0.7 && g_activeStatesCount > 50)
+         if(blockedRatio > 0.5 && g_activeStatesCount > 50)  // ✅ AJUSTADO: 50% ao invés de 70% - mais agressivo
          {
-            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
-            IntelligentPartialReset();
+            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%) - ", 
+                  CountBlockedStates(), "/", g_activeStatesCount, " estados");
+            
+            // ✅ Antes de resetar, tentar desbloquear estados que melhoraram
+            Print("🔓 Tentando desbloquear estados que melhoraram...");
+            AutoUnblockGoodStates();
+            
+            // Se ainda estiver muito bloqueado, fazer reset parcial
+            int stillBlocked = CountBlockedStates();
+            double newRatio = SafeDivide((double)stillBlocked, (double)g_activeStatesCount, 0.0);
+            if(newRatio > 0.6)
+            {
+               Print("⚠️ Ainda muitos bloqueados (", DoubleToString(newRatio*100,1), "%) - fazendo reset parcial");
+               IntelligentPartialReset();
+            }
          }
       }
    }
