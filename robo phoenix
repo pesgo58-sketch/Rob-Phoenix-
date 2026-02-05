@@ -4669,7 +4669,8 @@ void UpdateStateRankings()
          allStates[validCount].state = i;
          allStates[validCount].winRate = CalculateWinRate(i);
          allStates[validCount].visits = g_stateVisits[i];
-         allStates[validCount].profit = (ArraySize(g_stateAvgProfit) > i) ? g_stateAvgProfit[i] * g_stateVisits[i] : 0.0;
+         // ✅ FIX #23: Usar g_stateProfitSum (lucro real acumulado) ao invés de g_stateAvgProfit
+         allStates[validCount].profit = (ArraySize(g_stateProfitSum) > i) ? g_stateProfitSum[i] : 0.0;
          allStates[validCount].quality = GetStateQuality(i);
          validCount++;
       }
@@ -4679,7 +4680,8 @@ void UpdateStateRankings()
          allStates[validCount].state = i;
          allStates[validCount].winRate = CalculateWinRate(i);
          allStates[validCount].visits = g_stateVisits[i];
-         allStates[validCount].profit = (ArraySize(g_stateAvgProfit) > i) ? g_stateAvgProfit[i] * g_stateVisits[i] : 0.0;
+         // ✅ FIX #23: Usar g_stateProfitSum (lucro real acumulado) ao invés de g_stateAvgProfit
+         allStates[validCount].profit = (ArraySize(g_stateProfitSum) > i) ? g_stateProfitSum[i] : 0.0;
          allStates[validCount].quality = STATE_QUALITY_BLOCKED;
          validCount++;
       }
