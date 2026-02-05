@@ -5012,7 +5012,7 @@ int GetCurrentState()
    
    state_idx = (((((timeBucket * BINS_VOLUME + volumeBucket) * BINS_VOLATILITY + volBucket) * 
                   BINS_MACD + macdBucket) * 
-                  BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket;
+                  BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket);
    
    // ✅ VERIFICAÇÃO DE SEGURANÇA
    if(state_idx < 0) state_idx = 0;
@@ -7291,10 +7291,10 @@ void OnDeinit(const int reason)
    
    Print("💾 Processo de salvamento concluído");
    
+   // ✅ Liberar handles de indicadores
    IndicatorRelease(g_maHandle);
-   IndicatorRelease(g_adxHandle);
    IndicatorRelease(g_rsiHandle);
-   IndicatorRelease(g_bbHandle);
+   IndicatorRelease(g_macdHandle);  // ✅ MACD substituiu ADX e BB
    IndicatorRelease(g_atrHandle);
 
    RemoveHUD();
