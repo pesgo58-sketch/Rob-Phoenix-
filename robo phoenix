@@ -3929,17 +3929,17 @@ void ExecuteAction(int action, int state)
       }
    }
    
-   // ✅ SKIP para estados em exploração - permitir trades mesmo com restrições de direção
-   if(!isExploringState && !CanOpenNewPosition(isBuy))
+   // 🚨 CRÍTICO: Regras de direção são SEMPRE respeitadas (mesmo em exploração)
+   // Isso previne hedge não intencional e exposição excessiva em direções opostas
+   if(!CanOpenNewPosition(isBuy))
    {
       g_statusMessage = "⛔ Não pode abrir nova posição na direção";
+      if(isExploringState)
+      {
+         Print("🔍 EXPLORAÇÃO: Estado ", state, " bloqueado por regras de direção (segurança)");
+      }
       UpdateQ_NOP(state);
       return;
-   }
-   else if(isExploringState && !CanOpenNewPosition(isBuy))
-   {
-      Print("🔍 MODO EXPLORAÇÃO: Ignorando restrição de direção para testar estado");
-      // Continua mesmo assim
    }
    
    // ✅ SKIP para estados em exploração - permitir trades mesmo com restrição de tempo
