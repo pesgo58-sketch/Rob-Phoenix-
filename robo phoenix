@@ -7,6 +7,34 @@
 //|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
 //|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
+//|                                                                  |
+//| ===============================================================  |
+//| 📚 SISTEMA DE BLOQUEIO E APRENDIZADO - DOCUMENTAÇÃO             |
+//| ===============================================================  |
+//|                                                                  |
+//| O robô usa Q-Learning com bloqueio inteligente de estados ruins:|
+//|                                                                  |
+//| THRESHOLDS DE BLOQUEIO (ajustados para evitar over-blocking):   |
+//|   • MinVisitsForBlockDecision = 20 visitas (antes: 30)          |
+//|   • BlockLossRateThreshold = 70% perdas (antes: 80%)            |
+//|   • UnblockWinRateThreshold = 45% vitórias (antes: 55%)         |
+//|                                                                  |
+//| SELEÇÃO DE AÇÃO (NOP vs BUY/SELL):                              |
+//|   • Estado bloqueado → NOP (a menos que 80%+ estados bloq.)     |
+//|   • Win rate < 10% (com 20+ visitas) → NOP                      |
+//|   • NOP Q-value 8x melhor que melhor ação → NOP                 |
+//|   • Melhor ação Q ≤ -100 → NOP                                  |
+//|                                                                  |
+//| PROTEÇÕES ANTI-TRAVAMENTO:                                       |
+//|   • Cooldown bloqueio/desbloqueio: 30min (antes: 1h)           |
+//|   • Se 50%+ estados bloqueados → auto-unblock tentado           |
+//|   • Se 80%+ estados bloqueados → modo emergência (ignora bloq.) |
+//|   • Avaliação periódica de estados a cada 60 segundos           |
+//|                                                                  |
+//| RESET DE MEMÓRIA (se necessário):                                |
+//|   1. Deletar arquivo: MQL5/Files/Phoenix_Files/Backups/*.bin   |
+//|   2. Reiniciar EA - iniciará com memória limpa                  |
+//|                                                                  |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
@@ -38,17 +66,18 @@ CHistoryOrderInfo historyOrderInfo;
 // ====
 // ✅✅✅ ATUALIZAÇÃO CRÍTICA: DISCRETIZAÇÃO DE ESTADO OTIMIZADA
 // ============================================================
+// ✅ OTIMIZADO: Removido ADX e BB, adicionado MACD
 // Reduzindo para um número gerenciável de estados
-#define BINS_MA_DIST   3      // Reduzido de 6 para 3
-#define BINS_RSI       4      // Reduzido de 6 para 4  
-#define BINS_ADX       2      // Mantido 2
-#define BINS_BBPOS     3      // Reduzido de 6 para 3
-#define BINS_VOLATILITY 2     // Mantido 2
-#define BINS_VOLUME    2      // Reduzido de 3 para 2
-#define BINS_TIME      2      // Reduzido de 4 para 2
+#define BINS_MA_DIST   3      // Distância da MA (3 bins)
+#define BINS_RSI       4      // RSI (4 bins)
+#define BINS_MACD      3      // ✅ NOVO: MACD Histogram (3 bins: negativo, neutro, positivo)
+#define BINS_VOLATILITY 2     // Volatilidade ATR (2 bins)
+#define BINS_VOLUME    2      // Volume (2 bins)
+#define BINS_TIME      2      // Horário (2 bins)
 
-// Cálculo do número total de estados - DEVE SER 576
-#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_ADX * BINS_BBPOS * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
+// Cálculo do número total de estados - OTIMIZADO: 288 estados
+// 3 × 4 × 3 × 2 × 2 × 2 = 288 (antes era 576 com ADX e BB)
+#define NUM_STATES (BINS_MA_DIST * BINS_RSI * BINS_MACD * BINS_VOLATILITY * BINS_VOLUME * BINS_TIME)
 
 #define NUM_ACTIONS 3  // 0:NOP, 1:Buy, 2:Sell
 
@@ -57,14 +86,11 @@ CHistoryOrderInfo historyOrderInfo;
 // ============================================================
 const int MIN_VISITS_FOR_BLOCK = 30;
 
-// ✅ CONSTANTE PARA BOLLINGER BANDS
-// Quando a banda tem range zero (inválida), usar 0.5 (meio da banda)
-// como valor neutro, indicando que o preço está no centro
-const double BB_NEUTRAL_POSITION = 0.5;
+// ✅ REMOVIDO: BB_NEUTRAL_POSITION - não mais necessário (BB foi removido)
 
 // Persistência
 #define FILE_MAGIC   0x50484F45
-#define FILE_VERSION 3073
+#define FILE_VERSION 3074  // ✅ Incrementado para refletir nova versão com MACD
 
 #ifndef INT_MAX
   #define INT_MAX 2147483647
@@ -95,20 +121,18 @@ input int    MinMinutesBetweenTrades  = 3;            // Tempo mínimo entre tra
 input group "──── 📊 INDICADORES PRINCIPAIS ────";
 input int    MAPeriod                 = 200;          // Período da Média Móvel
 input ENUM_MA_METHOD  MAMethod        = MODE_EMA;     // Tipo da Média Móvel
-input int    RSIPeriod                = 20;           // Período do RSI
-input int    BBPeriod                 = 24;           // Período das Bandas de Bollinger
-input double BBDeviation              = 2.2;          // Desvio das Bandas de Bollinger
+input int    RSIPeriod                = 20;           // ✅ Período do RSI (otimizável)
 input int    ATRPeriod                = 18;           // Período do ATR
+
+// ✅ NOVO: Parâmetros MACD
+input int    MACDFastEMA              = 12;           // ✅ MACD Fast EMA (otimizável)
+input int    MACDSlowEMA              = 26;           // ✅ MACD Slow EMA (otimizável)
+input int    MACDSignalSMA            = 9;            // ✅ MACD Signal SMA (otimizável)
 
 input group "──── ✅ VALIDAÇÕES DE INDICADORES ────";
 input bool   UseRSIValidation         = true;         // Usar validação por RSI
 input double RSI_Overbought           = 75.0;         // RSI sobrecomprado
 input double RSI_Oversold             = 25.0;         // RSI sobrevendido
-input bool   UseBBValidation          = true;         // Usar validação por BB
-input double BB_UpperThreshold        = 0.7;          // Threshold superior BB
-input double BB_LowerThreshold        = 0.3;          // Threshold inferior BB
-input bool   UseADXValidation         = true;         // Usar validação por ADX
-input double MinADXStrength           = 20.0;         // Força mínima do ADX
 input bool   UseTrendValidation       = true;         // Usar validação de tendência
 input double MinDistanceFromMA        = 0.3;          // Distância mínima da MA
 
@@ -215,15 +239,24 @@ input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
 input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
-input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
-input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input double BlockLossRateThreshold   = 0.70;         // ✅ AJUSTADO: Taxa perda para bloquear (era 0.80)
+input double UnblockWinRateThreshold  = 0.45;         // ✅ AJUSTADO: Taxa vitória para desbloquear (era 0.55)
+input int    MinVisitsForBlockDecision    = 20;       // ✅ AJUSTADO: Visitas mín. decisão bloqueio (era 30)
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
 input double MinSharpeToUnblock       = 0.8;          // Sharpe mínimo para desbloquear
 input double MaxSharpeToBlock         = 0.3;          // Sharpe máximo para bloquear
 input int    MinTradesForSharpe       = 30;           // Trades mínimos para calcular Sharpe
+
+input group "──── 🧪 TESTE DE CONFIGURAÇÕES RSI+ATR+MACD ────";
+input bool   EnableConfigSearch       = false;        // ✅ Ativar teste de configurações completas
+input int    TradesPerConfig          = 300;          // Trades por configuração
+input bool   UseBestConfigAfterTest   = true;         // Usar melhor config após teste
+
+input group "──── 📄 EXPORTAÇÃO TXT LOG ────";
+input bool   EnableTxtExport          = true;         // ✅ Exportar log de atividade em TXT
+input int    TxtExportInterval        = 10;           // Exportar a cada N trades
 
 // ──────────────────────────────────────────────────────────────────────
 // 📤 7. EXPORTAÇÃO E LOGS
@@ -328,11 +361,78 @@ datetime g_lastUnblockTestTime = 0; // Tempo do último teste de desbloqueio
 // 📈 3. INDICADORES TÉCNICOS
 // ──────────────────────────────────────────────────────────────────────
 string g_currentSymbol;
-int g_adxHandle = INVALID_HANDLE;
 int g_maHandle  = INVALID_HANDLE;
 int g_rsiHandle = INVALID_HANDLE;
-int g_bbHandle  = INVALID_HANDLE;
+int g_macdHandle = INVALID_HANDLE;  // ✅ NOVO: MACD handle
 int g_atrHandle = INVALID_HANDLE;
+
+// ✅ NOVO: Sistema de Otimização Adaptativa de Parâmetros
+// ──────────────────────────────────────────────────────────────────────
+struct ParameterPerformance
+{
+   int paramValue;           // Valor do parâmetro
+   int trades;              // Número de trades com este parâmetro
+   int wins;                // Vitórias
+   double totalProfit;      // Lucro total
+   double avgProfit;        // Lucro médio
+   double winRate;          // Taxa de vitória
+};
+
+// Arrays para rastrear desempenho por parâmetro
+ParameterPerformance g_rsiParamPerf[];      // Performance por período RSI
+ParameterPerformance g_maParamPerf[];       // Performance por período MA
+ParameterPerformance g_macdFastPerf[];      // Performance por MACD Fast
+ParameterPerformance g_macdSlowPerf[];      // Performance por MACD Slow
+
+// Parâmetros atuais (podem ser otimizados)
+int g_currentRSIPeriod = 20;
+int g_currentMAPeriod = 200;
+int g_currentMACDFast = 12;
+int g_currentMACDSlow = 26;
+int g_currentMACDSignal = 9;
+
+// Configuração de otimização
+bool g_enableParamOptimization = true;      // Habilitar otimização adaptativa
+int g_paramOptimizationInterval = 100;      // Avaliar a cada N trades
+int g_minTradesForParamChange = 50;         // Mínimo de trades antes de mudar parâmetro
+datetime g_lastParamOptimization = 0;       // Última otimização
+int g_paramChangeCount = 0;                 // Contador de mudanças de parâmetros
+
+// ✅ NOVO: Sistema de Teste de Configurações Completas (RSI+ATR+MACD)
+// ──────────────────────────────────────────────────────────────────────
+#define MAX_RSI_ATR_MACD_CONFIGS 4
+
+struct RSIAtrMacdConfig
+{
+   // Parâmetros RSI
+   double rsiOverbought;
+   double rsiOversold;
+   
+   // Parâmetros ATR
+   int atrPeriod;
+   double atrStopMult;
+   
+   // Parâmetros MACD
+   int macdFast;
+   int macdSlow;
+   int macdSignal;
+   
+   // Rastreamento de performance
+   double totalProfit;
+   int totalTrades;
+   double avgProfitPerTrade;
+   int wins;
+   double winRate;
+};
+
+RSIAtrMacdConfig g_rsiAtrMacdConfigs[MAX_RSI_ATR_MACD_CONFIGS];
+int g_currentConfigIndex = 0;
+int g_tradesInCurrentConfig = 0;
+bool g_configSearchCompleted = false;
+int g_bestConfigIndex = 0;
+bool g_enableConfigSearch = false;        // Controlado por input
+int g_tradesPerConfig = 300;             // Controlado por input
+bool g_useBestConfigAfterTest = true;    // Controlado por input
 
 // ──────────────────────────────────────────────────────────────────────
 // 💰 4. CONTROLE DE TRADES E POSIÇÕES
@@ -809,9 +909,11 @@ void BlockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return;
 
-    if(g_stateLastBlockTime[state] > 0 && TimeCurrent() - g_stateLastBlockTime[state] < 3600)
+    // ✅ AJUSTADO: Reduzir cooldown de 3600s (1h) para 1800s (30min)
+    if(g_stateLastBlockTime[state] > 0 && TimeCurrent() - g_stateLastBlockTime[state] < 1800)
     {
-        Print("⏳ Cooldown ativo para estado ", state, " - aguardando 1h");
+        // ✅ DEBUG: Log apenas se tentando bloquear frequentemente
+        // Print("⏳ Cooldown ativo para estado ", state, " - aguardando 30min");
         return;
     }
 
@@ -825,7 +927,8 @@ void BlockState(int state)
     
     if(visits < MinVisitsForBlockDecision)
     {
-        Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
+        // ✅ DEBUG: Reduzido log para evitar spam
+        // Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
         return;
     }
     
@@ -846,20 +949,19 @@ void BlockState(int state)
             g_stateBlockTime[state] = TimeCurrent();
         }
         
-        Print("⛔ ESTADO BLOQUEADO CORRETAMENTE: ", state, 
-              " | Visitas REAIS: ", visits, 
-              " | Perdas REAIS: ", losses, 
-              " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-              " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
-              " | Bloqueios totais: ", g_stateBlockCount[state]);
+        Print("⛔ ESTADO BLOQUEADO: ", state, 
+              " | Visitas: ", visits, 
+              " | Perdas: ", losses, 
+              " | Taxa perda: ", DoubleToString(lossRate*100, 1), "%",
+              " | Threshold: ", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+              " | Bloqueios: ", g_stateBlockCount[state],
+              " | Total bloq.: ", CountBlockedStates()+1, "/", g_activeStatesCount);
+        
+        // ✅ NOVO: Exportar bloqueio de estado para TXT
+        ExportStateBlock(state, lossRate, visits);
         
         g_memoryDirty = true;
         InvalidateHUDCache();
-    }
-    else
-    {
-        Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
-              DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
     }
 }
 
@@ -868,9 +970,11 @@ void UnblockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return;
 
-    if(g_stateLastUnblockTime[state] > 0 && TimeCurrent() - g_stateLastUnblockTime[state] < 3600)
+    // ✅ AJUSTADO: Reduzir cooldown de 3600s (1h) para 1800s (30min)
+    if(g_stateLastUnblockTime[state] > 0 && TimeCurrent() - g_stateLastUnblockTime[state] < 1800)
     {
-        Print("⏳ Cooldown ativo para estado ", state, " - aguardando 1h");
+        // ✅ DEBUG: Log apenas se tentando desbloquear frequentemente
+        // Print("⏳ Cooldown ativo para estado ", state, " - aguardando 30min");
         return;
     }
 
@@ -879,11 +983,17 @@ void UnblockState(int state)
         g_stateBlocked[state] = false;
         g_stateLastUnblockTime[state] = TimeCurrent();
         
+        double winRate = CalculateWinRate(state);
+        
         Print("✅ ESTADO DESBLOQUEADO: ", state, 
               " | Visitas: ", g_stateVisits[state], 
               " | Vitórias: ", g_stateWins[state],
               " | Perdas: ", g_stateLosses[state],
-              " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%");
+              " | Win Rate: ", DoubleToString(winRate*100, 1), "%",
+              " | Total bloq.: ", CountBlockedStates()-1, "/", g_activeStatesCount);
+        
+        // ✅ NOVO: Exportar desbloqueio de estado para TXT
+        ExportStateUnblock(state, winRate, g_stateVisits[state]);
         
         g_memoryDirty = true;
         InvalidateHUDCache();
@@ -1578,6 +1688,45 @@ int CountBlockedStates()
    return count;
 }
 
+// ✅ NOVO: Função para mostrar status detalhado do sistema de bloqueio
+void PrintBlockingStatus()
+{
+   int totalBlocked = CountBlockedStates();
+   int totalActive = g_activeStatesCount;
+   double blockedRatio = SafeDivide((double)totalBlocked, (double)totalActive, 0.0);
+   double totalWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
+   
+   Print("╔═══════════════════════════════════════════════════════════════");
+   Print("║ 📊 STATUS DO SISTEMA DE BLOQUEIO");
+   Print("╠═══════════════════════════════════════════════════════════════");
+   Print("║ Estados Totais Possíveis: ", NUM_STATES);
+   Print("║ Estados Ativos (visitados): ", totalActive);
+   Print("║ Estados Bloqueados: ", totalBlocked, " (", DoubleToString(blockedRatio*100,1), "%)");
+   Print("║ Estados Disponíveis: ", totalActive - totalBlocked);
+   Print("║");
+   Print("║ Trades Totais: ", g_totalTrades);
+   Print("║ Vitórias: ", g_totalWins, " | Derrotas: ", g_totalLosses);
+   Print("║ Win Rate Geral: ", DoubleToString(totalWinRate*100,1), "%");
+   Print("║ Trades Hoje: ", g_tradesToday);
+   Print("║ Perdas Consecutivas: ", g_consecutiveLosses);
+   Print("║");
+   Print("║ THRESHOLDS ATUAIS:");
+   Print("║ - Visitas para bloquear: ", MinVisitsForBlockDecision);
+   Print("║ - Taxa perda para bloquear: ", DoubleToString(BlockLossRateThreshold*100,1), "%");
+   Print("║ - Win rate para desbloquear: ", DoubleToString(UnblockWinRateThreshold*100,1), "%");
+   Print("║");
+   if(blockedRatio > 0.8)
+      Print("║ ⚠️ ALERTA: >80% estados bloqueados - MODO EMERGÊNCIA ATIVO");
+   else if(blockedRatio > 0.5)
+      Print("║ ⚠️ ATENÇÃO: >50% estados bloqueados - considerar auto-unblock");
+   else if(blockedRatio > 0.3)
+      Print("║ ℹ️ INFO: 30-50% estados bloqueados - situação normal/alta");
+   else
+      Print("║ ✅ OK: <30% estados bloqueados - situação saudável");
+   Print("╚═══════════════════════════════════════════════════════════════");
+}
+
+
 // ======================================================================
 // ✅✅✅ FUNÇÕES DE MEMÓRIA PERSISTENTE (CORRIGIDAS)
 // ======================================================================
@@ -2128,8 +2277,8 @@ bool LoadBrainFromFile(string filename)
 
 string BrainKey()
 {
-   return StringFormat("B%dx%dx%dx%dx%dx%dx%d_A%d",
-      BINS_MA_DIST,BINS_RSI,BINS_ADX,BINS_BBPOS,BINS_VOLATILITY,BINS_VOLUME,BINS_TIME,NUM_ACTIONS);
+   return StringFormat("B%dx%dx%dx%dx%dx%d_A%d_MACD",
+      BINS_MA_DIST,BINS_RSI,BINS_MACD,BINS_VOLATILITY,BINS_VOLUME,BINS_TIME,NUM_ACTIONS);
 }
 
 string GetBrainFileName()
@@ -3060,6 +3209,452 @@ void OptimizeParametersDynamically()
    // Garantia: Estados NUNCA bloqueados com menos de 30 visitas
    
    g_memoryDirty = true;
+}
+
+// ======================================================================
+// ✅✅✅ SISTEMA DE OTIMIZAÇÃO ADAPTATIVA DE PARÂMETROS
+// ======================================================================
+
+// Inicializar arrays de performance de parâmetros
+void InitializeParameterOptimization()
+{
+   if(!g_enableParamOptimization) return;
+   
+   // Configurar ranges de teste para RSI (10 a 30, step 2)
+   int rsiRange = 11; // 10,12,14,16,18,20,22,24,26,28,30
+   ArrayResize(g_rsiParamPerf, rsiRange);
+   for(int i = 0; i < rsiRange; i++)
+   {
+      g_rsiParamPerf[i].paramValue = 10 + (i * 2);
+      g_rsiParamPerf[i].trades = 0;
+      g_rsiParamPerf[i].wins = 0;
+      g_rsiParamPerf[i].totalProfit = 0.0;
+      g_rsiParamPerf[i].avgProfit = 0.0;
+      g_rsiParamPerf[i].winRate = 0.0;
+   }
+   
+   // Configurar ranges de teste para MACD Fast (8 a 15, step 1)
+   int macdFastRange = 8; // 8,9,10,11,12,13,14,15
+   ArrayResize(g_macdFastPerf, macdFastRange);
+   for(int i = 0; i < macdFastRange; i++)
+   {
+      g_macdFastPerf[i].paramValue = 8 + i;
+      g_macdFastPerf[i].trades = 0;
+      g_macdFastPerf[i].wins = 0;
+      g_macdFastPerf[i].totalProfit = 0.0;
+      g_macdFastPerf[i].avgProfit = 0.0;
+      g_macdFastPerf[i].winRate = 0.0;
+   }
+   
+   // Configurar ranges de teste para MACD Slow (20 a 30, step 2)
+   int macdSlowRange = 6; // 20,22,24,26,28,30
+   ArrayResize(g_macdSlowPerf, macdSlowRange);
+   for(int i = 0; i < macdSlowRange; i++)
+   {
+      g_macdSlowPerf[i].paramValue = 20 + (i * 2);
+      g_macdSlowPerf[i].trades = 0;
+      g_macdSlowPerf[i].wins = 0;
+      g_macdSlowPerf[i].totalProfit = 0.0;
+      g_macdSlowPerf[i].avgProfit = 0.0;
+      g_macdSlowPerf[i].winRate = 0.0;
+   }
+   
+   Print("✅ Sistema de otimização de parâmetros inicializado");
+   Print("   RSI: 10-30 (11 valores)");
+   Print("   MACD Fast: 8-15 (8 valores)");
+   Print("   MACD Slow: 20-30 (6 valores)");
+}
+
+// Atualizar performance do parâmetro após cada trade
+void UpdateParameterPerformance(bool wasWin, double profit)
+{
+   if(!g_enableParamOptimization) return;
+   
+   // Atualizar performance do RSI atual
+   for(int i = 0; i < ArraySize(g_rsiParamPerf); i++)
+   {
+      if(g_rsiParamPerf[i].paramValue == g_currentRSIPeriod)
+      {
+         g_rsiParamPerf[i].trades++;
+         if(wasWin) g_rsiParamPerf[i].wins++;
+         g_rsiParamPerf[i].totalProfit += profit;
+         g_rsiParamPerf[i].avgProfit = g_rsiParamPerf[i].totalProfit / g_rsiParamPerf[i].trades;
+         g_rsiParamPerf[i].winRate = SafeDivide((double)g_rsiParamPerf[i].wins, (double)g_rsiParamPerf[i].trades, 0.0);
+         break;
+      }
+   }
+   
+   // Atualizar performance do MACD Fast atual
+   for(int i = 0; i < ArraySize(g_macdFastPerf); i++)
+   {
+      if(g_macdFastPerf[i].paramValue == g_currentMACDFast)
+      {
+         g_macdFastPerf[i].trades++;
+         if(wasWin) g_macdFastPerf[i].wins++;
+         g_macdFastPerf[i].totalProfit += profit;
+         g_macdFastPerf[i].avgProfit = g_macdFastPerf[i].totalProfit / g_macdFastPerf[i].trades;
+         g_macdFastPerf[i].winRate = SafeDivide((double)g_macdFastPerf[i].wins, (double)g_macdFastPerf[i].trades, 0.0);
+         break;
+      }
+   }
+   
+   // Atualizar performance do MACD Slow atual
+   for(int i = 0; i < ArraySize(g_macdSlowPerf); i++)
+   {
+      if(g_macdSlowPerf[i].paramValue == g_currentMACDSlow)
+      {
+         g_macdSlowPerf[i].trades++;
+         if(wasWin) g_macdSlowPerf[i].wins++;
+         g_macdSlowPerf[i].totalProfit += profit;
+         g_macdSlowPerf[i].avgProfit = g_macdSlowPerf[i].totalProfit / g_macdSlowPerf[i].trades;
+         g_macdSlowPerf[i].winRate = SafeDivide((double)g_macdSlowPerf[i].wins, (double)g_macdSlowPerf[i].trades, 0.0);
+         break;
+      }
+   }
+}
+
+// Encontrar melhor parâmetro baseado em performance
+int FindBestParameter(ParameterPerformance &perfArray[], int minTrades)
+{
+   int bestIdx = -1;
+   double bestScore = -DBL_MAX;
+   
+   for(int i = 0; i < ArraySize(perfArray); i++)
+   {
+      if(perfArray[i].trades < minTrades) continue;
+      
+      // Score = winRate * 0.6 + avgProfit_normalized * 0.4
+      double score = perfArray[i].winRate * 0.6 + 
+                     (perfArray[i].avgProfit > 0 ? 0.4 : -0.4);
+      
+      if(score > bestScore)
+      {
+         bestScore = score;
+         bestIdx = i;
+      }
+   }
+   
+   return bestIdx;
+}
+
+// Otimizar parâmetros periodicamente
+void OptimizeIndicatorParameters()
+{
+   if(!g_enableParamOptimization) return;
+   
+   // Só otimizar após número mínimo de trades
+   if(g_totalTrades < g_minTradesForParamChange) return;
+   
+   // Só otimizar a cada N trades
+   if(g_totalTrades % g_paramOptimizationInterval != 0) return;
+   
+   // Cooldown entre otimizações (mínimo 1 hora)
+   if(TimeCurrent() - g_lastParamOptimization < 3600) return;
+   
+   Print("🔧 === OTIMIZAÇÃO DE PARÂMETROS ===");
+   Print("   Total de trades: ", g_totalTrades);
+   
+   bool paramsChanged = false;
+   
+   // Otimizar RSI
+   int bestRSI = FindBestParameter(g_rsiParamPerf, g_minTradesForParamChange / 4);
+   if(bestRSI >= 0 && g_rsiParamPerf[bestRSI].paramValue != g_currentRSIPeriod)
+   {
+      int oldRSI = g_currentRSIPeriod;
+      g_currentRSIPeriod = g_rsiParamPerf[bestRSI].paramValue;
+      
+      Print("📊 RSI otimizado: ", oldRSI, " → ", g_currentRSIPeriod);
+      Print("   Win Rate: ", DoubleToString(g_rsiParamPerf[bestRSI].winRate*100, 1), "%");
+      Print("   Avg Profit: ", DoubleToString(g_rsiParamPerf[bestRSI].avgProfit, 2));
+      Print("   Trades: ", g_rsiParamPerf[bestRSI].trades);
+      
+      // Recriar handle RSI com novo período
+      if(g_rsiHandle != INVALID_HANDLE) IndicatorRelease(g_rsiHandle);
+      g_rsiHandle = iRSI(_Symbol, _Period, g_currentRSIPeriod, PRICE_CLOSE);
+      
+      paramsChanged = true;
+      g_paramChangeCount++;
+   }
+   
+   // Otimizar MACD Fast
+   int bestMACDFast = FindBestParameter(g_macdFastPerf, g_minTradesForParamChange / 4);
+   if(bestMACDFast >= 0 && g_macdFastPerf[bestMACDFast].paramValue != g_currentMACDFast)
+   {
+      int oldFast = g_currentMACDFast;
+      g_currentMACDFast = g_macdFastPerf[bestMACDFast].paramValue;
+      
+      Print("📊 MACD Fast otimizado: ", oldFast, " → ", g_currentMACDFast);
+      Print("   Win Rate: ", DoubleToString(g_macdFastPerf[bestMACDFast].winRate*100, 1), "%");
+      Print("   Avg Profit: ", DoubleToString(g_macdFastPerf[bestMACDFast].avgProfit, 2));
+      Print("   Trades: ", g_macdFastPerf[bestMACDFast].trades);
+      
+      // Recriar handle MACD com novos parâmetros
+      if(g_macdHandle != INVALID_HANDLE) IndicatorRelease(g_macdHandle);
+      g_macdHandle = iMACD(_Symbol, _Period, g_currentMACDFast, g_currentMACDSlow, g_currentMACDSignal, PRICE_CLOSE);
+      
+      paramsChanged = true;
+      g_paramChangeCount++;
+   }
+   
+   // Otimizar MACD Slow
+   int bestMACDSlow = FindBestParameter(g_macdSlowPerf, g_minTradesForParamChange / 4);
+   if(bestMACDSlow >= 0 && g_macdSlowPerf[bestMACDSlow].paramValue != g_currentMACDSlow)
+   {
+      int oldSlow = g_currentMACDSlow;
+      g_currentMACDSlow = g_macdSlowPerf[bestMACDSlow].paramValue;
+      
+      Print("📊 MACD Slow otimizado: ", oldSlow, " → ", g_currentMACDSlow);
+      Print("   Win Rate: ", DoubleToString(g_macdSlowPerf[bestMACDSlow].winRate*100, 1), "%");
+      Print("   Avg Profit: ", DoubleToString(g_macdSlowPerf[bestMACDSlow].avgProfit, 2));
+      Print("   Trades: ", g_macdSlowPerf[bestMACDSlow].trades);
+      
+      // Recriar handle MACD com novos parâmetros
+      if(g_macdHandle != INVALID_HANDLE) IndicatorRelease(g_macdHandle);
+      g_macdHandle = iMACD(_Symbol, _Period, g_currentMACDFast, g_currentMACDSlow, g_currentMACDSignal, PRICE_CLOSE);
+      
+      paramsChanged = true;
+      g_paramChangeCount++;
+   }
+   
+   if(paramsChanged)
+   {
+      Print("✅ Parâmetros otimizados! Total de mudanças: ", g_paramChangeCount);
+      g_lastParamOptimization = TimeCurrent();
+   }
+   else
+   {
+      Print("ℹ️ Nenhuma mudança de parâmetro necessária");
+   }
+   
+   Print("🔧 === FIM DA OTIMIZAÇÃO ===");
+}
+
+// ======================================================================
+// ✅✅✅ SISTEMA DE TESTE DE CONFIGURAÇÕES RSI+ATR+MACD
+// ======================================================================
+
+// Inicializar configurações de teste
+void InitRSIAtrMacdConfigs()
+{
+   if(!EnableConfigSearch) return;
+   
+   Print("🧪 === INICIALIZANDO CONFIGURAÇÕES DE TESTE RSI+ATR+MACD ===");
+   
+   // Config 0 - Base/Clássica
+   g_rsiAtrMacdConfigs[0].rsiOverbought   = 70;
+   g_rsiAtrMacdConfigs[0].rsiOversold     = 30;
+   g_rsiAtrMacdConfigs[0].atrPeriod       = 14;
+   g_rsiAtrMacdConfigs[0].atrStopMult     = 2.0;
+   g_rsiAtrMacdConfigs[0].macdFast        = 12;
+   g_rsiAtrMacdConfigs[0].macdSlow        = 26;
+   g_rsiAtrMacdConfigs[0].macdSignal      = 9;
+   g_rsiAtrMacdConfigs[0].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[0].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[0].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[0].wins            = 0;
+   g_rsiAtrMacdConfigs[0].winRate         = 0.0;
+   
+   // Config 1 - Agressiva/Rápida
+   g_rsiAtrMacdConfigs[1].rsiOverbought   = 68;
+   g_rsiAtrMacdConfigs[1].rsiOversold     = 32;
+   g_rsiAtrMacdConfigs[1].atrPeriod       = 14;
+   g_rsiAtrMacdConfigs[1].atrStopMult     = 1.8;
+   g_rsiAtrMacdConfigs[1].macdFast        = 8;
+   g_rsiAtrMacdConfigs[1].macdSlow        = 21;
+   g_rsiAtrMacdConfigs[1].macdSignal      = 5;
+   g_rsiAtrMacdConfigs[1].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[1].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[1].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[1].wins            = 0;
+   g_rsiAtrMacdConfigs[1].winRate         = 0.0;
+   
+   // Config 2 - Conservadora/Filtrada
+   g_rsiAtrMacdConfigs[2].rsiOverbought   = 72;
+   g_rsiAtrMacdConfigs[2].rsiOversold     = 28;
+   g_rsiAtrMacdConfigs[2].atrPeriod       = 20;
+   g_rsiAtrMacdConfigs[2].atrStopMult     = 2.5;
+   g_rsiAtrMacdConfigs[2].macdFast        = 16;
+   g_rsiAtrMacdConfigs[2].macdSlow        = 32;
+   g_rsiAtrMacdConfigs[2].macdSignal      = 9;
+   g_rsiAtrMacdConfigs[2].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[2].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[2].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[2].wins            = 0;
+   g_rsiAtrMacdConfigs[2].winRate         = 0.0;
+   
+   // Config 3 - Solta/Ampla
+   g_rsiAtrMacdConfigs[3].rsiOverbought   = 65;
+   g_rsiAtrMacdConfigs[3].rsiOversold     = 35;
+   g_rsiAtrMacdConfigs[3].atrPeriod       = 10;
+   g_rsiAtrMacdConfigs[3].atrStopMult     = 2.2;
+   g_rsiAtrMacdConfigs[3].macdFast        = 12;
+   g_rsiAtrMacdConfigs[3].macdSlow        = 26;
+   g_rsiAtrMacdConfigs[3].macdSignal      = 5;
+   g_rsiAtrMacdConfigs[3].totalProfit     = 0.0;
+   g_rsiAtrMacdConfigs[3].totalTrades     = 0;
+   g_rsiAtrMacdConfigs[3].avgProfitPerTrade = 0.0;
+   g_rsiAtrMacdConfigs[3].wins            = 0;
+   g_rsiAtrMacdConfigs[3].winRate         = 0.0;
+   
+   g_currentConfigIndex = 0;
+   g_tradesInCurrentConfig = 0;
+   g_configSearchCompleted = false;
+   g_bestConfigIndex = 0;
+   
+   g_enableConfigSearch = EnableConfigSearch;
+   g_tradesPerConfig = TradesPerConfig;
+   g_useBestConfigAfterTest = UseBestConfigAfterTest;
+   
+   Print("✅ 4 configurações de teste inicializadas");
+   Print("   Trades por config: ", g_tradesPerConfig);
+   Print("   Config inicial: 0 (Base/Clássica)");
+   Print("🧪 === FIM DA INICIALIZAÇÃO ===");
+}
+
+// Atualizar performance da configuração atual após trade
+void UpdateConfigPerformance(bool wasWin, double profit)
+{
+   if(!g_enableConfigSearch || g_configSearchCompleted) return;
+   
+   // MQL5 não suporta referências - usar índice diretamente
+   g_rsiAtrMacdConfigs[g_currentConfigIndex].totalProfit += profit;
+   g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades++;
+   if(wasWin) g_rsiAtrMacdConfigs[g_currentConfigIndex].wins++;
+   
+   if(g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades > 0)
+   {
+      g_rsiAtrMacdConfigs[g_currentConfigIndex].avgProfitPerTrade = 
+         g_rsiAtrMacdConfigs[g_currentConfigIndex].totalProfit / (double)g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades;
+      g_rsiAtrMacdConfigs[g_currentConfigIndex].winRate = 
+         SafeDivide((double)g_rsiAtrMacdConfigs[g_currentConfigIndex].wins, 
+                    (double)g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades, 0.0);
+   }
+   
+   g_tradesInCurrentConfig++;
+   
+   // Verificar se deve mudar de configuração
+   if(g_tradesInCurrentConfig >= g_tradesPerConfig)
+   {
+      Print("📊 Config ", g_currentConfigIndex, " testada: ",
+            " Trades=", g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades,
+            " | Lucro=", DoubleToString(g_rsiAtrMacdConfigs[g_currentConfigIndex].totalProfit, 2),
+            " | Win Rate=", DoubleToString(g_rsiAtrMacdConfigs[g_currentConfigIndex].winRate*100, 1), "%",
+            " | Avg/Trade=", DoubleToString(g_rsiAtrMacdConfigs[g_currentConfigIndex].avgProfitPerTrade, 2));
+      
+      int oldConfig = g_currentConfigIndex;
+      g_currentConfigIndex++;
+      g_tradesInCurrentConfig = 0;
+      
+      // Se completou todas as configs, selecionar a melhor
+      if(g_currentConfigIndex >= MAX_RSI_ATR_MACD_CONFIGS)
+      {
+         g_currentConfigIndex = 0;
+         g_configSearchCompleted = true;
+         
+         // Encontrar melhor configuração
+         double bestScore = -DBL_MAX;
+         int bestIndex = 0;
+         
+         Print("🧪 === ANÁLISE DE CONFIGURAÇÕES ===");
+         for(int i = 0; i < MAX_RSI_ATR_MACD_CONFIGS; i++)
+         {
+            double score = g_rsiAtrMacdConfigs[i].avgProfitPerTrade;
+            
+            Print("   Config ", i, ": Avg=", DoubleToString(g_rsiAtrMacdConfigs[i].avgProfitPerTrade, 2),
+                  " | WR=", DoubleToString(g_rsiAtrMacdConfigs[i].winRate*100, 1), "%",
+                  " | Trades=", g_rsiAtrMacdConfigs[i].totalTrades);
+            
+            if(score > bestScore)
+            {
+               bestScore = score;
+               bestIndex = i;
+            }
+         }
+         
+         g_bestConfigIndex = bestIndex;
+         
+         if(g_useBestConfigAfterTest)
+         {
+            g_currentConfigIndex = g_bestConfigIndex;
+         }
+         
+         // MQL5 não suporta referências - usar índice diretamente
+         int bestIdx = g_bestConfigIndex;
+         
+         Print("🏆 MELHOR CONFIGURAÇÃO: Index=", g_bestConfigIndex);
+         Print("   RSI: ", g_rsiAtrMacdConfigs[bestIdx].rsiOversold, "/", g_rsiAtrMacdConfigs[bestIdx].rsiOverbought);
+         Print("   ATR: Período=", g_rsiAtrMacdConfigs[bestIdx].atrPeriod, " | Mult=", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].atrStopMult, 1));
+         Print("   MACD: ", g_rsiAtrMacdConfigs[bestIdx].macdFast, "/", g_rsiAtrMacdConfigs[bestIdx].macdSlow, "/", g_rsiAtrMacdConfigs[bestIdx].macdSignal);
+         Print("   Lucro Total: ", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].totalProfit, 2));
+         Print("   Trades: ", g_rsiAtrMacdConfigs[bestIdx].totalTrades);
+         Print("   Win Rate: ", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].winRate*100, 1), "%");
+         Print("   Avg/Trade: ", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].avgProfitPerTrade, 2));
+         
+         if(g_useBestConfigAfterTest)
+         {
+            Print("✅ Sistema travado na melhor configuração");
+         }
+         else
+         {
+            Print("ℹ️ Sistema voltou para Config 0 (manual)");
+         }
+         
+         Print("🧪 === TESTE DE CONFIGURAÇÕES CONCLUÍDO ===");
+      }
+      else
+      {
+         // MQL5 não suporta referências - usar índice diretamente
+         int nextIdx = g_currentConfigIndex;
+         Print("🔄 Mudando para Config ", g_currentConfigIndex);
+         Print("   RSI: ", g_rsiAtrMacdConfigs[nextIdx].rsiOversold, "/", g_rsiAtrMacdConfigs[nextIdx].rsiOverbought,
+               " | ATR: ", g_rsiAtrMacdConfigs[nextIdx].atrPeriod, "/", DoubleToString(g_rsiAtrMacdConfigs[nextIdx].atrStopMult, 1),
+               " | MACD: ", g_rsiAtrMacdConfigs[nextIdx].macdFast, "/", g_rsiAtrMacdConfigs[nextIdx].macdSlow, "/", g_rsiAtrMacdConfigs[nextIdx].macdSignal);
+         
+         // ✅ NOVO: Exportar mudança de configuração para TXT
+         ExportConfigChange(oldConfig, g_currentConfigIndex);
+      }
+   }
+}
+
+// Obter parâmetros da configuração atual
+void GetCurrentConfigParams(double &rsiOB, double &rsiOS, int &atrPer, double &atrMult,
+                            int &macdF, int &macdS, int &macdSig)
+{
+   if(g_enableConfigSearch && !g_configSearchCompleted)
+   {
+      // Usar config atual em teste - MQL5 não suporta referências
+      int cfgIdx = g_currentConfigIndex;
+      rsiOB = g_rsiAtrMacdConfigs[cfgIdx].rsiOverbought;
+      rsiOS = g_rsiAtrMacdConfigs[cfgIdx].rsiOversold;
+      atrPer = g_rsiAtrMacdConfigs[cfgIdx].atrPeriod;
+      atrMult = g_rsiAtrMacdConfigs[cfgIdx].atrStopMult;
+      macdF = g_rsiAtrMacdConfigs[cfgIdx].macdFast;
+      macdS = g_rsiAtrMacdConfigs[cfgIdx].macdSlow;
+      macdSig = g_rsiAtrMacdConfigs[cfgIdx].macdSignal;
+   }
+   else if(g_enableConfigSearch && g_configSearchCompleted && g_useBestConfigAfterTest)
+   {
+      // Usar melhor config encontrada - MQL5 não suporta referências
+      int cfgIdx = g_bestConfigIndex;
+      rsiOB = g_rsiAtrMacdConfigs[cfgIdx].rsiOverbought;
+      rsiOS = g_rsiAtrMacdConfigs[cfgIdx].rsiOversold;
+      atrPer = g_rsiAtrMacdConfigs[cfgIdx].atrPeriod;
+      atrMult = g_rsiAtrMacdConfigs[cfgIdx].atrStopMult;
+      macdF = g_rsiAtrMacdConfigs[cfgIdx].macdFast;
+      macdS = g_rsiAtrMacdConfigs[cfgIdx].macdSlow;
+      macdSig = g_rsiAtrMacdConfigs[cfgIdx].macdSignal;
+   }
+   else
+   {
+      // Usar inputs padrão
+      rsiOB = RSI_Overbought;
+      rsiOS = RSI_Oversold;
+      atrPer = ATRPeriod;
+      atrMult = 2.0; // Padrão
+      macdF = MACDFastEMA;
+      macdS = MACDSlowEMA;
+      macdSig = MACDSignalSMA;
+   }
 }
 
 // ======================================================================
@@ -3998,9 +4593,37 @@ int ChooseAction(int state)
    
    if(IsStateBlocked(state))
    {
-      Print("⛔ Estado ", state, " bloqueado pelo sistema corrigido");
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (sistema corrigido)", state);
-      return 0;
+      // ✅ SAFETY: Se muitos estados bloqueados, permitir trading mesmo assim com aviso
+      int totalBlocked = CountBlockedStates();
+      double blockedRatio = SafeDivide((double)totalBlocked, (double)g_activeStatesCount, 0.0);
+      
+      // Se mais de 80% dos estados ativos estão bloqueados, permitir trading de emergência
+      if(blockedRatio > 0.80 && g_activeStatesCount > 20)
+      {
+         Print("⚠️ MODO EMERGÊNCIA: ", DoubleToString(blockedRatio*100,1), "% estados bloqueados (", 
+               totalBlocked, "/", g_activeStatesCount, ") - PERMITINDO TRADING do estado ", state);
+         g_statusMessage = StringFormat("⚠️ EMERGÊNCIA: Estado %d permitido apesar de bloqueado", state);
+         // Continuar para escolha de ação normal
+      }
+      else
+      {
+         // ✅ DEBUG: Mostrar estatísticas do estado bloqueado
+         int visits = g_stateVisits[state];
+         int wins = g_stateWins[state];
+         int losses = g_stateLosses[state];
+         double winRate = CalculateWinRate(state);
+         double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
+         
+         Print("⛔ Estado ", state, " BLOQUEADO | Visits=", visits, 
+               " | Wins=", wins, " | Losses=", losses,
+               " | WinRate=", DoubleToString(winRate*100,1), "%",
+               " | LossRate=", DoubleToString(lossRate*100,1), "%",
+               " | Total Bloqueados=", totalBlocked, "/", g_activeStatesCount);
+         
+         g_statusMessage = StringFormat("⛔ Estado %d bloqueado (WR: %.1f%%, %d/%d bloq.)", 
+                                         state, winRate*100, totalBlocked, g_activeStatesCount);
+         return 0;
+      }
    }
    
    if(ArraySize(g_Q) <= state * NUM_ACTIONS + 2)
@@ -4075,19 +4698,19 @@ int ChooseAction(int state)
    
    // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
    double winRate = CalculateWinRate(state);
-   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)  // ✅ REDUZIDO: 15% ao invés de 30%
+   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)  // ✅ AJUSTADO: 10% ao invés de 15% - mais tolerante
    {
       bestA = 0;
       Print("🤔 NOP escolhido (estado muito ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
       g_statusMessage = "NOP (estado muito ruim)";
    }
-   else if(nopQ > best * 5.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 5x melhor ao invés de 1.5x
+   else if(nopQ > best * 8.0 && bestA > 0)  // ✅ AJUSTADO: NOP precisa ser 8x melhor - ainda mais exigente
    {
       bestA = 0;
       Print("🤔 NOP escolhido (superioridade: ", nopQ, " vs ", best, ")");
       g_statusMessage = "NOP (melhor opção)";
    }
-   else if(best <= -50.0)  // ✅ REDUZIDO: -50 ao invés de -20 (ações precisam estar MUITO ruins)
+   else if(best <= -100.0)  // ✅ AJUSTADO: -100 ao invés de -50 - muito mais tolerante
    {
       bestA = 0;
       Print("🤔 NOP escolhido (ações de trade muito ruins: ", best, ")");
@@ -4420,6 +5043,9 @@ void ExecuteAction(int action, int state)
    
    AddPositionToTrailingSystem((ulong)res.order);
    
+   // ✅ NOVO: Exportar abertura de trade para TXT
+   ExportTradeOpen(isBuy, price, sl_price, tp_price, desiredLot, state);
+   
    // ✅ MAE/MFE TRACKING: Adiciona posição ao rastreamento de eficiência
    int direction = isBuy ? 1 : -1;
    AddPositionTracking((ulong)res.order, price, sl_price, tp_price, direction);
@@ -4554,18 +5180,15 @@ int GetMADistanceBucket(double maDistance)
 }
 
 // ✅ Função para calcular bucket ADX
-int GetADXBucket(double adxValue)
+// ✅ NOVO: Função para calcular bucket MACD
+int GetMACDBucket(double macdMain, double macdSignal)
 {
-   if(adxValue < 20) return 0;           // Tendência fraca
-   else return 1;                        // Tendência forte
-}
-
-// ✅ Função para calcular bucket Bollinger Bands
-int GetBBBucket(double bbPosition)
-{
-   if(bbPosition < 0.3) return 0;        // Próximo da banda inferior
-   else if(bbPosition < 0.7) return 1;   // No meio
-   else return 2;                        // Próximo da banda superior
+   double macdHistogram = macdMain - macdSignal;
+   
+   // Discretizar MACD histogram em 3 níveis
+   if(macdHistogram < -0.0001) return 0;      // MACD negativo (bearish)
+   else if(macdHistogram < 0.0001) return 1;  // MACD neutro
+   else return 2;                              // MACD positivo (bullish)
 }
 
 // ✅ Função para calcular bucket volatilidade
@@ -4603,12 +5226,11 @@ int GetTimeBucket()
 // ======================================================================
 int GetCurrentState()
 {
-   double ma[], rsi[], adx[], bb_upper[], bb_lower[], atr[];
+   double ma[], rsi[], macd_main[], macd_signal[], atr[];
    ArraySetAsSeries(ma, true);
    ArraySetAsSeries(rsi, true);
-   ArraySetAsSeries(adx, true);
-   ArraySetAsSeries(bb_upper, true);
-   ArraySetAsSeries(bb_lower, true);
+   ArraySetAsSeries(macd_main, true);
+   ArraySetAsSeries(macd_signal, true);
    ArraySetAsSeries(atr, true);
    
    if(CopyBuffer(g_maHandle, 0, 0, 1, ma) < 1) 
@@ -4621,19 +5243,14 @@ int GetCurrentState()
       Print("❌ Erro ao copiar RSI");
       return -1;
    }
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) 
+   if(CopyBuffer(g_macdHandle, 0, 0, 1, macd_main) < 1) 
    {
-      Print("❌ Erro ao copiar ADX");
+      Print("❌ Erro ao copiar MACD Main");
       return -1;
    }
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) 
+   if(CopyBuffer(g_macdHandle, 1, 0, 1, macd_signal) < 1) 
    {
-      Print("❌ Erro ao copiar BB Upper");
-      return -1;
-   }
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) 
-   {
-      Print("❌ Erro ao copiar BB Lower");
+      Print("❌ Erro ao copiar MACD Signal");
       return -1;
    }
    if(CopyBuffer(g_atrHandle, 0, 0, 2, atr) < 2) 
@@ -4657,19 +5274,10 @@ int GetCurrentState()
    else
       maDistance = SafeDivide(price - ma[0], point * 10, 0.0);
    
-   // ✅ Cálculo da posição nas Bollinger Bands
-   double bbPosition = 0;
-   double bbRange = bb_upper[0] - bb_lower[0];
-   if(bbRange > 0)
-      bbPosition = SafeDivide(price - bb_lower[0], bbRange, BB_NEUTRAL_POSITION);
-   else
-      bbPosition = BB_NEUTRAL_POSITION;  // Usar posição neutra se range inválido
-   
    // ✅ Calcular buckets otimizados
    int maBucket = GetMADistanceBucket(maDistance);
    int rsiBucket = GetRSIBucket(rsi[0]);
-   int adxBucket = GetADXBucket(adx[0]);
-   int bbBucket = GetBBBucket(bbPosition);
+   int macdBucket = GetMACDBucket(macd_main[0], macd_signal[0]);  // ✅ NOVO: MACD
    int volBucket = GetVolatilityBucket(atr[0], atr[1]);
    int volumeBucket = GetVolumeBucket();
    int timeBucket = GetTimeBucket();
@@ -4677,19 +5285,18 @@ int GetCurrentState()
    // ✅ Proteção contra overflow
    maBucket = (int)MathMod(maBucket, BINS_MA_DIST);
    rsiBucket = (int)MathMod(rsiBucket, BINS_RSI);
-   adxBucket = (int)MathMod(adxBucket, BINS_ADX);
-   bbBucket = (int)MathMod(bbBucket, BINS_BBPOS);
+   macdBucket = (int)MathMod(macdBucket, BINS_MACD);
    volBucket = (int)MathMod(volBucket, BINS_VOLATILITY);
    volumeBucket = (int)MathMod(volumeBucket, BINS_VOLUME);
    timeBucket = (int)MathMod(timeBucket, BINS_TIME);
    
-   // ✅ CORREÇÃO: Método correto - multiplicar na ordem inversa
+   // ✅ NOVO CÁLCULO: Sem ADX e BB, com MACD
+   // Formula: TIME × VOLUME × VOLATILITY × MACD × RSI × MA
    int state_idx = 0;
    
-   // Método correto - multiplicar na ordem inversa
    state_idx = (((((timeBucket * BINS_VOLUME + volumeBucket) * BINS_VOLATILITY + volBucket) * 
-                  BINS_BBPOS + bbBucket) * BINS_ADX + adxBucket) * 
-                  BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket;
+                  BINS_MACD + macdBucket) * 
+                  BINS_RSI + rsiBucket) * BINS_MA_DIST + maBucket);
    
    // ✅ VERIFICAÇÃO DE SEGURANÇA
    if(state_idx < 0) state_idx = 0;
@@ -4704,8 +5311,8 @@ int GetCurrentState()
    if(debugCounter++ % 100 == 0)
    {
       Print("DEBUG Estado: idx=", state_idx, 
-            " | ma=", maBucket, " rsi=", rsiBucket, " adx=", adxBucket,
-            " bb=", bbBucket, " vol=", volBucket, " volM=", volumeBucket, " time=", timeBucket);
+            " | ma=", maBucket, " rsi=", rsiBucket, " macd=", macdBucket,
+            " vol=", volBucket, " volM=", volumeBucket, " time=", timeBucket);
    }
    
    // ✅ PROTEÇÃO CONTRA ESTADO CONGELADO
@@ -4742,9 +5349,10 @@ int GetCurrentState()
    if((state_idx != lastLoggedState && (currentTime - lastLogTime) > 300) || 
       g_totalTrades % 50 == 0)
    {
-      PrintFormat("📊 Estado calculado: %d | RSI=%.1f(%d) | MA_dist=%.2f(%d) | ADX=%.1f(%d) | BB=%.2f(%d) | Vol=%d | Time=%d",
-                  state_idx, rsi[0], rsiBucket, maDistance, maBucket, adx[0], adxBucket, 
-                  bbPosition, bbBucket, volBucket, timeBucket);
+      double macdHist = macd_main[0] - macd_signal[0];
+      PrintFormat("📊 Estado: %d | RSI=%.1f(%d) | MA_dist=%.2f(%d) | MACD=%.5f(%d) | Vol=%d | Time=%d",
+                  state_idx, rsi[0], rsiBucket, maDistance, maBucket, macdHist, macdBucket,
+                  volBucket, timeBucket);
       lastLoggedState = state_idx;
       lastLogTime = currentTime;
    }
@@ -4950,6 +5558,10 @@ double CalculateSLByPoints(bool isBuy, double entryPrice)
    if(!UseFixedSL) return 0.0;
    
    int slPoints = FixedSL_Points;
+   
+   // ❌ REMOVIDO: Cálculo baseado em ATR (sempre usa pontos fixos agora)
+   // Usuário solicitou remoção dos stops adaptativos por ATR
+   
    if(slPoints <= 0) return 0.0;
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -4976,6 +5588,10 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
    if(!UseFixedTP) return 0.0;
    
    int tpPoints = FixedTP_Points;
+   
+   // ❌ REMOVIDO: Cálculo baseado em ATR (sempre usa pontos fixos agora)
+   // Usuário solicitou remoção dos stops adaptativos por ATR
+   
    if(tpPoints <= 0) return 0.0;
    
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -5109,11 +5725,19 @@ bool ValidateWithRSI(bool isBuy)
    double currentRSI = rsi[0];
    double previousRSI = rsi[1];
    
+   // ✅ Obter parâmetros da configuração atual
+   double rsiOverbought, rsiOversold;
+   int atrPeriod;
+   double atrStopMult;
+   int macdFast, macdSlow, macdSignal;
+   GetCurrentConfigParams(rsiOverbought, rsiOversold, atrPeriod, atrStopMult, 
+                          macdFast, macdSlow, macdSignal);
+   
    if(isBuy)
    {
-      if(currentRSI < RSI_Oversold) 
+      if(currentRSI < rsiOversold) 
       {
-         Print("✅ RSI EXCELENTE para BUY: ", DoubleToString(currentRSI, 2), " (oversold)");
+         Print("✅ RSI EXCELENTE para BUY: ", DoubleToString(currentRSI, 2), " (oversold<", rsiOversold, ")");
          return true;
       }
       
@@ -5140,9 +5764,9 @@ bool ValidateWithRSI(bool isBuy)
    }
    else
    {
-      if(currentRSI > RSI_Overbought)
+      if(currentRSI > rsiOverbought)
       {
-         Print("✅ RSI EXCELENTE para SELL: ", DoubleToString(currentRSI, 2), " (sobrecomprado)");
+         Print("✅ RSI EXCELENTE para SELL: ", DoubleToString(currentRSI, 2), " (overbought>", rsiOverbought, ")");
          return true;
       }
       
@@ -5169,107 +5793,9 @@ bool ValidateWithRSI(bool isBuy)
    }
 }
 
-bool ValidateWithBollingerBands(bool isBuy)
-{
-   if(!UseBBValidation) return true;
-   
-   double bb_upper[], bb_lower[];
-   ArraySetAsSeries(bb_upper, true);
-   ArraySetAsSeries(bb_lower, true);
-   if(CopyBuffer(g_bbHandle, 0, 0, 1, bb_upper) < 1) return false;
-   if(CopyBuffer(g_bbHandle, 2, 0, 1, bb_lower) < 1) return false;
-   
-   double price = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   double bb_range = bb_upper[0] - bb_lower[0];
-   
-   if(bb_range <= 0) return false;
-   
-   double bb_position = SafeDivide(price - bb_lower[0], bb_range, BB_NEUTRAL_POSITION);
-   
-   if(isBuy)
-   {
-      if(bb_position <= 0.7)
-      {
-         if(bb_position <= BB_LowerThreshold)
-         {
-            Print("✅ BB EXCELENTE para BUY: posição ", DoubleToString(bb_position*100, 1), "% (próximo da banda inferior)");
-         }
-         else if(bb_position <= 0.5)
-         {
-            Print("✅ BB BOM para BUY: posição ", DoubleToString(bb_position*100, 1), "% (faixa inferior)");
-         }
-         else
-         {
-            Print("✅ BB ACEITÁVEL para BUY: posição ", DoubleToString(bb_position*100, 1), "% (metade inferior)");
-         }
-         return true;
-      }
-      else if(bb_position <= 0.9)
-      {
-         Print("⚠️ BB NEUTRO para BUY: posição ", DoubleToString(bb_position*100, 1), "% (cuidado)");
-         return true;
-      }
-      else
-      {
-         Print("❌ BB muito alto para BUY: posição ", DoubleToString(bb_position*100, 1), "% (acima de 90%)");
-         return false;
-      }
-   }
-   else
-   {
-      if(bb_position >= 0.3)
-      {
-         if(bb_position >= BB_UpperThreshold)
-         {
-            Print("✅ BB EXCELENTE para SELL: posição ", DoubleToString(bb_position*100, 1), "% (próximo da banda superior)");
-         }
-         else if(bb_position >= 0.5)
-         {
-            Print("✅ BB BOM para SELL: posição ", DoubleToString(bb_position*100, 1), "% (faixa superior)");
-         }
-         else
-         {
-            Print("✅ BB ACEITÁVEL para SELL: posição ", DoubleToString(bb_position*100, 1), "% (metade superior)");
-         }
-         return true;
-      }
-      else if(bb_position >= 0.1)
-      {
-         Print("⚠️ BB NEUTRO para SELL: posição ", DoubleToString(bb_position*100, 1), "% (cuidado)");
-         return true;
-      }
-      else
-      {
-         Print("❌ BB muito baixo para SELL: posição ", DoubleToString(bb_position*100, 1), "% (abaixo de 10%)");
-         return false;
-      }
-   }
-}
 
-bool ValidateWithADX()
-{
-   if(!UseADXValidation) return true;
-   
-   double adx[];
-   ArraySetAsSeries(adx, true);
-   if(CopyBuffer(g_adxHandle, 0, 0, 1, adx) < 1) return false;
-   
-   if(adx[0] >= MinADXStrength)
-   {
-      Print("✅ ADX válido: ", DoubleToString(adx[0], 1), " (força suficiente)");
-      return true;
-   }
-   else if(adx[0] >= 15)
-   {
-      Print("⚠️ ADX moderado aceito: ", DoubleToString(adx[0], 1), " (abaixo do ideal, mas aceitável)");
-      return true;
-   }
-   else
-   {
-      Print("❌ ADX muito fraco: ", DoubleToString(adx[0], 1), " (mínimo aceitável: 15)");
-      return false;
-   }
-}
+// ✅ REMOVIDO: ValidateWithBollingerBands() - BB foi removido
+// ✅ REMOVIDO: ValidateWithADX() - ADX foi removido
 
 bool ValidateWithTrend(bool isBuy)
 {
@@ -5367,17 +5893,8 @@ bool ValidateAllIndicators(bool isBuy)
       return false;
    }
    
-   if(!ValidateWithBollingerBands(isBuy))
-   {
-      Print("❌ VALIDAÇÃO FALHOU: Bollinger Bands");
-      return false;
-   }
-   
-   if(!ValidateWithADX())
-   {
-      Print("❌ VALIDAÇÃO FALHOU: ADX");
-      return false;
-   }
+   // ✅ REMOVIDO: ValidateWithBollingerBands - BB foi removido
+   // ✅ REMOVIDO: ValidateWithADX - ADX foi removido
    
    if(!ValidateWithTrend(isBuy))
    {
@@ -5614,6 +6131,27 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    long entry_type = HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
    if(entry_type != DEAL_ENTRY_OUT) return;
+   
+   // ✅ NOVO: Obter tempo de abertura e fechamento para calcular duração
+   // Pegar position_id para encontrar o deal de entrada
+   ulong position_id = HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+   datetime deal_time_open = 0;
+   datetime deal_time_close = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
+   
+   // Buscar deal de entrada (DEAL_ENTRY_IN) com mesmo position_id
+   int total_deals = HistoryDealsTotal();
+   for(int i = 0; i < total_deals; i++)
+   {
+      ulong dt = HistoryDealGetTicket(i);
+      if(HistoryDealGetInteger(dt, DEAL_POSITION_ID) == position_id)
+      {
+         if(HistoryDealGetInteger(dt, DEAL_ENTRY) == DEAL_ENTRY_IN)
+         {
+            deal_time_open = (datetime)HistoryDealGetInteger(dt, DEAL_TIME);
+            break;
+         }
+      }
+   }
 
    // DEBUG: Logar todos os detalhes
    Print("=== ONTRADETRANSACTION CHAMADO ===");
@@ -5713,12 +6251,43 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             g_totalWins++;
             g_stateWins[g_lastTradeState]++;
             Print("✅✅✅ VITÓRIA REGISTRADA para estado ", g_lastTradeState);
+            
+            // ✅ NOVO: Atualizar performance dos parâmetros
+            UpdateParameterPerformance(true, net_profit);
+            
+            // ✅ NOVO: Atualizar performance da configuração
+            UpdateConfigPerformance(true, net_profit);
+            
+            // ✅ NOVO: Exportar fechamento de trade para TXT
+            double duration_hours = 0.0;
+            if(deal_time_open > 0)
+               duration_hours = (double)(deal_time_close - deal_time_open) / 3600.0; // Converter para horas
+            ExportTradeClose(true, net_profit, duration_hours);
          }
          else 
          {
             g_totalLosses++;
             g_stateLosses[g_lastTradeState]++;
             Print("❌❌❌ PERDA REGISTRADA para estado ", g_lastTradeState);
+            
+            // ✅ NOVO: Atualizar performance dos parâmetros
+            UpdateParameterPerformance(false, net_profit);
+            
+            // ✅ NOVO: Atualizar performance da configuração
+            UpdateConfigPerformance(false, net_profit);
+            
+            // ✅ NOVO: Exportar fechamento de trade para TXT
+            double duration_hours = 0.0;
+            if(deal_time_open > 0)
+               duration_hours = (double)(deal_time_close - deal_time_open) / 3600.0; // Converter para horas
+            ExportTradeClose(false, net_profit, duration_hours);
+         }
+         
+         // ✅ NOVO: Exportar resumo periódico
+         int totalTrades = g_totalWins + g_totalLosses;
+         if(totalTrades > 0 && totalTrades % TxtExportInterval == 0)
+         {
+            ExportPeriodicSummary();
          }
          
          // ✅ FIX: Avaliar bloqueio após QUALQUER trade (win ou loss), não só após perda
@@ -5978,6 +6547,107 @@ void UpdateMonthlyStats(double net_profit)
 }
 
 // Exporta relatório mensal/anual
+// ======================================================================
+// ✅✅✅ EXPORTAÇÃO TXT - LOG DE ATIVIDADE
+// ======================================================================
+
+void ExportActivityLog(string eventType, string details)
+{
+   if(!EnableTxtExport) return;
+   
+   string filename = "Phoenix_Activity_Log_" + _Symbol + ".txt";
+   
+   // Abrir em modo append para adicionar ao arquivo existente
+   int file = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(file == INVALID_HANDLE)
+   {
+      Print("❌ Erro ao abrir log de atividade: ", GetLastError());
+      return;
+   }
+   
+   // Ir para o final do arquivo
+   FileSeek(file, 0, SEEK_END);
+   
+   // Formatar linha do log
+   string timestamp = TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES|TIME_SECONDS);
+   string logLine = StringFormat("%s | %s | %s", timestamp, eventType, details);
+   
+   FileWrite(file, logLine);
+   FileClose(file);
+}
+
+void ExportTradeOpen(bool isBuy, double price, double sl, double tp, double lot, int state)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("DIR=%s | PRICE=%.5f | SL=%.5f | TP=%.5f | LOT=%.2f | STATE=%d",
+                                 isBuy ? "BUY" : "SELL", price, sl, tp, lot, state);
+   ExportActivityLog("TRADE_OPEN", details);
+}
+
+void ExportTradeClose(bool wasWin, double profit, double duration)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("RESULT=%s | PROFIT=%.2f | DURATION=%.1fh",
+                                 wasWin ? "WIN" : "LOSS", profit, duration/3600.0);
+   ExportActivityLog("TRADE_CLOSE", details);
+}
+
+void ExportConfigChange(int oldConfig, int newConfig)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("CONFIG: %d → %d", oldConfig, newConfig);
+   ExportActivityLog("CONFIG_CHANGE", details);
+}
+
+void ExportStateBlock(int state, double lossRate, int visits)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("STATE=%d | LOSS_RATE=%.1f%% | VISITS=%d",
+                                 state, lossRate*100, visits);
+   ExportActivityLog("STATE_BLOCKED", details);
+}
+
+void ExportStateUnblock(int state, double winRate, int visits)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("STATE=%d | WIN_RATE=%.1f%% | VISITS=%d",
+                                 state, winRate*100, visits);
+   ExportActivityLog("STATE_UNBLOCKED", details);
+}
+
+void ExportPeriodicSummary()
+{
+   if(!EnableTxtExport) return;
+   
+   int blockedCount = 0;
+   int activeCount = 0;
+   
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] > 0)
+      {
+         activeCount++;
+         if(g_stateBlocked[i]) blockedCount++;
+      }
+   }
+   
+   double winRate = SafeDivide((double)g_totalWins, (double)(g_totalWins + g_totalLosses), 0.0);
+   
+   string details = StringFormat("TRADES=%d | WINS=%d | LOSSES=%d | WIN_RATE=%.1f%% | ACTIVE_STATES=%d | BLOCKED=%d",
+                                 g_totalWins + g_totalLosses, g_totalWins, g_totalLosses,
+                                 winRate*100, activeCount, blockedCount);
+   ExportActivityLog("SUMMARY", details);
+}
+
+// ======================================================================
+// ✅ EXPORTAÇÃO MENSAL
+// ======================================================================
+
 bool ExportMonthlyReport()
 {
    if(!g_monthlyStatsInitialized) return false;
@@ -6258,10 +6928,23 @@ void OnTick()
       if(EnableIntelligentReset && g_activeStatesCount >= MinStatesBeforeReset)
       {
          double blockedRatio = SafeDivide((double)CountBlockedStates(), (double)g_activeStatesCount, 0.0);
-         if(blockedRatio > 0.7 && g_activeStatesCount > 50)
+         if(blockedRatio > 0.5 && g_activeStatesCount > 50)  // ✅ AJUSTADO: 50% ao invés de 70% - mais agressivo
          {
-            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%)");
-            IntelligentPartialReset();
+            Print("⚠️ Muitos estados bloqueados (", DoubleToString(blockedRatio*100,1), "%) - ", 
+                  CountBlockedStates(), "/", g_activeStatesCount, " estados");
+            
+            // ✅ Antes de resetar, tentar desbloquear estados que melhoraram
+            Print("🔓 Tentando desbloquear estados que melhoraram...");
+            AutoUnblockGoodStates();
+            
+            // Se ainda estiver muito bloqueado, fazer reset parcial
+            int stillBlocked = CountBlockedStates();
+            double newRatio = SafeDivide((double)stillBlocked, (double)g_activeStatesCount, 0.0);
+            if(newRatio > 0.6)
+            {
+               Print("⚠️ Ainda muitos bloqueados (", DoubleToString(newRatio*100,1), "%) - fazendo reset parcial");
+               IntelligentPartialReset();
+            }
          }
       }
    }
@@ -6274,6 +6957,9 @@ void OnTick()
       
       // ✅ OTIMIZAÇÃO DINÂMICA
       OptimizeParametersDynamically();
+      
+      // ✅ NOVO: Otimização de parâmetros de indicadores
+      OptimizeIndicatorParameters();
       
       // ✅ TESTE PERIÓDICO DE ESTADOS BLOQUEADOS
       if(EnableUnifiedBlockingSystem)
@@ -6307,6 +6993,9 @@ void OnTick()
       if(debugCounter % 50 == 0)
       {
          DebugStuckStatesEnhanced();
+         
+         // ✅ NOVO: Mostrar resumo completo do sistema de bloqueio a cada 50 barras
+         PrintBlockingStatus();
       }
       
       // ✅ Desbloquear estados bons apenas após atingir limite mínimo de estados
@@ -6706,17 +7395,26 @@ int OnInit()
 
    MathSrand((int)GetTickCount64());
 
-   g_maHandle      = iMA(_Symbol, _Period, MAPeriod, 0, MAMethod, PRICE_CLOSE);
-   g_adxHandle     = iADX(_Symbol, _Period, 20);
-   g_rsiHandle     = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
-   g_bbHandle      = iBands(_Symbol, _Period, BBPeriod, 0, BBDeviation, PRICE_CLOSE);
+   // ✅ Inicializar parâmetros otimizáveis com valores padrão
+   g_currentRSIPeriod = RSIPeriod;
+   g_currentMAPeriod = MAPeriod;
+   g_currentMACDFast = MACDFastEMA;
+   g_currentMACDSlow = MACDSlowEMA;
+   g_currentMACDSignal = MACDSignalSMA;
+
+   g_maHandle      = iMA(_Symbol, _Period, g_currentMAPeriod, 0, MAMethod, PRICE_CLOSE);
+   g_rsiHandle     = iRSI(_Symbol, _Period, g_currentRSIPeriod, PRICE_CLOSE);
+   g_macdHandle    = iMACD(_Symbol, _Period, g_currentMACDFast, g_currentMACDSlow, g_currentMACDSignal, PRICE_CLOSE);
    g_atrHandle     = iATR(_Symbol, _Period, ATRPeriod);
 
-   if(g_maHandle == INVALID_HANDLE || g_adxHandle == INVALID_HANDLE ||
-      g_rsiHandle == INVALID_HANDLE || g_bbHandle == INVALID_HANDLE ||
-      g_atrHandle == INVALID_HANDLE)
+   if(g_maHandle == INVALID_HANDLE || g_rsiHandle == INVALID_HANDLE ||
+      g_macdHandle == INVALID_HANDLE || g_atrHandle == INVALID_HANDLE)
    {
       Print("❌ Falha ao criar indicadores");
+      Print("   MA Handle: ", g_maHandle);
+      Print("   RSI Handle: ", g_rsiHandle);
+      Print("   MACD Handle: ", g_macdHandle);
+      Print("   ATR Handle: ", g_atrHandle);
       return INIT_FAILED;
    }
 
@@ -6869,6 +7567,12 @@ int OnInit()
    
    UpdateLearningStats();
    
+   // ✅ NOVO: Inicializar sistema de otimização de parâmetros
+   InitializeParameterOptimization();
+   
+   // ✅ NOVO: Inicializar sistema de teste de configurações
+   InitRSIAtrMacdConfigs();
+   
    g_statusMessage = "Inicializando Sistema Super Corrigido v309...";
    
    g_lastSaveTime  = TimeCurrent();
@@ -6891,19 +7595,18 @@ int OnInit()
       if(CloseOppositeOnNewSignal) CloseAllPositions();
    }
 
-   Print("🔥🔥🔥 INICIALIZANDO SISTEMA SUPER CORRIGIDO...");
+   Print("🔥🔥🔥 INICIALIZANDO SISTEMA COM MACD...");
    Print("🔥🔥🔥 CONFIGURAÇÃO DE ESTADOS:");
    Print("🔥🔥🔥 Bins por indicador:");
    Print("🔥🔥🔥 MA Distance: ", BINS_MA_DIST);
    Print("🔥🔥🔥 RSI: ", BINS_RSI);
-   Print("🔥🔥🔥 ADX: ", BINS_ADX);
-   Print("🔥🔥🔥 BB Position: ", BINS_BBPOS);
+   Print("🔥🔥🔥 MACD: ", BINS_MACD, " ✅ (NOVO - substitui ADX e BB)");
    Print("🔥🔥🔥 Volatilidade: ", BINS_VOLATILITY);
    Print("🔥🔥🔥 Volume: ", BINS_VOLUME);
    Print("🔥🔥🔥 Tempo: ", BINS_TIME);
-   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×3×2×2×2 = 576)");
+   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×3×2×2×2 = 288) ✅ OTIMIZADO!");
    Print("🔥🔥🔥 MEMÓRIA MÁXIMA: ", MaxMemoryStates, " estados ativos");
-   Print("🔥🔥🔥 SISTEMA SUPER CORRIGIDO: ATIVADO");
+   Print("🔥🔥🔥 SISTEMA COM MACD: ATIVADO");
    
    // ✅ CONFIGURAÇÕES APLICADAS:
    Print("⚙️ Configurações aplicadas:");
@@ -6913,10 +7616,21 @@ int OnInit()
    Print("   • BadStateLossThreshold: 60%");
    Print("   • MinStatesBeforeReset: 150 (previne resets e decay prematuros)");
    
+   // ✅ NOVO: Parâmetros de indicadores
+   Print("📊 Parâmetros dos indicadores:");
+   Print("   • RSI Period: ", g_currentRSIPeriod, " (otimizável)");
+   Print("   • MA Period: ", g_currentMAPeriod);
+   Print("   • MACD Fast: ", g_currentMACDFast, " (otimizável)");
+   Print("   • MACD Slow: ", g_currentMACDSlow, " (otimizável)");
+   Print("   • MACD Signal: ", g_currentMACDSignal, " (otimizável)");
+   
    if(EnableUnifiedBlockingSystem)
    {
       AutoUnblockGoodStates();
       TestBlockedStatesPeriodically();
+      
+      // ✅ NOVO: Mostrar status detalhado do sistema de bloqueio após inicialização
+      PrintBlockingStatus();
    }
 
    if(EnableMemoryExport) ExportAllMemoryFiles();
@@ -7027,10 +7741,10 @@ void OnDeinit(const int reason)
    
    Print("💾 Processo de salvamento concluído");
    
+   // ✅ Liberar handles de indicadores
    IndicatorRelease(g_maHandle);
-   IndicatorRelease(g_adxHandle);
    IndicatorRelease(g_rsiHandle);
-   IndicatorRelease(g_bbHandle);
+   IndicatorRelease(g_macdHandle);  // ✅ MACD substituiu ADX e BB
    IndicatorRelease(g_atrHandle);
 
    RemoveHUD();
