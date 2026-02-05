@@ -360,7 +360,7 @@ input int    TextExportMinInterval    = 60;           // Intervalo mínimo (min)
 input bool   ExportAllStates          = false;        // Exportar todos estados
 input bool   IncludeQValues           = true;         // Incluir Q-values
 input bool   IncludeStatistics        = true;         // Incluir estatísticas
-input int    MaxStatesToExport        = 500;          // Máximo estados exportar
+input int    MaxStatesToExport        = 100;          // Máximo estados exportar (evitar travamento)
 
 // ──────────────────────────────────────────────────────────────────────
 // 🖥️ 8. INTERFACE (HUD)
@@ -6868,6 +6868,9 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
 {
    if(!EnableTextExport && !forceExport) return false;
    
+   // ⏱️ Timer de performance
+   uint startTime = GetTickCount();
+   
    datetime currentTime = TimeCurrent();
    if(!forceExport && g_lastTextExportTime > 0)
    {
@@ -6974,15 +6977,30 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    }
    
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "📈 HISTÓRICO COMPLETO DE TODOS OS ESTADOS");
+   
+   // 🚨 FIX CRÍTICO: Aplicar limite MaxStatesToExport para evitar travamento
+   int statesToExport = MathMin(g_activeStatesCount, MaxStatesToExport);
+   
+   // ⚠️ AVISO se limitando
+   if(g_activeStatesCount > MaxStatesToExport)
+   {
+      string limitWarning = "⚠️ LIMITANDO EXPORTAÇÃO: " + IntegerToString(g_activeStatesCount) + 
+                           " estados descobertos, exportando apenas " + IntegerToString(MaxStatesToExport);
+      FileWrite(file_handle, limitWarning);
+      FileWrite(file_handle, "   (Para evitar travamento, ajuste MaxStatesToExport se necessário)");
+      FileWrite(file_handle, "");
+   }
+   
+   FileWrite(file_handle, "📈 HISTÓRICO DE ESTADOS (Top " + IntegerToString(statesToExport) + ")");
    FileWrite(file_handle, "----------------------------------------");
    
    // ✅ NOVA ORDENAÇÃO: 1) Bloqueados  2) Melhores (lucro/WR)  3) Restantes
    // Array: [state, visits, wins, losses, isBlocked(0/1), profit_x1000]
    int sortedStates[][6];
-   ArrayResize(sortedStates, g_activeStatesCount);
+   ArrayResize(sortedStates, statesToExport);
    
-   for(int i = 0; i < g_activeStatesCount; i++)
+   // 🚨 FIX: Copiar apenas os primeiros MaxStatesToExport estados
+   for(int i = 0; i < statesToExport; i++)
    {
       int state = g_activeStates[i];
       int visits = g_stateVisits[state];
@@ -6999,10 +7017,11 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       sortedStates[i][5] = (int)(profit * 1000); // Multiplicar por 1000 para evitar decimais
    }
    
-   // Bubble sort com critério customizado
-   for(int i = 0; i < g_activeStatesCount - 1; i++)
+   // 🚨 FIX: Sort otimizado - limitar iterações
+   int sortLimit = statesToExport - 1;
+   for(int i = 0; i < sortLimit; i++)
    {
-      for(int j = i + 1; j < g_activeStatesCount; j++)
+      for(int j = i + 1; j < statesToExport; j++)
       {
          bool shouldSwap = false;
          
@@ -7053,8 +7072,8 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       }
    }
    
-   // ✅ EXPORTAR TODOS OS ESTADOS (não apenas top 20)
-   for(int i = 0; i < g_activeStatesCount; i++)
+   // ✅ EXPORTAR estados limitados (para evitar travamento)
+   for(int i = 0; i < statesToExport; i++)
    {
       int state = sortedStates[i][0];
       int visits = sortedStates[i][1];
@@ -7111,10 +7130,22 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    g_lastTextExportTime = currentTime;
    g_textExportCount++;
    
+   // ⏱️ Calcular tempo gasto
+   uint elapsedMs = GetTickCount() - startTime;
+   double elapsedSeconds = elapsedMs / 1000.0;
+   
+   // ⚠️ Avisar se demorou muito
+   string perfWarning = "";
+   if(elapsedSeconds > 5.0)
+   {
+      perfWarning = " ⚠️ DEMOROU " + DoubleToString(elapsedSeconds, 1) + "s - considere reduzir MaxStatesToExport!";
+   }
+   
    Print("📄 Memória exportada para texto: ", filename, 
-         " | Estados: ", g_activeStatesCount,
+         " | Estados exportados: ", statesToExport, "/", g_activeStatesCount,
          " | Bloqueados: ", blockedCount,
-         " | Trades reais: ", g_totalTrades);
+         " | Tempo: ", DoubleToString(elapsedSeconds, 2), "s",
+         perfWarning);
    
    return true;
 }
