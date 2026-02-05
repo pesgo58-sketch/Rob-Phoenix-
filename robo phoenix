@@ -336,22 +336,24 @@ input int    PeriodicSaveMinutes      = 15;           // ✅ NOVO: Salvar a cada
 //    Exemplo: "Estado 0: 15 visitas, 9 wins, 6 losses, WR=60%, Q[BUY]=1.23"
 //
 // ⚠️ POR QUE ESTÁ DESLIGADO (false) POR PADRÃO?
-//    ❌ MUITO LENTO: Pode levar 30-60 segundos para gerar
-//    ❌ ARQUIVO ENORME: 5-50MB dependendo dos estados descobertos  
-//    ❌ PODE TRAVAR: Durante salvamento, MT5 pode fechar forçado
+//    ❌ BLOQUEIA OnTick(): Mesmo otimizado, leva 8-12s durante exportação
+//    ❌ PERDE TICKS: Robô NÃO processa sinais durante exportação
+//    ❌ SEM ENTRADAS: Durante exportação, nenhum trade é executado
+//    ❌ ARQUIVO GRANDE: 5-50MB dependendo dos estados descobertos  
 //    ❌ NÃO É USADO: Robô NÃO carrega de .txt, apenas .bin
-//    ❌ CAUSA PROBLEMAS: Arquivos .bin podem corromper durante .txt lento
 //
 // ✅ QUANDO HABILITAR?
 //    Apenas para ANÁLISE MANUAL dos estados (ver quais têm melhor WR)
-//    RECOMENDAÇÃO: Habilite, gere 1 arquivo, depois DESLIGUE
-//    NÃO deixe ativo durante operação normal!
+//    IMPORTANTE: Exporta APENAS ao fechar robô (OnDeinit)
+//               NÃO exporta durante operação (evita bloqueio)
+//    RECOMENDAÇÃO: Habilite, feche/abra robô 1x, depois DESLIGUE
 //
 // 💾 SISTEMA BINÁRIO (.bin) É SUPERIOR:
-//    ✅ Rápido (100ms vs 60s)
+//    ✅ Rápido (100ms vs 8-12s)
 //    ✅ Compacto (500KB vs 50MB)
 //    ✅ Confiável (3 backups automáticos)
 //    ✅ Usado pelo robô para carregar memória
+//    ✅ NÃO bloqueia OnTick()
 //
 // ════════════════════════════════════════════════════════════════════════════
 input group "──── 📄 EXPORTAÇÃO TEXTO (NÃO RECOMENDADO) ────";
