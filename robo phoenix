@@ -6787,10 +6787,18 @@ void OnTick()
          g_lastResetDate=TimeCurrent();
          cachedTradesToday = -1;
          
-         if(EnableTextExport)
-         {
-            CreateDailySummaryReport();
-         }
+         // ═══════════════════════════════════════════════════════════════════
+         // ❌ REMOVIDO: CreateDailySummaryReport() diário (bloqueava OnTick)
+         // ═══════════════════════════════════════════════════════════════════
+         // PROBLEMA: Chamava CreateDailySummaryReport() no primeiro tick do dia
+         //           Bloqueava OnTick por 5-15 segundos (FileWrites + rankings)
+         //           Robô perdia sinais importantes no início do dia
+         //
+         // SOLUÇÃO: Relatório diário gerado APENAS em OnDeinit (ao fechar)
+         //          NÃO mais gerado durante operação
+         //
+         // BENEFÍCIO: OnTick NUNCA bloqueado, mesmo no início do dia
+         // ═══════════════════════════════════════════════════════════════════
       }
 
       // 🚨 FIX CRÍTICO: Limites não devem impedir o código de executar
@@ -7538,6 +7546,13 @@ void OnDeinit(const int reason)
    
    // ✅ NOVO: Exportar relatório mensal/anual final
    ExportMonthlyReport();
+   
+   // ✅ NOVO: Criar relatório diário ao fechar (se EnableTextExport)
+   if(EnableTextExport)
+   {
+      Print("📋 Gerando relatório diário...");
+      CreateDailySummaryReport();
+   }
    
    Print("💾 Processo de salvamento concluído");
    
