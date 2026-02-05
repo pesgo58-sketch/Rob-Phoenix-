@@ -2605,27 +2605,19 @@ void DebugTradeCounting()
          totalVitórias += g_stateWins[s];
          totalPerdas += g_stateLosses[s];
          
-         if(g_stateWins[s] == 0 && g_stateLosses[s] == 0 && g_stateVisits[s] >= 3)
+         // 🚨 FIX CRÍTICO: NÃO resetar estados com 0 wins/losses
+         // Estados podem ter visitas mas 0 wins/losses se trades ainda estão ABERTOS
+         // Resetar causava estados "indo e voltando" inconsistentemente
+         
+         if(g_stateWins[s] == 0 && g_stateLosses[s] == 0 && g_stateVisits[s] >= 10)
          {
             estadosComProblema++;
-            Print("⚠️ PROBLEMA: Estado ", s, " tem ", g_stateVisits[s], 
-                  " visitas mas 0 vitórias e 0 perdas!");
+            // ✅ APENAS LOG - NÃO resetar!
+            // Print("ℹ️ INFO: Estado ", s, " tem ", g_stateVisits[s], 
+            //       " visitas mas 0 vitórias/perdas (trades abertos aguardando fechamento)");
             
-            // ⚠️ CORREÇÃO AUTOMÁTICA: Resetar estado problemático
-            if(g_stateVisits[s] >= 5)
-            {
-               Print("🔄 Resetando estado problemático ", s);
-               g_stateVisits[s] = 0;
-               g_stateWins[s] = 0;
-               g_stateLosses[s] = 0;
-               // ✅ NÃO desbloquear - preservar bloqueio se existir
-               // g_stateBlocked[s] permanece inalterado
-               
-               for(int a = 0; a < NUM_ACTIONS; a++)
-               {
-                  g_Q[s * NUM_ACTIONS + a] = 0.0;
-               }
-            }
+            // ❌ REMOVIDO: Reset automático de estados
+            // Causa inconsistência - estados descobertos devem ser PERMANENTES
          }
          
          // Verificar estados que deveriam estar bloqueados
