@@ -3929,14 +3929,15 @@ void ExecuteAction(int action, int state)
       }
    }
    
-   // 🚨 CRÍTICO: Regras de direção são SEMPRE respeitadas (mesmo em exploração)
-   // Isso previne hedge não intencional e exposição excessiva em direções opostas
-   if(!CanOpenNewPosition(isBuy))
+   // 🎯 Regras de direção: CRÍTICAS sempre respeitadas, NÃO-CRÍTICAS podem ser puladas em exploração
+   // CRÍTICO (sempre): AllowOnlyOneDirection, MaxTradesPerDirection
+   // NÃO-CRÍTICO (exploração pula): Tempo entre trades, barras entre trades, piramidação
+   if(!CanOpenNewPosition(isBuy, isExploringState))
    {
       g_statusMessage = "⛔ Não pode abrir nova posição na direção";
       if(isExploringState)
       {
-         Print("🔍 EXPLORAÇÃO: Estado ", state, " bloqueado por regras de direção (segurança)");
+         Print("🔍 EXPLORAÇÃO: Estado ", state, " bloqueado por regras CRÍTICAS de direção");
       }
       UpdateQ_NOP(state);
       return;
@@ -4780,7 +4781,7 @@ int GetTotalPositions()
    return count;
 }
 
-bool CanOpenNewPosition(bool isBuy)
+bool CanOpenNewPosition(bool isBuy, bool isExploring = false)
 {
    if(AllowOnlyOneDirection)
    {
@@ -4814,10 +4815,15 @@ bool CanOpenNewPosition(bool isBuy)
       
       if((currentDir == 1 && isBuy) || (currentDir == 2 && !isBuy))
       {
-         if(!EnablePyramiding)
+         if(!EnablePyramiding && !isExploring)
          {
             Print("❌ Piramidação desativada. Já existe posição na mesma direção.");
             return false;
+         }
+         else if(!EnablePyramiding && isExploring)
+         {
+            Print("🔍 EXPLORAÇÃO: Permitindo trade na mesma direção (piramiding desabilitado)");
+            return true;
          }
          return CanPyramid(isBuy);
       }
@@ -4848,14 +4854,21 @@ bool CanOpenNewPosition(bool isBuy)
          
          if(secondsSinceLast < requiredSeconds)
          {
-            Print("⏳ Aguardando tempo entre entradas na mesma direção: ", 
-                  secondsSinceLast, "s/", requiredSeconds, "s");
-            return false;
+            if(isExploring)
+            {
+               Print("🔍 EXPLORAÇÃO: Pulando validação de tempo entre trades da mesma direção");
+            }
+            else
+            {
+               Print("⏳ Aguardando tempo entre entradas na mesma direção: ", 
+                     secondsSinceLast, "s/", requiredSeconds, "s");
+               return false;
+            }
          }
       }
    }
    
-   if(sameDirCount > 0 && MinBarsBetweenSameDirection > 0)
+   if(sameDirCount > 0 && MinBarsBetweenSameDirection > 0 && !isExploring)
    {
       int barsSinceLast = BarsSinceLastEntry(isBuy);
       if(barsSinceLast >= 0 && barsSinceLast < MinBarsBetweenSameDirection)
