@@ -7185,24 +7185,48 @@ int OnInit()
    if(!LoadBrain())
    {
       // ✅ PROTEÇÃO CRÍTICA: Verificar se arquivo realmente não existe
-      // Se arquivo existe mas falhou ao carregar (erro temporário), NÃO sobrescrever!
+      // Se arquivo existe mas falhou ao carregar, tentar backups antes de desistir
       string mainFile = GetBrainFileName();
-      string backupFile = GetBackupFileName(0);
-      bool fileExists = FileIsExist(mainFile, FILE_COMMON) || FileIsExist(backupFile, FILE_COMMON);
+      bool mainFileExists = FileIsExist(mainFile, FILE_COMMON);
       
-      if(fileExists)
+      if(mainFileExists)
       {
-         // ❌ CRÍTICO: Arquivo existe mas falhou ao carregar!
-         // NÃO inicializar memória vazia - pode ser erro temporário
-         Print("❌ ERRO CRÍTICO: Arquivo existe mas falhou ao carregar!");
-         Print("❌ NÃO inicializando memória vazia para proteger dados existentes!");
-         Print("❌ Arquivo principal: ", mainFile, " existe=", FileIsExist(mainFile, FILE_COMMON));
-         Print("❌ Arquivo backup: ", backupFile, " existe=", FileIsExist(backupFile, FILE_COMMON));
-         Print("❌ Tente recarregar o EA ou verifique permissões de arquivo");
+         Print("⚠️ Arquivo principal existe mas falhou ao carregar: ", mainFile);
+         Print("🔄 Tentando carregar de arquivos de backup...");
          
-         // Mantém estado não inicializado para evitar sobrescrever
-         g_memoryInitialized = false;
-         return INIT_FAILED; // Falha na inicialização para evitar perda de dados
+         // Tentar carregar de backups
+         bool loadedFromBackup = false;
+         for(int i = 0; i < MaxBackupFiles && !loadedFromBackup; i++)
+         {
+            string backupFile = GetBackupFileName(i);
+            if(FileIsExist(backupFile, FILE_COMMON))
+            {
+               Print("📂 Tentando backup #", i, ": ", backupFile);
+               if(LoadBrainFromFile(backupFile))
+               {
+                  Print("✅ Memória carregada com sucesso do backup #", i);
+                  loadedFromBackup = true;
+                  g_memoryInitialized = true;
+                  
+                  // Salvar como arquivo principal para próxima vez
+                  SaveBrainToFile(mainFile);
+                  Print("💾 Backup restaurado como arquivo principal");
+                  break;
+               }
+            }
+         }
+         
+         if(!loadedFromBackup)
+         {
+            // ⚠️ TODOS os arquivos falharam - CONTINUAR com memória vazia
+            Print("⚠️⚠️⚠️ AVISO CRÍTICO: Falha ao carregar arquivo principal E backups!");
+            Print("⚠️ Robô continuará operando com MEMÓRIA VAZIA");
+            Print("⚠️ Aprendizado anterior foi PERDIDO - começando do zero");
+            Print("⚠️ Verifique arquivos em: ", TerminalInfoString(TERMINAL_DATA_PATH), "\\MQL5\\Files\\Common\\");
+            
+            // Continuar com memória vazia - NÃO retornar INIT_FAILED
+            // (Permite que robô opere, mesmo sem memória anterior)
+         }
       }
       
       // ✅ Arquivo realmente não existe - pode inicializar nova memória
