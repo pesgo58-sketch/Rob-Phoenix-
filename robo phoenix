@@ -7198,23 +7198,11 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
       int losses = g_stateLosses[state];
       bool isBlocked = g_stateBlocked[state];
       
-      // ✅ FIX: Incluir lucro flutuante de posições abertas
-      double profit = g_stateProfitSum[state]; // Lucro realizado (trades fechados)
-      
-      // Adicionar lucro flutuante de posições abertas neste estado
-      for(int p = PositionsTotal() - 1; p >= 0; p--)
-      {
-         if(PositionSelectByTicket(PositionGetTicket(p)))
-         {
-            if(PositionGetString(POSITION_SYMBOL) == _Symbol)
-            {
-               // Verificar se posição foi aberta neste estado (comparar magic number ou outra lógica)
-               // Por simplicidade, vamos adicionar todo lucro flutuante ao estado atual
-               profit += PositionGetDouble(POSITION_PROFIT);
-               break; // Adicionar apenas uma vez por estado
-            }
-         }
-      }
+      // ✅ FIX #25: Usar APENAS lucro realizado (trades fechados)
+      // REMOVIDO: Lucro flutuante - causava bug onde TODOS estados tinham mesmo valor
+      // Lucro flutuante não pode ser atribuído corretamente a estados específicos
+      // pois robô não rastreia qual estado abriu cada posição
+      double profit = g_stateProfitSum[state]; // Lucro REALIZADO quando trades fecham
       
       sortedStates[i][0] = state;
       sortedStates[i][1] = visits;
@@ -7317,16 +7305,8 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          }
       }
       
-      // Separar lucro realizado vs total (com flutuante)
-      double realizedProfit = g_stateProfitSum[state];
+      // ✅ FIX #25: Mostrar apenas lucro realizado (sem flutuante)
       string profitInfo = "Lucro: " + DoubleToString(profit, 2);
-      
-      // Se há diferença entre total e realizado, mostrar ambos
-      if(MathAbs(profit - realizedProfit) > 0.01)
-      {
-         profitInfo += " (Realizado: " + DoubleToString(realizedProfit, 2) + 
-                      ", Flutuante: " + DoubleToString(profit - realizedProfit, 2) + ")";
-      }
       
       string stateLine = IntegerToString(i+1) + ". Estado " + IntegerToString(state) + 
                         ": " + IntegerToString(visits) + " visitas | " + 
