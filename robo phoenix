@@ -327,8 +327,35 @@ input bool   SaveAfterEachTrade       = true;         // ✅ NOVO: Salvar após 
 input bool   EnablePeriodicAutoSave   = true;         // ✅ NOVO: Salvamento periódico automático
 input int    PeriodicSaveMinutes      = 15;           // ✅ NOVO: Salvar a cada X minutos
 
-input group "──── 📄 EXPORTAÇÃO TEXTO ────";
-input bool   EnableTextExport         = false;        // Habilitar export texto (apenas binário recomendado)
+// ════════════════════════════════════════════════════════════════════════════
+// 📄 EXPORTAÇÃO TEXTO - O QUE É E QUANDO USAR
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ❓ O QUE FAZ?
+//    Gera arquivo .txt legível com todos os estados, Q-values e estatísticas
+//    Exemplo: "Estado 0: 15 visitas, 9 wins, 6 losses, WR=60%, Q[BUY]=1.23"
+//
+// ⚠️ POR QUE ESTÁ DESLIGADO (false) POR PADRÃO?
+//    ❌ MUITO LENTO: Pode levar 30-60 segundos para gerar
+//    ❌ ARQUIVO ENORME: 5-50MB dependendo dos estados descobertos  
+//    ❌ PODE TRAVAR: Durante salvamento, MT5 pode fechar forçado
+//    ❌ NÃO É USADO: Robô NÃO carrega de .txt, apenas .bin
+//    ❌ CAUSA PROBLEMAS: Arquivos .bin podem corromper durante .txt lento
+//
+// ✅ QUANDO HABILITAR?
+//    Apenas para ANÁLISE MANUAL dos estados (ver quais têm melhor WR)
+//    RECOMENDAÇÃO: Habilite, gere 1 arquivo, depois DESLIGUE
+//    NÃO deixe ativo durante operação normal!
+//
+// 💾 SISTEMA BINÁRIO (.bin) É SUPERIOR:
+//    ✅ Rápido (100ms vs 60s)
+//    ✅ Compacto (500KB vs 50MB)
+//    ✅ Confiável (3 backups automáticos)
+//    ✅ Usado pelo robô para carregar memória
+//
+// ════════════════════════════════════════════════════════════════════════════
+input group "──── 📄 EXPORTAÇÃO TEXTO (NÃO RECOMENDADO) ────";
+input bool   EnableTextExport         = false;        // ⚠️ MANTER false - apenas para análise manual
 input int    TextExportMinInterval    = 60;           // Intervalo mínimo (min)
 input bool   ExportAllStates          = false;        // Exportar todos estados
 input bool   IncludeQValues           = true;         // Incluir Q-values
