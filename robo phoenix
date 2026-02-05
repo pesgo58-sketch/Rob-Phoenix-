@@ -2013,6 +2013,52 @@ bool LoadBrainFromFile(string filename)
       }
    }
    
+   // ✅ FIX #24: Se carregou mais estados que MaxMemoryStates, reorganizar IMEDIATAMENTE
+   // Isso evita oscilação: arquivo pode ter 150 estados mas cache só comporta 100
+   if(g_activeStatesCount > MaxMemoryStates)
+   {
+      Print("🔄 Arquivo contém ", g_activeStatesCount, " estados, mas MaxMemoryStates=", MaxMemoryStates);
+      Print("   Reorganizando para manter apenas ", MaxMemoryStates, " mais recentes...");
+      
+      // Coletar todos estados carregados em array temporário
+      int tempStates[];
+      ArrayResize(tempStates, g_activeStatesCount);
+      for(int i = 0; i < g_activeStatesCount; i++)
+      {
+         tempStates[i] = g_activeStates[i];
+      }
+      
+      // Ordenar por g_stateLastUpdate (mais recentes primeiro) - Bubble sort
+      for(int i = 0; i < g_activeStatesCount - 1; i++)
+      {
+         for(int j = i + 1; j < g_activeStatesCount; j++)
+         {
+            int stateA = tempStates[i];
+            int stateB = tempStates[j];
+            
+            // Ordenar decrescente (mais recente primeiro)
+            if(g_stateLastUpdate[stateB] > g_stateLastUpdate[stateA])
+            {
+               // Swap
+               tempStates[i] = stateB;
+               tempStates[j] = stateA;
+            }
+         }
+      }
+      
+      // Manter apenas os MaxMemoryStates mais recentes no cache
+      int originalCount = g_activeStatesCount;
+      g_activeStatesCount = MaxMemoryStates;
+      for(int i = 0; i < g_activeStatesCount; i++)
+      {
+         g_activeStates[i] = tempStates[i];
+      }
+      
+      Print("✅ Cache reorganizado com ", g_activeStatesCount, " estados MAIS RECENTES");
+      Print("   Total de estados descobertos preservados: ", originalCount);
+      Print("   ⚠️ ", (originalCount - g_activeStatesCount), " estados mais antigos fora do cache (mas preservados na memória)");
+   }
+   
    g_currentExplorationRate = FileReadDouble(h);
    g_tradesToday = FileReadInteger(h);
    g_consecutiveLosses = FileReadInteger(h);
