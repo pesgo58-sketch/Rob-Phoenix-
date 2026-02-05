@@ -254,6 +254,10 @@ input bool   EnableConfigSearch       = false;        // ✅ Ativar teste de con
 input int    TradesPerConfig          = 300;          // Trades por configuração
 input bool   UseBestConfigAfterTest   = true;         // Usar melhor config após teste
 
+input group "──── 📄 EXPORTAÇÃO TXT LOG ────";
+input bool   EnableTxtExport          = true;         // ✅ Exportar log de atividade em TXT
+input int    TxtExportInterval        = 10;           // Exportar a cada N trades
+
 // ──────────────────────────────────────────────────────────────────────
 // 📤 7. EXPORTAÇÃO E LOGS
 // ──────────────────────────────────────────────────────────────────────
@@ -953,6 +957,9 @@ void BlockState(int state)
               " | Bloqueios: ", g_stateBlockCount[state],
               " | Total bloq.: ", CountBlockedStates()+1, "/", g_activeStatesCount);
         
+        // ✅ NOVO: Exportar bloqueio de estado para TXT
+        ExportStateBlock(state, lossRate, visits);
+        
         g_memoryDirty = true;
         InvalidateHUDCache();
     }
@@ -976,12 +983,17 @@ void UnblockState(int state)
         g_stateBlocked[state] = false;
         g_stateLastUnblockTime[state] = TimeCurrent();
         
+        double winRate = CalculateWinRate(state);
+        
         Print("✅ ESTADO DESBLOQUEADO: ", state, 
               " | Visitas: ", g_stateVisits[state], 
               " | Vitórias: ", g_stateWins[state],
               " | Perdas: ", g_stateLosses[state],
-              " | Win Rate: ", DoubleToString(CalculateWinRate(state)*100, 1), "%",
+              " | Win Rate: ", DoubleToString(winRate*100, 1), "%",
               " | Total bloq.: ", CountBlockedStates()-1, "/", g_activeStatesCount);
+        
+        // ✅ NOVO: Exportar desbloqueio de estado para TXT
+        ExportStateUnblock(state, winRate, g_stateVisits[state]);
         
         g_memoryDirty = true;
         InvalidateHUDCache();
@@ -3526,6 +3538,7 @@ void UpdateConfigPerformance(bool wasWin, double profit)
             " | Win Rate=", DoubleToString(cfg.winRate*100, 1), "%",
             " | Avg/Trade=", DoubleToString(cfg.avgProfitPerTrade, 2));
       
+      int oldConfig = g_currentConfigIndex;
       g_currentConfigIndex++;
       g_tradesInCurrentConfig = 0;
       
@@ -3591,6 +3604,9 @@ void UpdateConfigPerformance(bool wasWin, double profit)
          Print("   RSI: ", next.rsiOversold, "/", next.rsiOverbought,
                " | ATR: ", next.atrPeriod, "/", DoubleToString(next.atrStopMult, 1),
                " | MACD: ", next.macdFast, "/", next.macdSlow, "/", next.macdSignal);
+         
+         // ✅ NOVO: Exportar mudança de configuração para TXT
+         ExportConfigChange(oldConfig, g_currentConfigIndex);
       }
    }
 }
@@ -5022,6 +5038,9 @@ void ExecuteAction(int action, int state)
    
    AddPositionToTrailingSystem((ulong)res.order);
    
+   // ✅ NOVO: Exportar abertura de trade para TXT
+   ExportTradeOpen(isBuy, price, sl_price, tp_price, desiredLot, state);
+   
    // ✅ MAE/MFE TRACKING: Adiciona posição ao rastreamento de eficiência
    int direction = isBuy ? 1 : -1;
    AddPositionTracking((ulong)res.order, price, sl_price, tp_price, direction);
@@ -5535,30 +5554,8 @@ double CalculateSLByPoints(bool isBuy, double entryPrice)
    
    int slPoints = FixedSL_Points;
    
-   // ✅ NOVO: Se config search ativo, usar ATR multiplicador
-   if(g_enableConfigSearch)
-   {
-      double rsiOB, rsiOS;
-      int atrPeriod;
-      double atrStopMult;
-      int macdF, macdS, macdSig;
-      GetCurrentConfigParams(rsiOB, rsiOS, atrPeriod, atrStopMult, macdF, macdS, macdSig);
-      
-      // Calcular ATR
-      double atr[];
-      ArraySetAsSeries(atr, true);
-      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1 && atr[0] > 0)
-      {
-         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-         if(point > 0)
-         {
-            // SL baseado em ATR × multiplicador
-            slPoints = (int)((atr[0] * atrStopMult) / point);
-            Print("🎯 SL ATR-based: ATR=", DoubleToString(atr[0], 5), 
-                  " × ", DoubleToString(atrStopMult, 1), " = ", slPoints, " pontos");
-         }
-      }
-   }
+   // ❌ REMOVIDO: Cálculo baseado em ATR (sempre usa pontos fixos agora)
+   // Usuário solicitou remoção dos stops adaptativos por ATR
    
    if(slPoints <= 0) return 0.0;
    
@@ -5587,30 +5584,8 @@ double CalculateTPByPoints(bool isBuy, double entryPrice)
    
    int tpPoints = FixedTP_Points;
    
-   // ✅ NOVO: Se config search ativo, usar ATR multiplicador (mesmo mult que SL)
-   if(g_enableConfigSearch)
-   {
-      double rsiOB, rsiOS;
-      int atrPeriod;
-      double atrStopMult;
-      int macdF, macdS, macdSig;
-      GetCurrentConfigParams(rsiOB, rsiOS, atrPeriod, atrStopMult, macdF, macdS, macdSig);
-      
-      // Calcular ATR
-      double atr[];
-      ArraySetAsSeries(atr, true);
-      if(CopyBuffer(g_atrHandle, 0, 0, 1, atr) >= 1 && atr[0] > 0)
-      {
-         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-         if(point > 0)
-         {
-            // TP baseado em ATR × multiplicador (pode usar mesmo ou maior)
-            tpPoints = (int)((atr[0] * atrStopMult) / point);
-            Print("🎯 TP ATR-based: ATR=", DoubleToString(atr[0], 5), 
-                  " × ", DoubleToString(atrStopMult, 1), " = ", tpPoints, " pontos");
-         }
-      }
-   }
+   // ❌ REMOVIDO: Cálculo baseado em ATR (sempre usa pontos fixos agora)
+   // Usuário solicitou remoção dos stops adaptativos por ATR
    
    if(tpPoints <= 0) return 0.0;
    
@@ -6256,6 +6231,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             
             // ✅ NOVO: Atualizar performance da configuração
             UpdateConfigPerformance(true, net_profit);
+            
+            // ✅ NOVO: Exportar fechamento de trade para TXT
+            double duration = TimeCurrent() - deal_time_open;
+            ExportTradeClose(true, net_profit, duration);
          }
          else 
          {
@@ -6268,6 +6247,17 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             
             // ✅ NOVO: Atualizar performance da configuração
             UpdateConfigPerformance(false, net_profit);
+            
+            // ✅ NOVO: Exportar fechamento de trade para TXT
+            double duration = TimeCurrent() - deal_time_open;
+            ExportTradeClose(false, net_profit, duration);
+         }
+         
+         // ✅ NOVO: Exportar resumo periódico
+         int totalTrades = g_totalWins + g_totalLosses;
+         if(totalTrades > 0 && totalTrades % TxtExportInterval == 0)
+         {
+            ExportPeriodicSummary();
          }
          
          // ✅ FIX: Avaliar bloqueio após QUALQUER trade (win ou loss), não só após perda
@@ -6527,6 +6517,107 @@ void UpdateMonthlyStats(double net_profit)
 }
 
 // Exporta relatório mensal/anual
+// ======================================================================
+// ✅✅✅ EXPORTAÇÃO TXT - LOG DE ATIVIDADE
+// ======================================================================
+
+void ExportActivityLog(string eventType, string details)
+{
+   if(!EnableTxtExport) return;
+   
+   string filename = "Phoenix_Activity_Log_" + _Symbol + ".txt";
+   
+   // Abrir em modo append para adicionar ao arquivo existente
+   int file = FileOpen(filename, FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(file == INVALID_HANDLE)
+   {
+      Print("❌ Erro ao abrir log de atividade: ", GetLastError());
+      return;
+   }
+   
+   // Ir para o final do arquivo
+   FileSeek(file, 0, SEEK_END);
+   
+   // Formatar linha do log
+   string timestamp = TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES|TIME_SECONDS);
+   string logLine = StringFormat("%s | %s | %s", timestamp, eventType, details);
+   
+   FileWrite(file, logLine);
+   FileClose(file);
+}
+
+void ExportTradeOpen(bool isBuy, double price, double sl, double tp, double lot, int state)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("DIR=%s | PRICE=%.5f | SL=%.5f | TP=%.5f | LOT=%.2f | STATE=%d",
+                                 isBuy ? "BUY" : "SELL", price, sl, tp, lot, state);
+   ExportActivityLog("TRADE_OPEN", details);
+}
+
+void ExportTradeClose(bool wasWin, double profit, double duration)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("RESULT=%s | PROFIT=%.2f | DURATION=%.1fh",
+                                 wasWin ? "WIN" : "LOSS", profit, duration/3600.0);
+   ExportActivityLog("TRADE_CLOSE", details);
+}
+
+void ExportConfigChange(int oldConfig, int newConfig)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("CONFIG: %d → %d", oldConfig, newConfig);
+   ExportActivityLog("CONFIG_CHANGE", details);
+}
+
+void ExportStateBlock(int state, double lossRate, int visits)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("STATE=%d | LOSS_RATE=%.1f%% | VISITS=%d",
+                                 state, lossRate*100, visits);
+   ExportActivityLog("STATE_BLOCKED", details);
+}
+
+void ExportStateUnblock(int state, double winRate, int visits)
+{
+   if(!EnableTxtExport) return;
+   
+   string details = StringFormat("STATE=%d | WIN_RATE=%.1f%% | VISITS=%d",
+                                 state, winRate*100, visits);
+   ExportActivityLog("STATE_UNBLOCKED", details);
+}
+
+void ExportPeriodicSummary()
+{
+   if(!EnableTxtExport) return;
+   
+   int blockedCount = 0;
+   int activeCount = 0;
+   
+   for(int i = 0; i < NUM_STATES; i++)
+   {
+      if(g_stateVisits[i] > 0)
+      {
+         activeCount++;
+         if(g_stateBlocked[i]) blockedCount++;
+      }
+   }
+   
+   double winRate = SafeDivide((double)g_totalWins, (double)(g_totalWins + g_totalLosses), 0.0);
+   
+   string details = StringFormat("TRADES=%d | WINS=%d | LOSSES=%d | WIN_RATE=%.1f%% | ACTIVE_STATES=%d | BLOCKED=%d",
+                                 g_totalWins + g_totalLosses, g_totalWins, g_totalLosses,
+                                 winRate*100, activeCount, blockedCount);
+   ExportActivityLog("SUMMARY", details);
+}
+
+// ======================================================================
+// ✅ EXPORTAÇÃO MENSAL
+// ======================================================================
+
 bool ExportMonthlyReport()
 {
    if(!g_monthlyStatsInitialized) return false;
