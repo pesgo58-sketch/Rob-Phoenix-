@@ -1608,6 +1608,45 @@ int CountBlockedStates()
    return count;
 }
 
+// ✅ NOVO: Função para mostrar status detalhado do sistema de bloqueio
+void PrintBlockingStatus()
+{
+   int totalBlocked = CountBlockedStates();
+   int totalActive = g_activeStatesCount;
+   double blockedRatio = SafeDivide((double)totalBlocked, (double)totalActive, 0.0);
+   double totalWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
+   
+   Print("╔═══════════════════════════════════════════════════════════════");
+   Print("║ 📊 STATUS DO SISTEMA DE BLOQUEIO");
+   Print("╠═══════════════════════════════════════════════════════════════");
+   Print("║ Estados Totais Possíveis: ", NUM_STATES);
+   Print("║ Estados Ativos (visitados): ", totalActive);
+   Print("║ Estados Bloqueados: ", totalBlocked, " (", DoubleToString(blockedRatio*100,1), "%)");
+   Print("║ Estados Disponíveis: ", totalActive - totalBlocked);
+   Print("║");
+   Print("║ Trades Totais: ", g_totalTrades);
+   Print("║ Vitórias: ", g_totalWins, " | Derrotas: ", g_totalLosses);
+   Print("║ Win Rate Geral: ", DoubleToString(totalWinRate*100,1), "%");
+   Print("║ Trades Hoje: ", g_tradesToday);
+   Print("║ Perdas Consecutivas: ", g_consecutiveLosses);
+   Print("║");
+   Print("║ THRESHOLDS ATUAIS:");
+   Print("║ - Visitas para bloquear: ", MinVisitsForBlockDecision);
+   Print("║ - Taxa perda para bloquear: ", DoubleToString(BlockLossRateThreshold*100,1), "%");
+   Print("║ - Win rate para desbloquear: ", DoubleToString(UnblockWinRateThreshold*100,1), "%");
+   Print("║");
+   if(blockedRatio > 0.8)
+      Print("║ ⚠️ ALERTA: >80% estados bloqueados - MODO EMERGÊNCIA ATIVO");
+   else if(blockedRatio > 0.5)
+      Print("║ ⚠️ ATENÇÃO: >50% estados bloqueados - considerar auto-unblock");
+   else if(blockedRatio > 0.3)
+      Print("║ ℹ️ INFO: 30-50% estados bloqueados - situação normal/alta");
+   else
+      Print("║ ✅ OK: <30% estados bloqueados - situação saudável");
+   Print("╚═══════════════════════════════════════════════════════════════");
+}
+
+
 // ======================================================================
 // ✅✅✅ FUNÇÕES DE MEMÓRIA PERSISTENTE (CORRIGIDAS)
 // ======================================================================
@@ -6379,16 +6418,8 @@ void OnTick()
       {
          DebugStuckStatesEnhanced();
          
-         // ✅ NOVO: Mostrar resumo do sistema de bloqueio a cada 50 barras
-         int totalBlocked = CountBlockedStates();
-         double blockedRatio = SafeDivide((double)totalBlocked, (double)g_activeStatesCount, 0.0);
-         double totalWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
-         
-         Print("📊 === RESUMO BLOQUEIO (Barra #", debugCounter, ") ===");
-         Print("   Estados ativos: ", g_activeStatesCount, " | Bloqueados: ", totalBlocked, 
-               " (", DoubleToString(blockedRatio*100,1), "%)");
-         Print("   Win Rate geral: ", DoubleToString(totalWinRate*100,1), "% (", g_totalWins, "/", g_totalTrades, ")");
-         Print("   Trades hoje: ", g_tradesToday, " | Consecutivas perdas: ", g_consecutiveLosses);
+         // ✅ NOVO: Mostrar resumo completo do sistema de bloqueio a cada 50 barras
+         PrintBlockingStatus();
       }
       
       // ✅ Desbloquear estados bons apenas após atingir limite mínimo de estados
@@ -6999,6 +7030,9 @@ int OnInit()
    {
       AutoUnblockGoodStates();
       TestBlockedStatesPeriodically();
+      
+      // ✅ NOVO: Mostrar status detalhado do sistema de bloqueio após inicialização
+      PrintBlockingStatus();
    }
 
    if(EnableMemoryExport) ExportAllMemoryFiles();
