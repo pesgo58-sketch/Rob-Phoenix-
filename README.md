@@ -3,6 +3,30 @@ robô Phoenix
 
 ## 🔧 Recent Updates
 
+### 2026-02-05: RSI+ATR+MACD Configuration Testing System ✨
+
+**NEW: Intelligent configuration testing that finds the best parameter combinations!**
+
+Instead of testing individual parameters, the system now tests **complete configurations** of RSI, ATR, and MACD working together.
+
+📚 **[Read the Configuration Testing Guide →](CONFIG_TESTING_GUIDE.md)**
+
+**Quick Start:**
+```
+EnableConfigSearch = true          // Activate system
+TradesPerConfig = 300              // Test each config for 300 trades
+UseBestConfigAfterTest = true      // Lock to winner
+```
+
+**What it does:**
+- Tests 4 pre-defined configurations (Base, Aggressive, Conservative, Loose)
+- Each config has RSI levels + ATR period/multiplier + MACD settings
+- Tracks performance: profit, win rate, avg profit per trade
+- Automatically selects and locks to the best performing configuration
+- ATR-based stops adapt to market volatility
+
+---
+
 ### 2026-02-05: MACD Integration & Adaptive Parameter Optimization ✨
 
 **Major new features added:**
