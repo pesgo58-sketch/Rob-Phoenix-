@@ -404,6 +404,7 @@ double g_stateProfitSqSum[];           // Soma de lucros ao quadrado por estado 
 int g_stateLastUpdate[];               // Último update de cada estado
 bool g_stateBlocked[];                 // Estados bloqueados por má performance
 datetime g_stateLastBlockTime[];       // Timestamp do último bloqueio
+datetime g_stateLastUnblockTime[];     // Timestamp do último desbloqueio (reativação)
 bool g_stateWasBlockedBefore[];        // Flag indicando se o estado já foi bloqueado anteriormente
 datetime g_stateBlockTime[];           // Timestamp de quando o estado foi bloqueado pela primeira vez
 int g_stateBlockCount[];               // Contador de quantas vezes o estado foi bloqueado
