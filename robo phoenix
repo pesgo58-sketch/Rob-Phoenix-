@@ -3516,15 +3516,18 @@ void UpdateConfigPerformance(bool wasWin, double profit)
 {
    if(!g_enableConfigSearch || g_configSearchCompleted) return;
    
-   RSIAtrMacdConfig &cfg = g_rsiAtrMacdConfigs[g_currentConfigIndex];
-   cfg.totalProfit += profit;
-   cfg.totalTrades++;
-   if(wasWin) cfg.wins++;
+   // MQL5 não suporta referências - usar índice diretamente
+   g_rsiAtrMacdConfigs[g_currentConfigIndex].totalProfit += profit;
+   g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades++;
+   if(wasWin) g_rsiAtrMacdConfigs[g_currentConfigIndex].wins++;
    
-   if(cfg.totalTrades > 0)
+   if(g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades > 0)
    {
-      cfg.avgProfitPerTrade = cfg.totalProfit / (double)cfg.totalTrades;
-      cfg.winRate = SafeDivide((double)cfg.wins, (double)cfg.totalTrades, 0.0);
+      g_rsiAtrMacdConfigs[g_currentConfigIndex].avgProfitPerTrade = 
+         g_rsiAtrMacdConfigs[g_currentConfigIndex].totalProfit / (double)g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades;
+      g_rsiAtrMacdConfigs[g_currentConfigIndex].winRate = 
+         SafeDivide((double)g_rsiAtrMacdConfigs[g_currentConfigIndex].wins, 
+                    (double)g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades, 0.0);
    }
    
    g_tradesInCurrentConfig++;
@@ -3533,10 +3536,10 @@ void UpdateConfigPerformance(bool wasWin, double profit)
    if(g_tradesInCurrentConfig >= g_tradesPerConfig)
    {
       Print("📊 Config ", g_currentConfigIndex, " testada: ",
-            " Trades=", cfg.totalTrades,
-            " | Lucro=", DoubleToString(cfg.totalProfit, 2),
-            " | Win Rate=", DoubleToString(cfg.winRate*100, 1), "%",
-            " | Avg/Trade=", DoubleToString(cfg.avgProfitPerTrade, 2));
+            " Trades=", g_rsiAtrMacdConfigs[g_currentConfigIndex].totalTrades,
+            " | Lucro=", DoubleToString(g_rsiAtrMacdConfigs[g_currentConfigIndex].totalProfit, 2),
+            " | Win Rate=", DoubleToString(g_rsiAtrMacdConfigs[g_currentConfigIndex].winRate*100, 1), "%",
+            " | Avg/Trade=", DoubleToString(g_rsiAtrMacdConfigs[g_currentConfigIndex].avgProfitPerTrade, 2));
       
       int oldConfig = g_currentConfigIndex;
       g_currentConfigIndex++;
@@ -3575,16 +3578,17 @@ void UpdateConfigPerformance(bool wasWin, double profit)
             g_currentConfigIndex = g_bestConfigIndex;
          }
          
-         RSIAtrMacdConfig &best = g_rsiAtrMacdConfigs[g_bestConfigIndex];
+         // MQL5 não suporta referências - usar índice diretamente
+         int bestIdx = g_bestConfigIndex;
          
          Print("🏆 MELHOR CONFIGURAÇÃO: Index=", g_bestConfigIndex);
-         Print("   RSI: ", best.rsiOversold, "/", best.rsiOverbought);
-         Print("   ATR: Período=", best.atrPeriod, " | Mult=", DoubleToString(best.atrStopMult, 1));
-         Print("   MACD: ", best.macdFast, "/", best.macdSlow, "/", best.macdSignal);
-         Print("   Lucro Total: ", DoubleToString(best.totalProfit, 2));
-         Print("   Trades: ", best.totalTrades);
-         Print("   Win Rate: ", DoubleToString(best.winRate*100, 1), "%");
-         Print("   Avg/Trade: ", DoubleToString(best.avgProfitPerTrade, 2));
+         Print("   RSI: ", g_rsiAtrMacdConfigs[bestIdx].rsiOversold, "/", g_rsiAtrMacdConfigs[bestIdx].rsiOverbought);
+         Print("   ATR: Período=", g_rsiAtrMacdConfigs[bestIdx].atrPeriod, " | Mult=", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].atrStopMult, 1));
+         Print("   MACD: ", g_rsiAtrMacdConfigs[bestIdx].macdFast, "/", g_rsiAtrMacdConfigs[bestIdx].macdSlow, "/", g_rsiAtrMacdConfigs[bestIdx].macdSignal);
+         Print("   Lucro Total: ", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].totalProfit, 2));
+         Print("   Trades: ", g_rsiAtrMacdConfigs[bestIdx].totalTrades);
+         Print("   Win Rate: ", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].winRate*100, 1), "%");
+         Print("   Avg/Trade: ", DoubleToString(g_rsiAtrMacdConfigs[bestIdx].avgProfitPerTrade, 2));
          
          if(g_useBestConfigAfterTest)
          {
@@ -3599,11 +3603,12 @@ void UpdateConfigPerformance(bool wasWin, double profit)
       }
       else
       {
-         RSIAtrMacdConfig &next = g_rsiAtrMacdConfigs[g_currentConfigIndex];
+         // MQL5 não suporta referências - usar índice diretamente
+         int nextIdx = g_currentConfigIndex;
          Print("🔄 Mudando para Config ", g_currentConfigIndex);
-         Print("   RSI: ", next.rsiOversold, "/", next.rsiOverbought,
-               " | ATR: ", next.atrPeriod, "/", DoubleToString(next.atrStopMult, 1),
-               " | MACD: ", next.macdFast, "/", next.macdSlow, "/", next.macdSignal);
+         Print("   RSI: ", g_rsiAtrMacdConfigs[nextIdx].rsiOversold, "/", g_rsiAtrMacdConfigs[nextIdx].rsiOverbought,
+               " | ATR: ", g_rsiAtrMacdConfigs[nextIdx].atrPeriod, "/", DoubleToString(g_rsiAtrMacdConfigs[nextIdx].atrStopMult, 1),
+               " | MACD: ", g_rsiAtrMacdConfigs[nextIdx].macdFast, "/", g_rsiAtrMacdConfigs[nextIdx].macdSlow, "/", g_rsiAtrMacdConfigs[nextIdx].macdSignal);
          
          // ✅ NOVO: Exportar mudança de configuração para TXT
          ExportConfigChange(oldConfig, g_currentConfigIndex);
@@ -3617,27 +3622,27 @@ void GetCurrentConfigParams(double &rsiOB, double &rsiOS, int &atrPer, double &a
 {
    if(g_enableConfigSearch && !g_configSearchCompleted)
    {
-      // Usar config atual em teste
-      RSIAtrMacdConfig &cfg = g_rsiAtrMacdConfigs[g_currentConfigIndex];
-      rsiOB = cfg.rsiOverbought;
-      rsiOS = cfg.rsiOversold;
-      atrPer = cfg.atrPeriod;
-      atrMult = cfg.atrStopMult;
-      macdF = cfg.macdFast;
-      macdS = cfg.macdSlow;
-      macdSig = cfg.macdSignal;
+      // Usar config atual em teste - MQL5 não suporta referências
+      int cfgIdx = g_currentConfigIndex;
+      rsiOB = g_rsiAtrMacdConfigs[cfgIdx].rsiOverbought;
+      rsiOS = g_rsiAtrMacdConfigs[cfgIdx].rsiOversold;
+      atrPer = g_rsiAtrMacdConfigs[cfgIdx].atrPeriod;
+      atrMult = g_rsiAtrMacdConfigs[cfgIdx].atrStopMult;
+      macdF = g_rsiAtrMacdConfigs[cfgIdx].macdFast;
+      macdS = g_rsiAtrMacdConfigs[cfgIdx].macdSlow;
+      macdSig = g_rsiAtrMacdConfigs[cfgIdx].macdSignal;
    }
    else if(g_enableConfigSearch && g_configSearchCompleted && g_useBestConfigAfterTest)
    {
-      // Usar melhor config encontrada
-      RSIAtrMacdConfig &cfg = g_rsiAtrMacdConfigs[g_bestConfigIndex];
-      rsiOB = cfg.rsiOverbought;
-      rsiOS = cfg.rsiOversold;
-      atrPer = cfg.atrPeriod;
-      atrMult = cfg.atrStopMult;
-      macdF = cfg.macdFast;
-      macdS = cfg.macdSlow;
-      macdSig = cfg.macdSignal;
+      // Usar melhor config encontrada - MQL5 não suporta referências
+      int cfgIdx = g_bestConfigIndex;
+      rsiOB = g_rsiAtrMacdConfigs[cfgIdx].rsiOverbought;
+      rsiOS = g_rsiAtrMacdConfigs[cfgIdx].rsiOversold;
+      atrPer = g_rsiAtrMacdConfigs[cfgIdx].atrPeriod;
+      atrMult = g_rsiAtrMacdConfigs[cfgIdx].atrStopMult;
+      macdF = g_rsiAtrMacdConfigs[cfgIdx].macdFast;
+      macdS = g_rsiAtrMacdConfigs[cfgIdx].macdSlow;
+      macdSig = g_rsiAtrMacdConfigs[cfgIdx].macdSignal;
    }
    else
    {
@@ -6126,6 +6131,27 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
    long entry_type = HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
    if(entry_type != DEAL_ENTRY_OUT) return;
+   
+   // ✅ NOVO: Obter tempo de abertura e fechamento para calcular duração
+   // Pegar position_id para encontrar o deal de entrada
+   ulong position_id = HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+   datetime deal_time_open = 0;
+   datetime deal_time_close = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
+   
+   // Buscar deal de entrada (DEAL_ENTRY_IN) com mesmo position_id
+   int total_deals = HistoryDealsTotal();
+   for(int i = 0; i < total_deals; i++)
+   {
+      ulong dt = HistoryDealGetTicket(i);
+      if(HistoryDealGetInteger(dt, DEAL_POSITION_ID) == position_id)
+      {
+         if(HistoryDealGetInteger(dt, DEAL_ENTRY) == DEAL_ENTRY_IN)
+         {
+            deal_time_open = (datetime)HistoryDealGetInteger(dt, DEAL_TIME);
+            break;
+         }
+      }
+   }
 
    // DEBUG: Logar todos os detalhes
    Print("=== ONTRADETRANSACTION CHAMADO ===");
@@ -6233,8 +6259,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             UpdateConfigPerformance(true, net_profit);
             
             // ✅ NOVO: Exportar fechamento de trade para TXT
-            double duration = TimeCurrent() - deal_time_open;
-            ExportTradeClose(true, net_profit, duration);
+            double duration_hours = 0.0;
+            if(deal_time_open > 0)
+               duration_hours = (double)(deal_time_close - deal_time_open) / 3600.0; // Converter para horas
+            ExportTradeClose(true, net_profit, duration_hours);
          }
          else 
          {
@@ -6249,8 +6277,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             UpdateConfigPerformance(false, net_profit);
             
             // ✅ NOVO: Exportar fechamento de trade para TXT
-            double duration = TimeCurrent() - deal_time_open;
-            ExportTradeClose(false, net_profit, duration);
+            double duration_hours = 0.0;
+            if(deal_time_open > 0)
+               duration_hours = (double)(deal_time_close - deal_time_open) / 3600.0; // Converter para horas
+            ExportTradeClose(false, net_profit, duration_hours);
          }
          
          // ✅ NOVO: Exportar resumo periódico
