@@ -7,6 +7,34 @@
 //|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
 //|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
+//|                                                                  |
+//| ===============================================================  |
+//| 📚 SISTEMA DE BLOQUEIO E APRENDIZADO - DOCUMENTAÇÃO             |
+//| ===============================================================  |
+//|                                                                  |
+//| O robô usa Q-Learning com bloqueio inteligente de estados ruins:|
+//|                                                                  |
+//| THRESHOLDS DE BLOQUEIO (ajustados para evitar over-blocking):   |
+//|   • MinVisitsForBlockDecision = 20 visitas (antes: 30)          |
+//|   • BlockLossRateThreshold = 70% perdas (antes: 80%)            |
+//|   • UnblockWinRateThreshold = 45% vitórias (antes: 55%)         |
+//|                                                                  |
+//| SELEÇÃO DE AÇÃO (NOP vs BUY/SELL):                              |
+//|   • Estado bloqueado → NOP (a menos que 80%+ estados bloq.)     |
+//|   • Win rate < 10% (com 20+ visitas) → NOP                      |
+//|   • NOP Q-value 8x melhor que melhor ação → NOP                 |
+//|   • Melhor ação Q ≤ -100 → NOP                                  |
+//|                                                                  |
+//| PROTEÇÕES ANTI-TRAVAMENTO:                                       |
+//|   • Cooldown bloqueio/desbloqueio: 30min (antes: 1h)           |
+//|   • Se 50%+ estados bloqueados → auto-unblock tentado           |
+//|   • Se 80%+ estados bloqueados → modo emergência (ignora bloq.) |
+//|   • Avaliação periódica de estados a cada 60 segundos           |
+//|                                                                  |
+//| RESET DE MEMÓRIA (se necessário):                                |
+//|   1. Deletar arquivo: MQL5/Files/Phoenix_Files/Backups/*.bin   |
+//|   2. Reiniciar EA - iniciará com memória limpa                  |
+//|                                                                  |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
@@ -4000,22 +4028,37 @@ int ChooseAction(int state)
    
    if(IsStateBlocked(state))
    {
-      // ✅ MELHOR DEBUG: Mostrar estatísticas do estado bloqueado
-      int visits = g_stateVisits[state];
-      int wins = g_stateWins[state];
-      int losses = g_stateLosses[state];
-      double winRate = CalculateWinRate(state);
-      double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
+      // ✅ SAFETY: Se muitos estados bloqueados, permitir trading mesmo assim com aviso
+      int totalBlocked = CountBlockedStates();
+      double blockedRatio = SafeDivide((double)totalBlocked, (double)g_activeStatesCount, 0.0);
       
-      Print("⛔ Estado ", state, " BLOQUEADO | Visits=", visits, 
-            " | Wins=", wins, " | Losses=", losses,
-            " | WinRate=", DoubleToString(winRate*100,1), "%",
-            " | LossRate=", DoubleToString(lossRate*100,1), "%",
-            " | Total Bloqueados=", CountBlockedStates());
-      
-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (WR: %.1f%%, %d/%d bloq.)", 
-                                      state, winRate*100, CountBlockedStates(), NUM_STATES);
-      return 0;
+      // Se mais de 80% dos estados ativos estão bloqueados, permitir trading de emergência
+      if(blockedRatio > 0.80 && g_activeStatesCount > 20)
+      {
+         Print("⚠️ MODO EMERGÊNCIA: ", DoubleToString(blockedRatio*100,1), "% estados bloqueados (", 
+               totalBlocked, "/", g_activeStatesCount, ") - PERMITINDO TRADING do estado ", state);
+         g_statusMessage = StringFormat("⚠️ EMERGÊNCIA: Estado %d permitido apesar de bloqueado", state);
+         // Continuar para escolha de ação normal
+      }
+      else
+      {
+         // ✅ DEBUG: Mostrar estatísticas do estado bloqueado
+         int visits = g_stateVisits[state];
+         int wins = g_stateWins[state];
+         int losses = g_stateLosses[state];
+         double winRate = CalculateWinRate(state);
+         double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
+         
+         Print("⛔ Estado ", state, " BLOQUEADO | Visits=", visits, 
+               " | Wins=", wins, " | Losses=", losses,
+               " | WinRate=", DoubleToString(winRate*100,1), "%",
+               " | LossRate=", DoubleToString(lossRate*100,1), "%",
+               " | Total Bloqueados=", totalBlocked, "/", g_activeStatesCount);
+         
+         g_statusMessage = StringFormat("⛔ Estado %d bloqueado (WR: %.1f%%, %d/%d bloq.)", 
+                                         state, winRate*100, totalBlocked, g_activeStatesCount);
+         return 0;
+      }
    }
    
    if(ArraySize(g_Q) <= state * NUM_ACTIONS + 2)
@@ -6335,6 +6378,17 @@ void OnTick()
       if(debugCounter % 50 == 0)
       {
          DebugStuckStatesEnhanced();
+         
+         // ✅ NOVO: Mostrar resumo do sistema de bloqueio a cada 50 barras
+         int totalBlocked = CountBlockedStates();
+         double blockedRatio = SafeDivide((double)totalBlocked, (double)g_activeStatesCount, 0.0);
+         double totalWinRate = SafeDivide((double)g_totalWins, (double)g_totalTrades, 0.0);
+         
+         Print("📊 === RESUMO BLOQUEIO (Barra #", debugCounter, ") ===");
+         Print("   Estados ativos: ", g_activeStatesCount, " | Bloqueados: ", totalBlocked, 
+               " (", DoubleToString(blockedRatio*100,1), "%)");
+         Print("   Win Rate geral: ", DoubleToString(totalWinRate*100,1), "% (", g_totalWins, "/", g_totalTrades, ")");
+         Print("   Trades hoje: ", g_tradesToday, " | Consecutivas perdas: ", g_consecutiveLosses);
       }
       
       // ✅ Desbloquear estados bons apenas após atingir limite mínimo de estados
