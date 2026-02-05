@@ -299,6 +299,14 @@ input double StateBlockThreshold      = 0.20;         // Win rate mínimo para N
 input double BlockLossRateThreshold   = 0.60;         // Taxa perda para bloquear (REDUZIDO de 0.80 → 0.60)
 input int    MinVisitsForBlockDecision    = 10;       // Visitas mín. decisão bloqueio (REDUZIDO de 30 → 10)
 input bool   AggressiveLearningMode       = false;         // Modo aprendizado agressivo (MinVisits=5, LossRate=50%)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔄 REATIVAÇÃO DE ESTADOS BLOQUEADOS (NOVO)
+// ═══════════════════════════════════════════════════════════════════════════
+input bool   EnableStateReactivation  = false;        // ⚠️ Habilitar reativação de estados bloqueados
+input int    ReactivationDays         = 30;           // Dias após bloqueio para reativar
+input double ReactivationWinRate      = 0.45;         // Win rate mínimo para reativar antecipadamente
+
 input bool   EnableBlockingDebugLogs  = false;        // Habilitar logs detalhados de bloqueio
 
 input group "──── 🎯 CLASSIFICAÇÃO DE QUALIDADE ────";
@@ -818,7 +826,79 @@ void BlockState(int state)
     }
 }
 
-// ✅✅✅ 2️⃣ ESTADOS BLOQUEADOS PERMANECEM BLOQUEADOS PERMANENTEMENTE
+// ══════════════════════════════════════════════════════════════════════
+// 🔄 FUNÇÃO: Reativar Estados Bloqueados (SE HABILITADO)
+// ══════════════════════════════════════════════════════════════════════
+void ReactivateStatesIfEnabled()
+{
+   if(!EnableStateReactivation)
+   {
+      return;  // Reativação desabilitada
+   }
+   
+   int reactivated = 0;
+   datetime currentTime = TimeCurrent();
+   
+   for(int state = 0; state < NUM_STATES; state++)
+   {
+      if(!g_stateBlocked[state]) continue;  // Não está bloqueado
+      
+      int visits = g_stateVisits[state];
+      if(visits < MinVisitsForBlockDecision) continue;  // Poucas visitas
+      
+      int wins = g_stateWins[state];
+      double winRate = SafeDivide((double)wins, (double)visits, 0.0);
+      
+      // Critério 1: Win rate melhorou para >= threshold
+      if(winRate >= ReactivationWinRate)
+      {
+         g_stateBlocked[state] = false;
+         g_stateLastUnblockTime[state] = currentTime;
+         reactivated++;
+         
+         if(EnableBlockingDebugLogs)
+         {
+            Print("🔄 REATIVADO (WinRate): Estado ", state,
+                  " | Visitas: ", visits,
+                  " | WinRate: ", DoubleToString(winRate*100, 1), "%");
+         }
+         continue;
+      }
+      
+      // Critério 2: Passou tempo suficiente desde bloqueio
+      if(ReactivationDays > 0)
+      {
+         datetime blockTime = g_stateBlockTime[state];
+         if(blockTime > 0)
+         {
+            int daysSinceBlock = (int)((currentTime - blockTime) / 86400);
+            
+            if(daysSinceBlock >= ReactivationDays)
+            {
+               g_stateBlocked[state] = false;
+               g_stateLastUnblockTime[state] = currentTime;
+               reactivated++;
+               
+               if(EnableBlockingDebugLogs)
+               {
+                  Print("🔄 REATIVADO (Tempo): Estado ", state,
+                        " | Dias desde bloqueio: ", daysSinceBlock,
+                        " | WinRate: ", DoubleToString(winRate*100, 1), "%");
+               }
+            }
+         }
+      }
+   }
+   
+   if(reactivated > 0)
+   {
+      Print("✅ ", reactivated, " estados reativados (EnableStateReactivation=true)");
+      InvalidateHUDCache();  // Atualizar HUD
+      g_memoryDirty = true;  // Salvar mudanças
+   }
+}
+
+// ✅✅✅ 2️⃣ ESTADOS BLOQUEADOS PERMANECEM BLOQUEADOS PERMANENTEMENTE (SE REATIVAÇÃO DESABILITADA)
 // Sem função de desbloqueio - conforme solicitado pelo usuário
 
 
@@ -3187,12 +3267,13 @@ void UpdateHUDLight()
    }
    
    // ✅ EXIBIR CLASSIFICAÇÃO DE QUALIDADE NO HUD
+   // 🔧 CORREÇÃO: Usar blockedStates (contagem real) ao invés de g_blockedStatesCount (por qualidade)
    string qualityText = StringFormat("   Qualidade: ELITE=%d | BONS=%d | NEUTROS=%d | RUINS=%d | BLOQ=%d",
                                      g_eliteStatesCount,
                                      g_goodStatesCount,
                                      g_neutralStatesCount,
                                      g_badStatesCount,
-                                     g_blockedStatesCount);
+                                     blockedStates);  // ← USAR CONTAGEM REAL
    ObjectSetString(0, "HUD_Quality", OBJPROP_TEXT, qualityText);
    
    string directionIcon = GetDirectionIconFast(currentDir);
@@ -6756,6 +6837,9 @@ void OnTick()
    if(EnableUnifiedBlockingSystem)
    {
       EvaluateAllActiveStates();
+      
+      // 🔄 NOVO: Reativar estados bloqueados (se habilitado)
+      ReactivateStatesIfEnabled();
    }
 
    if(current_bar_time != last_bar_time)
