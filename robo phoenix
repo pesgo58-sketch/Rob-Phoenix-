@@ -1571,45 +1571,21 @@ void CleanMemory()
    
    g_memoryCleanCounter = 0;
    
-   Print("🧹 LIMPANDO MEMÓRIA...");
+   Print("🧹 REORGANIZANDO MEMÓRIA...");
    
-   int cleaned = 0;
-   int kept = 0;
+   // 🚨 FIX CRÍTICO: Não remover estados descobertos, apenas reorganizar lista
+   // Estados com visitas > 0 são informação valiosa, mesmo com poucas visitas
+   // Remover estados causa "redescoberta" e inconsistência
    
-   for(int state = 0; state < NUM_STATES; state++)
-   {
-      if(g_stateVisits[state] > 0)
-      {
-         if(g_stateVisits[state] < 3 && 
-            (g_totalTrades - g_stateLastUpdate[state]) > 100)
-         {
-            g_stateVisits[state] = 0;
-            g_stateLosses[state] = 0;
-            g_stateWins[state] = 0;
-            g_stateLastUpdate[state] = 0;
-            g_stateLastBlockTime[state] = 0;
-            
-            for(int a = 0; a < NUM_ACTIONS; a++)
-            {
-               g_Q[state * NUM_ACTIONS + a] = 0.0;
-            }
-            
-            g_stateBlocked[state] = false;
-            
-            cleaned++;
-         }
-         else
-         {
-            kept++;
-         }
-      }
-   }
+   int totalStatesWithVisits = 0;
    
+   // Recontar estados ativos (não remover nenhum)
    g_activeStatesCount = 0;
    for(int state = 0; state < NUM_STATES; state++)
    {
       if(g_stateVisits[state] > 0)
       {
+         totalStatesWithVisits++;
          if(g_activeStatesCount < MaxMemoryStates)
          {
             g_activeStates[g_activeStatesCount] = state;
@@ -1618,9 +1594,10 @@ void CleanMemory()
       }
    }
    
-   Print("✅ Memória limpa: ", cleaned, " estados removidos, ", kept, " mantidos");
-   Print("   Estados ativos na memória: ", g_activeStatesCount);
+   Print("✅ Memória reorganizada: ", g_activeStatesCount, " estados ativos mantidos");
+   Print("   Total estados com visitas: ", totalStatesWithVisits);
    
+   // Salvar estado reorganizado
    SaveState();
 }
 
