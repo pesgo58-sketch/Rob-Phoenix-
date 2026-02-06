@@ -6005,6 +6005,9 @@ bool CanPyramid(bool isBuy)
       Print("❌ PIRAMIDAÇÃO: Limite de ", MaxPyramidPositions, " posições por direção atingido");
       return false;
    }
+   
+   return true;  // ✅ FIX #42: Fechar CanPyramid() corretamente
+}
 
 // ======================================================================
 // ✅ FIX #41: FUNÇÃO PARA EXTRAIR ESTADO DO TICKET
