@@ -1,15 +1,17 @@
 //+------------------------------------------------------------------+
-//|                         Phoenix_Trader_SIMPLIFIED.mq5            |
+//|                  Phoenix_Trader_v308_COMPLETE_35FIXES.mq5        |
+//|          VERSÃO COMPLETA COM 35 CORREÇÕES CRÍTICAS               |
 //|          SISTEMA SIMPLIFICADO - SEM ADX E BB                     |
-//|          APENAS RSI, MACD, ATR, MA, VOLUME                       |
+//|          + GERENCIAMENTO DE RISCO AVANÇADO PARA $100             |
+//|          + CIRCUIT BREAKERS DIÁRIO/SEMANAL                       |
 //|                  COM SISTEMA DE MEMÓRIA OTIMIZADA COMPLETA       |
 //|                      SISTEMA DE BLOQUEIO UNIFICADO              |
-//|                    Q-LEARNING PURO - SEM DECAY                   |
-//|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
+//|                    Q-LEARNING OTIMIZADO (α=0.1)                  |
+//|                  + 35 CORREÇÕES CRÍTICAS IMPLEMENTADAS          |
 //+------------------------------------------------------------------+
-#property copyright "Phoenix Trader"
+#property copyright "Phoenix Trader - 35 Critical Fixes Applied"
 #property link      ""
-#property version   "3.08"
+#property version   "3.08.35"
 
 // ══════════════════════════════════════════════════════════════════════
 // 📖 DOCUMENTAÇÃO DO SISTEMA DE BLOQUEIO E QUALIDADE DE ESTADOS
@@ -73,6 +75,104 @@
 // • BadWinRateThreshold: Win rate abaixo = RUIM (padrão: 35%)
 // • MinVisitsForBlockDecision: Visitas mínimas para bloquear (padrão: 30)
 // • BlockLossRateThreshold: Taxa de perda para bloquear (padrão: 80%)
+//
+// ══════════════════════════════════════════════════════════════════════
+// 🔧 35 CORREÇÕES CRÍTICAS APLICADAS (FIX #1-#35)
+// ══════════════════════════════════════════════════════════════════════
+//
+// GRUPO 1-7: FUNDAMENTOS (FIX #1-#25)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #1-7:   Sistema de bloqueio permanente + exploração mínima
+// ✅ #8-11:  Contabilidade precisa + salvamento completo
+// ✅ #12:    Auto-recuperação (INIT_FAILED removido)
+// ✅ #13-18: EnableTextExport otimizado (0s bloqueio)
+// ✅ #19:    Lucro flutuante incluído nos cálculos
+// ✅ #20-21: HUD correto + g_stateLastUnblockTime
+// ✅ #22:    Cache por recência (CleanMemory reorganiza)
+// ✅ #23:    Rankings usam g_stateProfitSum (valores reais)
+// ✅ #24:    LoadBrain reorganiza se > MaxMemoryStates
+// ✅ #25:    Bug de lucro flutuante resolvido
+//
+// GRUPO 8: ESTADOS ESTÁVEIS (FIX #26-27)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #26:    Redução para 144 estados (tentativa de estabilidade)
+// ✅ #27:    Reversão para 288 estados (preferência usuário)
+//
+// GRUPO 9: APRENDIZADO (FIX #28)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #28:    LearningRate 0.03 → 0.1 (aprende 3.3x mais rápido!)
+//
+// GRUPO 10: OSCILAÇÃO RESOLVIDA (FIX #29)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #29:    CleanMemory baseado em TRADES, não tempo
+//            g_memoryCleanCounter incrementa a cada trade
+//
+// GRUPO 11: CACHE LIMPO (FIX #30)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #30:    CleanMemory remove estados com 0 visitas
+//            Cache contém APENAS estados visitados
+//
+// GRUPO 12: VISITAS CORRETAS (FIX #31)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #31:    g_stateVisits incrementa ao CALCULAR estado
+//            NOPs agora contam como visitas
+//
+// GRUPO 13: DIAGNÓSTICO (FIX #32)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #32:    Busca minuciosa completa + logs de debug
+//            Diagnóstico preciso de problemas
+//
+// GRUPO 14: BLOQUEIO FUNCIONAL (FIX #33)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #33:    Cooldown de 1h REMOVIDO
+//            Bloqueios imediatos ao atingir critério
+//
+// GRUPO 15: RANKINGS TEMPO REAL (FIX #34)
+// ────────────────────────────────────────────────────────────────────
+// ✅ #34:    UpdateStateRankings a cada 10 trades + 30 min
+//            Rankings sempre atualizados
+//
+// GRUPO 16: GERENCIAMENTO DE RISCO (FIX #35) ⭐⭐⭐
+// ────────────────────────────────────────────────────────────────────
+// ✅ #35:    Gerenciamento por % da banca (UsePercentRisk)
+//            - RiskPercentPerTrade: 1% da banca por trade
+//            - InitialBalance: $100 (banca inicial)
+//            - CalculateDynamicLotSize(): lote automático
+//
+//            Circuit Breakers:
+//            - EnableDailyCircuitBreaker: proteção diária
+//            - MaxDailyLossPercent: 5% ($5 de $100)
+//            - EnableWeeklyCircuitBreaker: proteção semanal
+//            - MaxWeeklyLossPercent: 10%
+//            - EnableDailyProfitTarget: meta de lucro
+//
+//            Risk Overlay por Qualidade:
+//            - ELITE: lote × 1.5 (150%)
+//            - GOOD: lote × 1.2 (120%)
+//            - NEUTRAL: lote × 1.0 (100%)
+//            - BAD: lote × 0.5 (50%)
+//            - BLOCKED: lote × 0.0 (0%)
+//
+//            ✅ IDEAL PARA INICIAR COM $100 COM SEGURANÇA TOTAL
+//
+// ══════════════════════════════════════════════════════════════════════
+// 🎯 CONFIGURAÇÃO RECOMENDADA PARA BANCA PEQUENA ($100)
+// ══════════════════════════════════════════════════════════════════════
+//
+// UsePercentRisk = true              // Gerenciamento por %
+// RiskPercentPerTrade = 1.0%         // $1 por trade
+// InitialBalance = 100.0             // Banca inicial
+// MaxAllowedLot = 0.30               // Limite para $100
+//
+// EnableDailyCircuitBreaker = true   // Proteção diária
+// MaxDailyLossPercent = 5.0%         // Máx -$5/dia
+//
+// EnableSmartLot = true               // Risk overlay ativo
+// SmartLotMultiplier = 1.2           // Moderado
+// UltraLotMultiplier = 1.5           // Elite moderado
+//
+// LearningRate = 0.1                 // Aprendizado 3.3x mais rápido
+// ExplorationRate = 0.35             // 35% exploração
 //
 // ══════════════════════════════════════════════════════════════════════
 
