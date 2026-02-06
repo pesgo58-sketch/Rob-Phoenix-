@@ -1633,6 +1633,10 @@ void AddActiveState(int state)
       {
          // Estado já existe - apenas atualiza timestamp
          g_stateLastUpdate[state] = g_totalTrades;
+         
+         // ✅ FIX #31: Incrementar visitas SEMPRE que estado é calculado
+         // NÃO apenas quando trade é executado (estava causando NOPs não serem contados)
+         g_stateVisits[state]++;
          return;
       }
    }
@@ -1647,6 +1651,10 @@ void AddActiveState(int state)
    {
       g_activeStates[g_activeStatesCount] = state;
       g_activeStatesCount++;
+      
+      // ✅ FIX #31: Inicializar visitas = 1 (primeira vez que estado é usado)
+      g_stateVisits[state] = 1;
+      g_stateLastUpdate[state] = g_totalTrades;
       
       // ✅ Só imprimir "NOVO" se realmente for novo (sem visitas anteriores)
       if(isNewState)
@@ -4461,15 +4469,10 @@ void ExecuteAction(int action, int state)
    g_lastLotUsed     = desiredLot;
    g_tradesToday++;
    
-   // 🚨 FIX CRÍTICO: Incrementar visitas IMEDIATAMENTE ao abrir trade
-   // Não esperar OnTradeTransaction que pode ser assíncrono ou falhar
-   // Isso garante que estados descobertos tenham contabilidade correta
-   if(state >= 0 && state < NUM_STATES)
-   {
-      g_stateVisits[state]++;
-      g_stateLastUpdate[state] = g_totalTrades;
-      Print("📊 VISITA REGISTRADA: Estado ", state, " agora tem ", g_stateVisits[state], " visitas");
-   }
+   // ❌ REMOVIDO: g_stateVisits[state]++ movido para AddActiveState()
+   // MOTIVO (FIX #31): Visitas devem ser contadas quando ESTADO É CALCULADO,
+   // não apenas quando trade é executado. NOPs também precisam contar visitas.
+   // Incremento agora em AddActiveState() que é chamado para TODOS estados calculados
    
    g_currentDirection = isBuy ? 1 : 2;
    g_positionsCount = GetTotalPositions();
