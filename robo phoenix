@@ -3124,7 +3124,7 @@ void CreateHUDObjects()
       ObjectSetString(0, "HUD_Title", OBJPROP_FONT, "Arial");
       ObjectSetInteger(0, "HUD_Title", OBJPROP_BACK, false);
       ObjectSetInteger(0, "HUD_Title", OBJPROP_SELECTABLE, false);
-      ObjectSetString(0, "HUD_Title", OBJPROP_TEXT, "PHOENIX TRADER v307F SUPER CORRIGIDO");
+      ObjectSetString(0, "HUD_Title", OBJPROP_TEXT, "PHOENIX TRADER v3.85");
       hudObjects[hudObjectCount++] = "HUD_Title";
       currentY += lineHeight;
    }
@@ -3457,7 +3457,7 @@ void UpdateHUDLight()
       cachedDirection = currentDir;
    }
    
-   string newTitle = "🛡️ PHOENIX TRADER v307F SUPER CORRIGIDO";
+   string newTitle = "🛡️ PHOENIX TRADER v3.85";
    ObjectSetString(0, "HUD_Title", OBJPROP_TEXT, newTitle);
    
    string newStates = StringFormat("Estados: %d/%d", visitedStates, NUM_STATES);
@@ -6529,12 +6529,121 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       {
          Print("💾 AUTO-SAVE: Memória salva após trade #", g_totalTrades);
          
-         // ✅ NOVO: Exportar relatório mensal após cada trade
-         ExportMonthlyReport();
+         // ✅ FIX #39: Exportar relatório mensal após cada trade
+         if(g_totalTrades % 10 == 0)  // A cada 10 trades para não sobrecarregar
+         {
+            ExportMonthlyReport();
+         }
       }
    }
    
    Print("=== FIM ONTRADETRANSACTION ===");
+}
+
+// ======================================================================
+// ✅ FIX #39: FUNÇÃO DE RELATÓRIO MENSAL
+// ======================================================================
+
+// Função auxiliar para nome do mês
+string MonthName(int month)
+{
+   switch(month)
+   {
+      case 1: return "Janeiro";
+      case 2: return "Fevereiro";
+      case 3: return "Março";
+      case 4: return "Abril";
+      case 5: return "Maio";
+      case 6: return "Junho";
+      case 7: return "Julho";
+      case 8: return "Agosto";
+      case 9: return "Setembro";
+      case 10: return "Outubro";
+      case 11: return "Novembro";
+      case 12: return "Dezembro";
+      default: return "Desconhecido";
+   }
+}
+
+// Exportar relatório mensal
+void ExportMonthlyReport()
+{
+   // Gerar nome do arquivo com data
+   datetime now = TimeCurrent();
+   MqlDateTime dt;
+   TimeToStruct(now, dt);
+   
+   string filename = StringFormat("Phoenix_Monthly_%04d_%02d.txt", 
+                                  dt.year, dt.mon);
+   
+   int h = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_COMMON);
+   
+   if(h == INVALID_HANDLE)
+   {
+      Print("❌ Erro ao criar relatório mensal: ", filename);
+      return;
+   }
+   
+   // Cabeçalho
+   FileWrite(h, "=================================================================");
+   FileWrite(h, "PHOENIX TRADER v3.85 - RELATÓRIO MENSAL");
+   FileWrite(h, "Gerado em: ", TimeToString(now, TIME_DATE|TIME_MINUTES));
+   FileWrite(h, "=================================================================");
+   FileWrite(h, "");
+   
+   // Estatísticas mensais dos últimos 12 meses
+   FileWrite(h, "📊 ESTATÍSTICAS MENSAIS (Últimos 12 meses)");
+   FileWrite(h, "----------------------------------------");
+   
+   int currentYear = dt.year - 2006;  // Index do ano (base 2006)
+   int currentMonth = dt.mon - 1;     // Index do mês (0-11)
+   
+   for(int i = 11; i >= 0; i--)  // Últimos 12 meses
+   {
+      int m = currentMonth - i;
+      int y = currentYear;
+      
+      while(m < 0)
+      {
+         m += 12;
+         y--;
+      }
+      
+      if(y >= 0 && y < 20 && m >= 0 && m < 12)
+      {
+         if(g_monthlyStats[y][m].totalTrades > 0)
+         {
+            FileWrite(h, "");
+            FileWrite(h, StringFormat("📅 %s/%04d", 
+                      MonthName(m+1), 2006+y));
+            FileWrite(h, StringFormat("   Trades: %d", 
+                      g_monthlyStats[y][m].totalTrades));
+            FileWrite(h, StringFormat("   Wins: %d", 
+                      g_monthlyStats[y][m].totalWins));
+            FileWrite(h, StringFormat("   Losses: %d", 
+                      g_monthlyStats[y][m].totalLosses));
+            FileWrite(h, StringFormat("   Lucro Total: %.2f", 
+                      g_monthlyStats[y][m].totalProfit));
+            
+            double monthWinRate = SafeDivide((double)g_monthlyStats[y][m].totalWins,
+                                            (double)g_monthlyStats[y][m].totalTrades, 0.0);
+            FileWrite(h, StringFormat("   Win Rate: %.1f%%", monthWinRate * 100.0));
+            
+            double avgProfit = SafeDivide(g_monthlyStats[y][m].totalProfit,
+                                         (double)g_monthlyStats[y][m].totalTrades, 0.0);
+            FileWrite(h, StringFormat("   Lucro Médio/Trade: %.2f", avgProfit));
+         }
+      }
+   }
+   
+   FileWrite(h, "");
+   FileWrite(h, "=================================================================");
+   FileWrite(h, "FIM DO RELATÓRIO MENSAL");
+   FileWrite(h, "=================================================================");
+   
+   FileClose(h);
+   
+   Print("✅ Relatório mensal criado: ", filename);
 }
 
 // ======================================================================
@@ -7153,7 +7262,7 @@ void CreateDailySummaryReport()
    FileWrite(file_handle, "");
    
    FileWrite(file_handle, "================================================================");
-   FileWrite(file_handle, "FIM DO RELATÓRIO - SISTEMA SUPER CORRIGIDO v307F");
+   FileWrite(file_handle, "FIM DO RELATÓRIO - PHOENIX TRADER v3.85");
    FileWrite(file_handle, "================================================================");
    
    FileClose(file_handle);
@@ -7200,7 +7309,7 @@ bool ExportAllMemoryFiles()
 }
 
 // ======================================================================
-// ✅✅✅ ✅✅✅ FUNÇÃO PRINCIPAL OnTick (COM SISTEMA SUPER CORRIGIDO E NOVAS FUNÇÕES)
+// ✅✅✅ ✅✅✅ FUNÇÃO PRINCIPAL OnTick (PHOENIX TRADER v3.85 - 39 Fixes)
 // ======================================================================
 void OnTick()
 {
@@ -7476,12 +7585,12 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    }
    
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "PHOENIX TRADER v307F - SISTEMA SUPER CORRIGIDO");
+   FileWrite(file_handle, "PHOENIX TRADER v3.85 - 39 Fixes Applied");
    FileWrite(file_handle, "Data/Hora: " + TimeToString(currentTime));
    FileWrite(file_handle, "Symbol: " + _Symbol + " | Timeframe: " + EnumToString((ENUM_TIMEFRAMES)_Period));
    FileWrite(file_handle, "=================================================================");
    FileWrite(file_handle, "");
-   FileWrite(file_handle, "🛡️ SISTEMA SUPER CORRIGIDO - MELHORIAS IMPLEMENTADAS");
+   FileWrite(file_handle, "🛡️ PHOENIX TRADER v3.85 - MELHORIAS IMPLEMENTADAS");
    FileWrite(file_handle, "----------------------------------------");
    FileWrite(file_handle, "✅ CORREÇÕES CRÍTICAS IMPLEMENTADAS:");
    FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (576 estados)");
@@ -7509,7 +7618,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    if(IncludeStatistics)
    {
       FileWrite(file_handle, "");
-      FileWrite(file_handle, "📊 ESTATÍSTICAS GERAIS (SISTEMA SUPER CORRIGIDO)");
+      FileWrite(file_handle, "📊 ESTATÍSTICAS GERAIS (PHOENIX TRADER v3.85)");
       FileWrite(file_handle, "----------------------------------------");
       
       string totalTrades = "Total de Trades REAIS: " + IntegerToString(g_totalTrades);
@@ -7679,7 +7788,44 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
          }
          else
          {
-            statusInfo = " [🚫 BLOQUEADO PERMANENTEMENTE]";
+            // ✅ FIX #39: Mostrar informações detalhadas do bloqueio
+            datetime blockTime = g_stateBlockTime[state];
+            string blockDate = "";
+            if(blockTime > 0)
+            {
+               blockDate = TimeToString(blockTime, TIME_DATE|TIME_MINUTES);
+            }
+            
+            // Determinar razão do bloqueio
+            string blockReason = "Critério: ";
+            int stateVisits = g_stateVisits[state];
+            int stateWins = g_stateWins[state];
+            int stateLosses = g_stateLosses[state];
+            
+            double stateWinRate = SafeDivide((double)stateWins, (double)stateVisits, 0.0) * 100.0;
+            double stateLossRate = SafeDivide((double)stateLosses, (double)stateVisits, 0.0) * 100.0;
+            
+            if(stateLossRate >= BlockLossRateThreshold * 100.0)
+            {
+               blockReason += StringFormat("LossRate %.1f%% >= %.0f%%", stateLossRate, BlockLossRateThreshold * 100.0);
+            }
+            else if(stateWinRate < MinWinRateThreshold * 100.0)
+            {
+               blockReason += StringFormat("WinRate %.1f%% < %.0f%%", stateWinRate, MinWinRateThreshold * 100.0);
+            }
+            else
+            {
+               blockReason += "Critérios múltiplos";
+            }
+            
+            if(blockDate != "")
+            {
+               statusInfo = StringFormat(" [🚫 BLOQUEADO em %s - %s]", blockDate, blockReason);
+            }
+            else
+            {
+               statusInfo = StringFormat(" [🚫 BLOQUEADO - %s]", blockReason);
+            }
          }
       }
       else
@@ -7709,7 +7855,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    
    FileWrite(file_handle, "");
    FileWrite(file_handle, "=================================================================");
-   FileWrite(file_handle, "FIM DA EXPORTAÇÃO - SISTEMA SUPER CORRIGIDO v307F");
+   FileWrite(file_handle, "FIM DA EXPORTAÇÃO - PHOENIX TRADER v3.85");
    FileWrite(file_handle, "=================================================================");
    
    FileClose(file_handle);
@@ -7738,7 +7884,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
 }
 
 // ======================================================================
-// ✅✅✅ ✅✅✅ OnInit (COM SISTEMA SUPER CORRIGIDO)
+// ✅✅✅ ✅✅✅ OnInit (PHOENIX TRADER v3.85 - 39 Fixes)
 // ======================================================================
 int OnInit()
 {
@@ -8017,7 +8163,7 @@ int OnInit()
    if(EnableMemoryExport) ExportAllMemoryFiles();
 
    Print("===============================================================");
-   Print("✅ PHOENIX TRADER V307F - SISTEMA SUPER CORRIGIDO V2");
+   Print("✅ PHOENIX TRADER V3.85 - 39 Fixes Applied");
    Print("===============================================================");
    Print("🔴 CORREÇÕES EXTREMAS IMPLEMENTADAS:");
    Print("   1. ✅ REMOÇÃO COMPLETA do limite de 10 visitas");
