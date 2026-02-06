@@ -5954,6 +5954,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    // ✅ FIX #29: Incrementar contador de limpeza A CADA TRADE
    g_memoryCleanCounter++;
    
+   // ✅ FIX #34: Atualizar ranking a cada 10 trades
+   if(g_totalTrades % 10 == 0)
+   {
+      UpdateStateRankings();
+   }
+   
    // ✅ NOVO: Atualizar estatísticas mensais
    UpdateMonthlyStats(net_profit);
    
@@ -6940,6 +6946,13 @@ void OnTick()
       
       // 🔄 NOVO: Reativar estados bloqueados (se habilitado)
       ReactivateStatesIfEnabled();
+   }
+   
+   // ✅ FIX #34: Atualizar ranking periodicamente (a cada 30 minutos)
+   datetime currentTime = TimeCurrent();
+   if(currentTime - g_lastRankingUpdate > 1800 || g_lastRankingUpdate == 0)
+   {
+      UpdateStateRankings();
    }
 
    if(current_bar_time != last_bar_time)
