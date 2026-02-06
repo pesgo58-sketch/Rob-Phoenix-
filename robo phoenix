@@ -6002,21 +6002,43 @@ int GetStateFromTicket(ulong ticket)
    // Obter comment do deal
    string comment = HistoryDealGetString(ticket, DEAL_COMMENT);
    
-   // ✅ FIX #46: Formato novo "S42" (comentário simplificado)
-   // Evita truncamento (limite MQL5 = 31 chars)
-   if(StringFind(comment, "S") == 0 && StringLen(comment) >= 2)
+   // ✅ FIX #48: Procurar "S" em QUALQUER posição (não só no início)
+   // Funciona com: "S42", "PHX_S42", " S42 ", etc.
+   int sPos = StringFind(comment, "S");
+   
+   if(sPos >= 0)  // "S" encontrado
    {
-      // Extrair número após "S"
-      // "S42" → "42"
-      string stateStr = StringSubstr(comment, 1);  // Pula "S"
-      int state = (int)StringToInteger(stateStr);
+      // Extrair substring a partir de "S"
+      string afterS = StringSubstr(comment, sPos + 1);
       
-      if(state >= 0 && state < NUM_STATES)
+      // Extrair apenas dígitos consecutivos
+      string stateStr = "";
+      for(int i = 0; i < StringLen(afterS); i++)
       {
-         return state;
+         string ch = StringSubstr(afterS, i, 1);
+         if(ch >= "0" && ch <= "9")
+         {
+            stateStr += ch;
+         }
+         else
+         {
+            break;  // Para no primeiro não-dígito
+         }
+      }
+      
+      if(StringLen(stateStr) > 0)
+      {
+         int state = (int)StringToInteger(stateStr);
+         
+         if(state >= 0 && state < NUM_STATES)
+         {
+            Print("✅ FIX #48: Estado ", state, " extraído do comment: '", comment, "'");
+            return state;
+         }
       }
    }
    
+   Print("⚠️ FIX #48: Falha ao extrair estado do comment: '", comment, "'");
    return -1;  // Estado não identificado
 }
 
@@ -6352,6 +6374,14 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    // ✅ FIX #41: Rastrear lucro/wins/losses POR ESTADO
    int closedState = GetStateFromTicket(deal_ticket);
    
+   // ✅ FIX #48: Usar g_lastTradeState como fallback se GetStateFromTicket falhar
+   if(closedState < 0 || closedState >= NUM_STATES)
+   {
+      Print("⚠️ FIX #48: GetStateFromTicket falhou (retornou ", closedState, 
+            "), usando g_lastTradeState: ", g_lastTradeState);
+      closedState = g_lastTradeState;
+   }
+   
    if(closedState >= 0 && closedState < NUM_STATES)
    {
       // Atualizar lucro do estado
@@ -6368,7 +6398,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       }
       
       // Log detalhado do rastreamento
-      Print("📊 FIX #45/#46: Estado ", closedState,
+      Print("📊 FIX #48: Estado ", closedState,
             " | Profit: ", DoubleToString(net_profit, 2),
             " | Total Estado: ", DoubleToString(g_stateProfitSum[closedState], 2),
             " | Wins: ", g_stateWins[closedState],
@@ -6376,7 +6406,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    }
    else
    {
-      Print("⚠️ Estado não identificado do ticket ", deal_ticket, " - usando g_lastTradeState: ", g_lastTradeState);
+      Print("❌ FIX #48: ERRO CRÍTICO! Estado inválido (", closedState, 
+            "), trade com profit ", net_profit, " NÃO rastreado!");
    }
    
    // ✅ FIX #34: Atualizar ranking a cada 10 trades
