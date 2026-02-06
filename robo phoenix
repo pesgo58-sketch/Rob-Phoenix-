@@ -103,8 +103,8 @@ CHistoryOrderInfo historyOrderInfo;
 // ✅✅✅ ATUALIZAÇÃO CRÍTICA: DISCRETIZAÇÃO DE ESTADO OTIMIZADA
 // ============================================================
 // Reduzindo para um número gerenciável de estados
-#define BINS_MA_DIST   2      // ✅ FIX #26: Reduzido de 3 para 2 (menos sensível)
-#define BINS_RSI       3      // ✅ FIX #26: Reduzido de 4 para 3 (menos oscilação)  
+#define BINS_MA_DIST   3      // 🔄 REVERT #27: Restaurado para 3 (preferência do usuário)
+#define BINS_RSI       4      // 🔄 REVERT #27: Restaurado para 4 (preferência do usuário)  
 // ✅ REMOVIDO: BINS_ADX (indicador ADX removido)
 // ✅ REMOVIDO: BINS_BBPOS (indicador BB removido)
 #define BINS_VOLATILITY 2     // Mantido 2
@@ -4793,20 +4793,22 @@ void UpdateStateRankings()
 // ✅ Função para calcular bucket RSI
 int GetRSIBucket(double rsiValue)
 {
-   // ✅ FIX #26: Reduzido de 4 para 3 níveis (menos sensível)
-   // Cortes mais amplos para evitar mudanças constantes de estado
-   if(rsiValue < 30) return 0;          // Oversold (< 30)
-   else if(rsiValue < 70) return 1;     // Neutro (30-70) ← ZONA AMPLA!
-   else return 2;                       // Overbought (>= 70)
+   // 🔄 REVERT #27: Restaurado buckets originais (288 estados)
+   // 4 níveis para maior granularidade conforme preferência do usuário
+   if(rsiValue < 25) return 0;          // Muito oversold (< 25)
+   else if(rsiValue < 40) return 1;     // Oversold (25-40)
+   else if(rsiValue < 50) return 2;     // Baixa (40-50)
+   else return 3;                       // Alta (>= 50)
 }
 
 // ✅ Função para calcular bucket MA Distance
 int GetMADistanceBucket(double maDistance)
 {
-   // ✅ FIX #26: Reduzido de 3 para 2 níveis (menos sensível)
-   // Corte mais distante de zero para evitar oscilações ao cruzar MA
-   if(maDistance < -0.5) return 0;       // Abaixo da MA (com margem)
-   else return 1;                        // Acima/neutro da MA
+   // 🔄 REVERT #27: Restaurado buckets originais (288 estados)
+   // 3 níveis para maior granularidade conforme preferência do usuário
+   if(maDistance < -1.5) return 0;       // Muito abaixo da MA
+   else if(maDistance < 0) return 1;     // Abaixo da MA
+   else return 2;                        // Acima da MA
 }
 
 // ✅ REMOVIDO: GetADXBucket() (indicador ADX removido)
