@@ -232,6 +232,21 @@ input double SmartLotMultiplier       = 1.8;          // Multiplicador lote norm
 input double UltraLotMultiplier       = 3.0;          // Multiplicador lote ultra
 input double MaxAllowedLot            = 1.0;          // Lote máximo permitido
 
+input group "──── 🎯 GERENCIAMENTO DE RISCO AVANÇADO (FIX #35) ────";
+input bool   UsePercentRisk           = false;        // Usar % da banca ao invés de lote fixo
+input double RiskPercentPerTrade      = 1.0;          // Risco por trade (% da banca)
+input double InitialBalance           = 100.0;        // Banca inicial para referência ($)
+input int    StopLossPipsForCalc      = 20;           // SL em pips para cálculo de lote
+input double MinLotAllowed            = 0.01;         // Lote mínimo absoluto
+
+input group "──── 🛡️ CIRCUIT BREAKERS (FIX #35) ────";
+input bool   EnableDailyCircuitBreaker    = true;    // Ativar circuit breaker diário
+input double MaxDailyLossPercent          = 5.0;     // Perda diária máxima (% da banca)
+input bool   EnableWeeklyCircuitBreaker   = false;   // Ativar circuit breaker semanal
+input double MaxWeeklyLossPercent         = 10.0;    // Perda semanal máxima (% da banca)
+input bool   EnableDailyProfitTarget      = false;   // Parar ao atingir meta diária
+input double DailyProfitTargetPercent     = 3.0;     // Meta de lucro diária (%)
+
 input group "──── 📊 PIRAMIDAÇÃO ────";
 input bool   EnablePyramiding         = true;         // Habilitar piramidação
 input int    MaxPyramidPositions      = 4;            // Máximo de posições pirâmide
@@ -533,6 +548,16 @@ int g_trackedPositionsCount = 0; // Contador de posições rastreadas
 int g_currentDirection = 0;
 int g_positionsCount = 0;
 datetime g_directionStartTime = 0;
+
+// ✅ FIX #35: Circuit Breakers e Gerenciamento de Risco
+datetime g_lastDayReset = 0;
+datetime g_lastWeekReset = 0;
+double   g_dailyProfit = 0.0;
+double   g_weeklyProfit = 0.0;
+bool     g_dailyCircuitBreakerActive = false;
+bool     g_weeklyCircuitBreakerActive = false;
+bool     g_dailyProfitTargetReached = false;
+double   g_sessionStartBalance = 0.0;
 
 // Controle de timing
 datetime g_lastEntryTime = 0;
@@ -4124,6 +4149,227 @@ int ChooseAction(int state)
 }
 
 // ======================================================================
+// 🎯 FIX #35: GERENCIAMENTO DE RISCO AVANÇADO
+// ======================================================================
+
+//+------------------------------------------------------------------+
+//| Calcula tamanho do lote baseado em % da banca (FIX #35)          |
+//+------------------------------------------------------------------+
+double CalculateDynamicLotSize(int state)
+{
+   double lot = LotSize;  // Valor padrão
+   
+   if(UsePercentRisk)
+   {
+      // Obter saldo da conta
+      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      if(balance <= 0) balance = InitialBalance;
+      
+      // Calcular risco em dólares
+      double riskAmount = balance * (RiskPercentPerTrade / 100.0);
+      
+      // Obter valor do pip
+      double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double pointValue = (tickValue / tickSize);
+      
+      // Calcular lote baseado no risco e stop loss
+      if(StopLossPipsForCalc > 0 && pointValue > 0)
+      {
+         double pipValue = pointValue * 10;  // 1 pip = 10 points
+         lot = riskAmount / (StopLossPipsForCalc * pipValue);
+      }
+      
+      // Aplicar limites
+      lot = MathMax(lot, MinLotAllowed);
+      lot = MathMin(lot, MaxAllowedLot);
+      
+      // Normalizar lote
+      double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+      double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+      
+      lot = MathMax(lot, minLot);
+      lot = MathMin(lot, maxLot);
+      lot = MathFloor(lot / lotStep) * lotStep;
+   }
+   
+   // Aplicar multiplicador por qualidade do estado (Smart Lot)
+   if(EnableSmartLot && state >= 0 && state < NUM_STATES)
+   {
+      ENUM_STATE_QUALITY quality = GetStateQuality(state);
+      
+      switch(quality)
+      {
+         case STATE_QUALITY_ELITE:
+            lot *= 1.5;  // 150% para estados ELITE
+            break;
+         case STATE_QUALITY_GOOD:
+            lot *= 1.2;  // 120% para estados BONS
+            break;
+         case STATE_QUALITY_NEUTRAL:
+            lot *= 1.0;  // 100% para estados NEUTROS
+            break;
+         case STATE_QUALITY_BAD:
+            lot *= 0.5;  // 50% para estados RUINS (defensivo)
+            break;
+         case STATE_QUALITY_BLOCKED:
+            lot = 0.0;   // Não opera estados bloqueados
+            break;
+      }
+   }
+   
+   // Aplicar limite máximo final
+   lot = MathMin(lot, MaxAllowedLot);
+   
+   // Normalizar novamente após multiplicação
+   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   lot = MathFloor(lot / lotStep) * lotStep;
+   
+   return lot;
+}
+
+//+------------------------------------------------------------------+
+//| Verifica e atualiza circuit breakers (FIX #35)                   |
+//+------------------------------------------------------------------+
+bool CheckCircuitBreakers()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   
+   // ──────────────────────────────────────────────────────────────
+   // RESET DIÁRIO
+   // ──────────────────────────────────────────────────────────────
+   datetime currentDay = StringToTime(StringFormat("%04d.%02d.%02d", dt.year, dt.mon, dt.day));
+   
+   if(currentDay > g_lastDayReset)
+   {
+      // Novo dia - resetar contadores
+      g_lastDayReset = currentDay;
+      g_dailyProfit = 0.0;
+      g_dailyCircuitBreakerActive = false;
+      g_dailyProfitTargetReached = false;
+      
+      Print("📅 NOVO DIA - Resetando circuit breakers diários");
+      Print("   Balance: $", AccountInfoDouble(ACCOUNT_BALANCE));
+   }
+   
+   // ──────────────────────────────────────────────────────────────
+   // RESET SEMANAL (segunda-feira = 1)
+   // ──────────────────────────────────────────────────────────────
+   if(EnableWeeklyCircuitBreaker)
+   {
+      datetime currentWeek = currentDay - (dt.day_of_week * 86400);  // Segunda-feira da semana
+      
+      if(currentWeek > g_lastWeekReset)
+      {
+         g_lastWeekReset = currentWeek;
+         g_weeklyProfit = 0.0;
+         g_weeklyCircuitBreakerActive = false;
+         
+         Print("📅 NOVA SEMANA - Resetando circuit breakers semanais");
+      }
+   }
+   
+   // ──────────────────────────────────────────────────────────────
+   // VERIFICAR CIRCUIT BREAKER DIÁRIO
+   // ──────────────────────────────────────────────────────────────
+   if(EnableDailyCircuitBreaker && !g_dailyCircuitBreakerActive)
+   {
+      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      if(balance <= 0) balance = InitialBalance;
+      
+      double dailyLossPercent = (g_dailyProfit / balance) * 100.0;
+      
+      if(dailyLossPercent < -MaxDailyLossPercent)
+      {
+         g_dailyCircuitBreakerActive = true;
+         
+         Print("🔴 CIRCUIT BREAKER DIÁRIO ATIVADO!");
+         Print("   Perda Diária: $", g_dailyProfit, " (", dailyLossPercent, "%)");
+         Print("   Limite: -", MaxDailyLossPercent, "%");
+         Print("   ⏸️ OPERAÇÕES PAUSADAS ATÉ AMANHÃ");
+         
+         // Fechar todas as posições abertas (proteção)
+         CloseAllPositions();
+         
+         return false;  // NÃO OPERAR
+      }
+   }
+   
+   // ──────────────────────────────────────────────────────────────
+   // VERIFICAR META DE LUCRO DIÁRIA
+   // ──────────────────────────────────────────────────────────────
+   if(EnableDailyProfitTarget && !g_dailyProfitTargetReached)
+   {
+      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      if(balance <= 0) balance = InitialBalance;
+      
+      double dailyProfitPercent = (g_dailyProfit / balance) * 100.0;
+      
+      if(dailyProfitPercent >= DailyProfitTargetPercent)
+      {
+         g_dailyProfitTargetReached = true;
+         
+         Print("🎯 META DE LUCRO DIÁRIA ATINGIDA!");
+         Print("   Lucro Diário: $", g_dailyProfit, " (", dailyProfitPercent, "%)");
+         Print("   Meta: +", DailyProfitTargetPercent, "%");
+         Print("   ⏸️ OPERAÇÕES PAUSADAS ATÉ AMANHÃ (proteção de lucros)");
+         
+         // Fechar todas as posições abertas (garantir lucro)
+         CloseAllPositions();
+         
+         return false;  // NÃO OPERAR
+      }
+   }
+   
+   // ──────────────────────────────────────────────────────────────
+   // VERIFICAR CIRCUIT BREAKER SEMANAL
+   // ──────────────────────────────────────────────────────────────
+   if(EnableWeeklyCircuitBreaker && !g_weeklyCircuitBreakerActive)
+   {
+      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      if(balance <= 0) balance = InitialBalance;
+      
+      double weeklyLossPercent = (g_weeklyProfit / balance) * 100.0;
+      
+      if(weeklyLossPercent < -MaxWeeklyLossPercent)
+      {
+         g_weeklyCircuitBreakerActive = true;
+         
+         Print("🔴 CIRCUIT BREAKER SEMANAL ATIVADO!");
+         Print("   Perda Semanal: $", g_weeklyProfit, " (", weeklyLossPercent, "%)");
+         Print("   Limite: -", MaxWeeklyLossPercent, "%");
+         Print("   ⏸️ OPERAÇÕES PAUSADAS ATÉ PRÓXIMA SEMANA");
+         
+         CloseAllPositions();
+         
+         return false;  // NÃO OPERAR
+      }
+   }
+   
+   // ──────────────────────────────────────────────────────────────
+   // VERIFICAR SE JÁ ESTÁ ATIVO
+   // ──────────────────────────────────────────────────────────────
+   if(g_dailyCircuitBreakerActive)
+   {
+      return false;  // Circuit breaker diário ativo
+   }
+   
+   if(g_dailyProfitTargetReached)
+   {
+      return false;  // Meta diária atingida
+   }
+   
+   if(g_weeklyCircuitBreakerActive)
+   {
+      return false;  // Circuit breaker semanal ativo
+   }
+   
+   return true;  // PODE OPERAR
+}
+
+// ======================================================================
 // ✅✅✅ ExecuteAction - COM SISTEMA CORRIGIDO
 // ======================================================================
 void ExecuteAction(int action, int state)
@@ -4290,12 +4536,22 @@ void ExecuteAction(int action, int state)
       }
    }
    
+   // ✅ FIX #35: Usar cálculo dinâmico de lote (% da banca ou fixo)
+   double baseLotSize = CalculateDynamicLotSize(state);
+   
+   // Se lote calculado é 0 (estado bloqueado), não operar
+   if(baseLotSize <= 0)
+   {
+      Print("⛔ Lote calculado = 0 (estado bloqueado ou sem risco). Cancelando trade.");
+      return;
+   }
+   
    // ✅ CORREÇÃO: Aplicar Smart Lot tanto para primeira entrada quanto para piramidação
    if(sameDirCount == 0)
    {
-      // Primeira entrada: usar lote base × Smart Lot
-      desiredLot = LotSize * smartLotMultiplier;
-      Print("💰 PRIMEIRA ENTRADA: LotSize=", DoubleToString(LotSize, 2), 
+      // Primeira entrada: usar lote calculado × Smart Lot
+      desiredLot = baseLotSize * smartLotMultiplier;
+      Print("💰 PRIMEIRA ENTRADA: BaseLot=", DoubleToString(baseLotSize, 2), 
             " × SmartMult=", DoubleToString(smartLotMultiplier, 2),
             " = ", DoubleToString(desiredLot, 2));
    }
@@ -5951,6 +6207,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    g_totalTrades++;
    g_sumProfit += net_profit;
    
+   // ✅ FIX #35: Atualizar lucro diário e semanal para circuit breakers
+   g_dailyProfit += net_profit;
+   g_weeklyProfit += net_profit;
+   
    // ✅ FIX #29: Incrementar contador de limpeza A CADA TRADE
    g_memoryCleanCounter++;
    
@@ -6846,6 +7106,13 @@ void OnTick()
 {
    static datetime last_bar_time = 0;
    datetime current_bar_time = iTime(_Symbol,_Period,0);
+
+   // ✅ FIX #35: Verificar circuit breakers ANTES de processar tick
+   if(!CheckCircuitBreakers())
+   {
+      // Circuit breaker ativo - NÃO OPERAR
+      return;
+   }
 
    // ✅ ATUALIZAÇÃO MAE/MFE: Rastrear eficiência dos trades em tempo real
    UpdatePositionMetrics();
