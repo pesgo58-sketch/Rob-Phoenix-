@@ -6565,86 +6565,8 @@ string MonthName(int month)
    }
 }
 
-// Exportar relatório mensal
-void ExportMonthlyReport()
-{
-   // Gerar nome do arquivo com data
-   datetime now = TimeCurrent();
-   MqlDateTime dt;
-   TimeToStruct(now, dt);
-   
-   string filename = StringFormat("Phoenix_Monthly_%04d_%02d.txt", 
-                                  dt.year, dt.mon);
-   
-   int h = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_COMMON);
-   
-   if(h == INVALID_HANDLE)
-   {
-      Print("❌ Erro ao criar relatório mensal: ", filename);
-      return;
-   }
-   
-   // Cabeçalho
-   FileWrite(h, "=================================================================");
-   FileWrite(h, "PHOENIX TRADER v3.85 - RELATÓRIO MENSAL");
-   FileWrite(h, "Gerado em: ", TimeToString(now, TIME_DATE|TIME_MINUTES));
-   FileWrite(h, "=================================================================");
-   FileWrite(h, "");
-   
-   // Estatísticas mensais dos últimos 12 meses
-   FileWrite(h, "📊 ESTATÍSTICAS MENSAIS (Últimos 12 meses)");
-   FileWrite(h, "----------------------------------------");
-   
-   int currentYear = dt.year - 2006;  // Index do ano (base 2006)
-   int currentMonth = dt.mon - 1;     // Index do mês (0-11)
-   
-   for(int i = 11; i >= 0; i--)  // Últimos 12 meses
-   {
-      int m = currentMonth - i;
-      int y = currentYear;
-      
-      while(m < 0)
-      {
-         m += 12;
-         y--;
-      }
-      
-      if(y >= 0 && y < 20 && m >= 0 && m < 12)
-      {
-         if(g_monthlyStats[y][m].totalTrades > 0)
-         {
-            FileWrite(h, "");
-            FileWrite(h, StringFormat("📅 %s/%04d", 
-                      MonthName(m+1), 2006+y));
-            FileWrite(h, StringFormat("   Trades: %d", 
-                      g_monthlyStats[y][m].totalTrades));
-            FileWrite(h, StringFormat("   Wins: %d", 
-                      g_monthlyStats[y][m].totalWins));
-            FileWrite(h, StringFormat("   Losses: %d", 
-                      g_monthlyStats[y][m].totalLosses));
-            FileWrite(h, StringFormat("   Lucro Total: %.2f", 
-                      g_monthlyStats[y][m].totalProfit));
-            
-            double monthWinRate = SafeDivide((double)g_monthlyStats[y][m].totalWins,
-                                            (double)g_monthlyStats[y][m].totalTrades, 0.0);
-            FileWrite(h, StringFormat("   Win Rate: %.1f%%", monthWinRate * 100.0));
-            
-            double avgProfit = SafeDivide(g_monthlyStats[y][m].totalProfit,
-                                         (double)g_monthlyStats[y][m].totalTrades, 0.0);
-            FileWrite(h, StringFormat("   Lucro Médio/Trade: %.2f", avgProfit));
-         }
-      }
-   }
-   
-   FileWrite(h, "");
-   FileWrite(h, "=================================================================");
-   FileWrite(h, "FIM DO RELATÓRIO MENSAL");
-   FileWrite(h, "=================================================================");
-   
-   FileClose(h);
-   
-   Print("✅ Relatório mensal criado: ", filename);
-}
+// ✅ FIX #40: Função ExportMonthlyReport duplicada removida
+// Mantida apenas a versão bool completa (linha ~6808)
 
 // ======================================================================
 // ✅✅✅ FUNÇÕES PARA APRENDIZADO EVOLUTIVO
@@ -7809,9 +7731,9 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
             {
                blockReason += StringFormat("LossRate %.1f%% >= %.0f%%", stateLossRate, BlockLossRateThreshold * 100.0);
             }
-            else if(stateWinRate < MinWinRateThreshold * 100.0)
+            else if(stateWinRate < BadWinRateThreshold * 100.0)  // ✅ FIX #40: MinWinRateThreshold → BadWinRateThreshold
             {
-               blockReason += StringFormat("WinRate %.1f%% < %.0f%%", stateWinRate, MinWinRateThreshold * 100.0);
+               blockReason += StringFormat("WinRate %.1f%% < %.0f%%", stateWinRate, BadWinRateThreshold * 100.0);
             }
             else
             {
