@@ -11,7 +11,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader - 35 Critical Fixes Applied"
 #property link      ""
-#property version   "3.08.35"
+#property version   "3.85"
 
 // ══════════════════════════════════════════════════════════════════════
 // 📖 DOCUMENTAÇÃO DO SISTEMA DE BLOQUEIO E QUALIDADE DE ESTADOS
