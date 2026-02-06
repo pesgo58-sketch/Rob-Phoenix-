@@ -333,7 +333,7 @@ input double UltraLotMultiplier       = 3.0;          // Multiplicador lote ultr
 input double MaxAllowedLot            = 1.0;          // Lote máximo permitido
 
 input group "──── 🎯 GERENCIAMENTO DE RISCO AVANÇADO (FIX #35) ────";
-input bool   UsePercentRisk           = false;        // Usar % da banca ao invés de lote fixo
+input bool   UsePercentRisk           = true;         // Usar % da banca ao invés de lote fixo (RECOMENDADO para $100)
 input double RiskPercentPerTrade      = 1.0;          // Risco por trade (% da banca)
 input double InitialBalance           = 100.0;        // Banca inicial para referência ($)
 input int    StopLossPipsForCalc      = 20;           // SL em pips para cálculo de lote
