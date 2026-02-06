@@ -1735,11 +1735,18 @@ void CleanMemory()
       }
    }
    
-   // ✅ Preencher cache com estados mais recentes
-   g_activeStatesCount = MathMin(tempCount, MaxMemoryStates);
-   for(int i = 0; i < g_activeStatesCount; i++)
+   // ✅ FIX #30: Preencher cache apenas com estados que TÊM visitas
+   g_activeStatesCount = 0;
+   for(int i = 0; i < tempCount && g_activeStatesCount < MaxMemoryStates; i++)
    {
-      g_activeStates[i] = tempStates[i];
+      int state = tempStates[i];
+      
+      // Verificar novamente se tem visitas (proteção contra estados resetados)
+      if(g_stateVisits[state] > 0)
+      {
+         g_activeStates[g_activeStatesCount] = state;
+         g_activeStatesCount++;
+      }
    }
    
    Print("✅ Memória reorganizada: ", g_activeStatesCount, " estados MAIS RECENTES mantidos no cache");
