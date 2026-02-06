@@ -750,15 +750,13 @@ void BlockState(int state)
 {
     if(state < 0 || state >= NUM_STATES) return;
 
-    if(g_stateLastBlockTime[state] > 0 && TimeCurrent() - g_stateLastBlockTime[state] < 3600)
-    {
-        Print("⏳ Cooldown ativo para estado ", state, " - aguardando 1h");
-        return;
-    }
-
+    // ✅ FIX #33: REMOVIDO cooldown de 1 hora que impedia bloqueios
+    // Estados que atingem critério devem ser bloqueados IMEDIATAMENTE
+    
+    // Verificar se já está bloqueado
     if(g_stateBlocked[state])
     {
-        return;
+        return;  // Já está bloqueado, nada a fazer
     }
     
     // 🚨 PROTEÇÃO CRÍTICA: Nunca bloquear se já temos muitos estados bloqueados
@@ -775,56 +773,37 @@ void BlockState(int state)
         return;  // NÃO BLOQUEAR - prevenir travamento total
     }
 
-    int visits = g_stateVisits[state];
-    int losses = g_stateLosses[state];
+    // ✅ FIX #33: Verificações de visitas e loss rate removidas (redundantes)
+    // ShouldBlockState() já verificou tudo isso antes de chamar BlockState()
     
-    if(visits < MinVisitsForBlockDecision)
+    // ✅ BLOQUEAR ESTADO IMEDIATAMENTE
+    g_stateBlocked[state] = true;
+    g_stateLastBlockTime[state] = TimeCurrent();
+    
+    // Incrementar contador de bloqueios
+    g_stateBlockCount[state]++;
+    
+    // Marcar que este estado já foi bloqueado e registrar timestamp do primeiro bloqueio
+    if(!g_stateWasBlockedBefore[state])
     {
-        if(EnableBlockingDebugLogs)
-        {
-            Print("✅ Estado ", state, " tem poucas visitas (", visits, ") - NÃO bloqueando");
-        }
-        return;
+        g_stateWasBlockedBefore[state] = true;
+        g_stateBlockTime[state] = TimeCurrent();
     }
     
-    double lossRate = SafeDivide((double)losses, (double)visits, 0.0);
+    // Log sempre visível (não depende de EnableBlockingDebugLogs)
+    double winRate = CalculateWinRate(state);
+    double lossRate = SafeDivide(g_stateLosses[state], g_stateVisits[state], 0.0);
     
-    if(lossRate >= BlockLossRateThreshold)
-    {
-        g_stateBlocked[state] = true;
-        g_stateLastBlockTime[state] = TimeCurrent();
-        
-        // Incrementar contador de bloqueios
-        g_stateBlockCount[state]++;
-        
-        // Marcar que este estado já foi bloqueado e registrar timestamp do primeiro bloqueio
-        if(!g_stateWasBlockedBefore[state])
-        {
-            g_stateWasBlockedBefore[state] = true;
-            g_stateBlockTime[state] = TimeCurrent();
-        }
-        
-        if(EnableBlockingDebugLogs)
-        {
-            Print("⛔ ESTADO BLOQUEADO: ", state, 
-                  " | Visitas: ", visits, 
-                  " | Perdas: ", losses, 
-                  " | Taxa de perda: ", DoubleToString(lossRate*100, 1), "%",
-                  " | Mínimo requerido: ", MinVisitsForBlockDecision, " visitas",
-                  " | Bloqueios totais: ", g_stateBlockCount[state]);
-        }
-        
-        g_memoryDirty = true;
-        InvalidateHUDCache();
-    }
-    else
-    {
-        if(EnableBlockingDebugLogs)
-        {
-            Print("✅ Estado ", state, " NÃO bloqueado - Taxa de perda: ", 
-                  DoubleToString(lossRate*100, 1), "% (limite: ", BlockLossRateThreshold*100, "%)");
-        }
-    }
+    Print("🚫 ESTADO BLOQUEADO: ", state, 
+          " | Visitas: ", g_stateVisits[state],
+          " | Wins: ", g_stateWins[state],
+          " | Losses: ", g_stateLosses[state], 
+          " | WinRate: ", DoubleToString(winRate*100, 1), "%",
+          " | LossRate: ", DoubleToString(lossRate*100, 1), "%",
+          " | Bloqueios totais: ", g_stateBlockCount[state]);
+    
+    g_memoryDirty = true;
+    InvalidateHUDCache();
 }
 
 // ══════════════════════════════════════════════════════════════════════
