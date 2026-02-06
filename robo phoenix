@@ -258,7 +258,7 @@ input bool   UseSimpleRewardSystem    = true;         // Sistema de recompensa s
 input double RewardWin                = 5.0;          // Recompensa por vitória
 input double RewardLoss               = -2.0;         // Penalidade por perda
 input bool   EnableDynamicReward      = false;        // Reward dinâmica por estado
-double LearningRate                   = 0.03;         // Taxa de aprendizado (fixo)
+input double LearningRate             = 0.1;          // ✅ FIX #28: Taxa de aprendizado (0.05-0.15 recomendado)
 
 input group "──── 🎲 EXPLORAÇÃO ────";
 input bool   DisableExploration       = false;        // Desabilitar exploração completamente (usar apenas Q-learning)
