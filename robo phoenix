@@ -5988,27 +5988,6 @@ int CountSameDirectionPositions(bool isBuy)
    return count;
 }
 
-bool CanPyramid(bool isBuy)
-{
-   if(!EnablePyramiding) 
-   {
-      Print("❌ Piramidação desativada nas configurações");
-      return false;
-   }
-   
-   int sameDirCount = CountSameDirectionPositions(isBuy);
-   
-   Print("📊 Piramidação: Contagem na direção ", isBuy ? "BUY" : "SELL", ": ", sameDirCount);
-   
-   if(sameDirCount >= MaxPyramidPositions)
-   {
-      Print("❌ PIRAMIDAÇÃO: Limite de ", MaxPyramidPositions, " posições por direção atingido");
-      return false;
-   }
-   
-   return true;  // ✅ FIX #42: Fechar CanPyramid() corretamente
-}
-
 // ======================================================================
 // ✅ FIX #41: FUNÇÃO PARA EXTRAIR ESTADO DO TICKET
 // ======================================================================
@@ -6045,8 +6024,25 @@ int GetStateFromTicket(ulong ticket)
    return -1;  // Estado não identificado
 }
 
-// ======================================================================
+bool CanPyramid(bool isBuy)
+{
+   if(!EnablePyramiding) 
+   {
+      Print("❌ Piramidação desativada nas configurações");
+      return false;
+   }
    
+   int sameDirCount = CountSameDirectionPositions(isBuy);
+   
+   Print("📊 Piramidação: Contagem na direção ", isBuy ? "BUY" : "SELL", ": ", sameDirCount);
+   
+   if(sameDirCount >= MaxPyramidPositions)
+   {
+      Print("❌ PIRAMIDAÇÃO: Limite de ", MaxPyramidPositions, " posições por direção atingido");
+      return false;
+   }
+   
+   // ✅ FIX #43: Remover return true prematuro - continuar com lógica de distância
    if(sameDirCount > 0)
    {
       double atr[];
