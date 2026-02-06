@@ -1966,6 +1966,9 @@ bool SaveBrainToFile(string filename)
          FileWriteInteger(h, (int)g_stateBlocked[s]);
          FileWriteLong(h, (long)g_stateLastBlockTime[s]);
          
+         // ✅ FIX #46: Salvar lucro do estado (CRÍTICO!)
+         FileWriteDouble(h, g_stateProfitSum[s]);
+         
          // Validação ao salvar: garante que contador está entre 0-10
          int blockCountToSave = g_stateBlockCount[s];
          if(blockCountToSave < 0 || blockCountToSave > 10)
@@ -2126,6 +2129,9 @@ bool LoadBrainFromFile(string filename)
          g_stateLastUpdate[state] = FileReadInteger(h);
          g_stateBlocked[state] = (bool)FileReadInteger(h);
          g_stateLastBlockTime[state] = (datetime)FileReadLong(h);
+         
+         // ✅ FIX #46: Carregar lucro do estado (CRÍTICO!)
+         g_stateProfitSum[state] = FileReadDouble(h);
          
          // Lê contador de bloqueios com validação para evitar overflow/corrupção
          int blockCount = FileReadInteger(h);
@@ -4781,15 +4787,9 @@ void ExecuteAction(int action, int state)
       else commentType = "NEUTRO";
    }
    
-   // ✅ FIX #41: Incluir estado no comment para rastreamento de lucro
-   string comment = StringFormat("State_%d_PHX_QL_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f", 
-                   state,  // ✅ CRÍTICO: Estado no início para GetStateFromTicket()
-                   isBuy ? "BUY" : "SELL",
-                   commentType,
-                   pyramidLevel,
-                   FixedSL_Points, FixedTP_Points,
-                   g_volumeMultiplier,
-                   quality);
+   // ✅ FIX #46: Simplificar comment para evitar truncamento (limite MQL5 = 31 chars)
+   // "S42" = 3 chars, sempre funciona. Comment longo era truncado!
+   string comment = StringFormat("S%d", state);
    
    // ✅ CORREÇÃO: Atribuir string diretamente ao campo comment
    req.comment = comment;
@@ -6002,22 +6002,18 @@ int GetStateFromTicket(ulong ticket)
    // Obter comment do deal
    string comment = HistoryDealGetString(ticket, DEAL_COMMENT);
    
-   // Comment no formato: "State_42_PHX_QL_..." ou "State_123_..."
-   if(StringFind(comment, "State_") == 0)
+   // ✅ FIX #46: Formato novo "S42" (comentário simplificado)
+   // Evita truncamento (limite MQL5 = 31 chars)
+   if(StringFind(comment, "S") == 0 && StringLen(comment) >= 2)
    {
-      // Encontrar próximo "_" após "State_"
-      int firstUnderscore = StringFind(comment, "_", 6);  // Buscar após "State_"
+      // Extrair número após "S"
+      // "S42" → "42"
+      string stateStr = StringSubstr(comment, 1);  // Pula "S"
+      int state = (int)StringToInteger(stateStr);
       
-      if(firstUnderscore > 6)
+      if(state >= 0 && state < NUM_STATES)
       {
-         // Extrair número entre "State_" e próximo "_"
-         string stateStr = StringSubstr(comment, 6, firstUnderscore - 6);
-         int state = (int)StringToInteger(stateStr);
-         
-         if(state >= 0 && state < NUM_STATES)
-         {
-            return state;
-         }
+         return state;
       }
    }
    
@@ -6372,7 +6368,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       }
       
       // Log detalhado do rastreamento
-      Print("📊 FIX #41: Estado ", closedState,
+      Print("📊 FIX #45/#46: Estado ", closedState,
             " | Profit: ", DoubleToString(net_profit, 2),
             " | Total Estado: ", DoubleToString(g_stateProfitSum[closedState], 2),
             " | Wins: ", g_stateWins[closedState],
