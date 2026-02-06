@@ -1637,6 +1637,12 @@ void AddActiveState(int state)
          // ✅ FIX #31: Incrementar visitas SEMPRE que estado é calculado
          // NÃO apenas quando trade é executado (estava causando NOPs não serem contados)
          g_stateVisits[state]++;
+         
+         // 🔍 DEBUG #32: Log de incremento para diagnóstico
+         if(g_stateVisits[state] % 10 == 0)  // Log a cada 10 visitas
+         {
+            Print("📊 Estado ", state, " atingiu ", g_stateVisits[state], " visitas");
+         }
          return;
       }
    }
@@ -1659,11 +1665,11 @@ void AddActiveState(int state)
       // ✅ Só imprimir "NOVO" se realmente for novo (sem visitas anteriores)
       if(isNewState)
       {
-         Print("✨ NOVO ESTADO DESCOBERTO: ", state, " | Total estados ativos: ", g_activeStatesCount);
+         Print("✨ NOVO ESTADO DESCOBERTO: ", state, " | Total estados ativos: ", g_activeStatesCount, " | Visitas: 1");
       }
       else
       {
-         Print("🔄 Estado readicionado ao cache: ", state, " | Total ativos: ", g_activeStatesCount);
+         Print("🔄 Estado readicionado ao cache: ", state, " | Total ativos: ", g_activeStatesCount, " | Visitas anteriores preservadas");
       }
    }
    else
@@ -1996,7 +2002,12 @@ bool LoadBrainFromFile(string filename)
    int tempActiveStatesCount = FileReadInteger(h);
    g_activeStatesCount = tempActiveStatesCount;
    
-   Print("📊 Carregando ", g_activeStatesCount, " estados ativos...");
+   Print("📊 Carregando ", g_activeStatesCount, " estados salvos no arquivo...");
+   if(g_activeStatesCount > MaxMemoryStates)
+   {
+      Print("⚠️ ALERTA: Arquivo contém ", g_activeStatesCount, " estados mas MaxMemoryStates = ", MaxMemoryStates);
+      Print("🔄 Fix #24 reorganizará para manter apenas ", MaxMemoryStates, " mais recentes após carregar");
+   }
    
    for(int i = 0; i < g_activeStatesCount; i++)
    {
@@ -7453,6 +7464,7 @@ int OnInit()
    if(arraysSeemEmpty)
    {
       Print("⚠️ Arrays detectados como vazios apesar de g_activeStatesCount=", g_activeStatesCount);
+      Print("🔍 DEBUG #32: Primeiro estado = ", g_activeStates[0], " | Visitas = ", g_stateVisits[g_activeStates[0]]);
       Print("🔄 Forçando reload completo da memória...");
       g_activeStatesCount = 0; // Força LoadBrain() a recarregar tudo
    }
