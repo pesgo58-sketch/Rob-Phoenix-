@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                         Phoenix_Trader_v307_FIXED_CORRIGIDO.mq5  |
+//|                         Phoenix_Trader_v308_RISK_OVERLAY.mq5     |
 //|          CONTAGEM CORRIGIDA + DECAY FUNCIONAL + EXPLORAÇÃO LIMITADA |
 //|                  COM SISTEMA DE MEMÓRIA OTIMIZADA COMPLETA       |
 //|                      SISTEMA DE BLOQUEIO UNIFICADO              |
@@ -7,10 +7,35 @@
 //|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
 //|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
+//|                                                                  |
+//|  ✨ VERSÃO 3.08 - NOVAS FUNCIONALIDADES:                        |
+//|  🎯 Risk Overlay por Qualidade de Estado                        |
+//|     - Gestão de risco baseada em % do saldo                     |
+//|     - Multiplicadores por categoria de qualidade:               |
+//|       💎 Elite (>0.8): 2.0x | 🚀 Good (0.3-0.8): 1.5x          |
+//|       📊 Neutral (0.0-0.3): 1.0x | ⚠️ Bad (<0.0): 0.5x         |
+//|                                                                  |
+//|  🚨 Circuit Breakers Diário e Semanal                           |
+//|     - Proteção automática contra perdas excessivas              |
+//|     - Limites configuráveis em % e valor absoluto               |
+//|     - Resetam automaticamente no novo período                   |
+//|                                                                  |
+//|  💰 Adaptado para Contas Pequenas (~$100)                       |
+//|     - Cálculo de lote respeitando margem mínima                 |
+//|     - MaxAllowedLot reduzido para 0.1                           |
+//|     - Valores padrão otimizados para capital inicial baixo      |
+//|                                                                  |
+//|  📝 CONFIGURAÇÃO RECOMENDADA PARA CONTA $100:                   |
+//|     - LotSize = 0.01                                            |
+//|     - AccountRiskPerTradePercent = 1.0% ($1 por trade)          |
+//|     - DailyMaxLossPercent = 5.0% ($5 limite diário)             |
+//|     - WeeklyMaxLossPercent = 10.0% ($10 limite semanal)         |
+//|     - FixedSL_Points = 35000 (350 pips)                         |
+//|     - FixedTP_Points = 70000 (700 pips, R:R 1:2)                |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
-#property version   "3.07"
+#property version   "3.08"
 
 // ====
 // Includes essenciais
@@ -147,7 +172,24 @@ input double HighQualityThreshold     = 0.3;          // Threshold alta qualidad
 input double UltraQualityThreshold    = 0.8;          // Threshold ultra qualidade
 input double SmartLotMultiplier       = 1.8;          // Multiplicador lote normal
 input double UltraLotMultiplier       = 3.0;          // Multiplicador lote ultra
-input double MaxAllowedLot            = 1.0;          // Lote máximo permitido
+input double MaxAllowedLot            = 0.1;          // Lote máximo permitido (reduzido para contas pequenas)
+
+input group "──── 💰 GESTÃO DE RISCO BASEADA EM % ────";
+input bool   UseAccountRiskPercent    = true;         // Usar % do saldo por trade
+input double AccountRiskPerTradePercent = 1.0;        // % de risco por trade (1% = $1 em conta de $100)
+input bool   EnableStateQualityRiskOverlay = true;   // Multiplicar risco por qualidade do estado
+input double QualityMultiplier_Elite  = 2.0;          // Multiplicador para estados Elite (>0.8)
+input double QualityMultiplier_Good   = 1.5;          // Multiplicador para estados Good (0.3-0.8)
+input double QualityMultiplier_Neutral = 1.0;         // Multiplicador para estados Neutral (0.0-0.3)
+input double QualityMultiplier_Bad    = 0.5;          // Multiplicador para estados Bad (<0.0)
+
+input group "──── 🚨 CIRCUIT BREAKERS (PROTEÇÃO) ────";
+input bool   EnableDailyCircuitBreaker = true;        // Habilitar proteção diária
+input double DailyMaxLossPercent      = 5.0;          // % máxima de perda diária (5% de $100 = $5)
+input double DailyMaxLossCurrency     = 5.0;          // Perda máxima diária em $ (para conta $100)
+input bool   EnableWeeklyCircuitBreaker = true;       // Habilitar proteção semanal
+input double WeeklyMaxLossPercent     = 10.0;         // % máxima de perda semanal (10% de $100 = $10)
+input double WeeklyMaxLossCurrency    = 10.0;         // Perda máxima semanal em $ (para conta $100)
 
 input group "──── 📊 PIRAMIDAÇÃO ────";
 input bool   EnablePyramiding         = true;         // Habilitar piramidação
@@ -373,6 +415,19 @@ int g_lastBarProcessed = 0;
 int g_tradesToday = 0;
 datetime g_lastTradeDate = 0;
 datetime g_lastResetDate = 0;
+
+// ──────────────────────────────────────────────────────────────────────
+// 🚨 CIRCUIT BREAKERS - TRACKING DIÁRIO E SEMANAL
+// ──────────────────────────────────────────────────────────────────────
+double g_dailyPnL = 0.0;                  // P&L acumulado do dia
+double g_dailyStartBalance = 0.0;         // Saldo no início do dia
+datetime g_dailyStartDate = 0;            // Data de início do dia atual
+bool g_dailyCircuitBreakerActive = false; // Flag se circuit breaker diário está ativo
+
+double g_weeklyPnL = 0.0;                 // P&L acumulado da semana
+double g_weeklyStartBalance = 0.0;        // Saldo no início da semana
+datetime g_weeklyStartDate = 0;           // Data de início da semana atual
+bool g_weeklyCircuitBreakerActive = false;// Flag se circuit breaker semanal está ativo
 
 // ──────────────────────────────────────────────────────────────────────
 // 📊 5. ESTATÍSTICAS E PERFORMANCE
@@ -4127,6 +4182,20 @@ void ExecuteAction(int action, int state)
          " | Perdas REAIS: ", g_stateLosses[state],
          " | Vitórias REAIS: ", g_stateWins[state]);
    
+   // ──────────────────────────────────────────────────────────────
+   // 🚨 VERIFICAÇÃO 1: CIRCUIT BREAKERS (PRIMEIRA VERIFICAÇÃO)
+   // ──────────────────────────────────────────────────────────────
+   if(!CheckCircuitBreakers())
+   {
+      Print("🚨🚨🚨 CIRCUIT BREAKER ATIVO - Trade cancelado por proteção de risco");
+      if(g_dailyCircuitBreakerActive)
+         g_statusMessage = "🚨 Circuit Breaker Diário Ativo";
+      else if(g_weeklyCircuitBreakerActive)
+         g_statusMessage = "🚨 Circuit Breaker Semanal Ativo";
+      UpdateQ_NOP(state);
+      return;
+   }
+   
    if(IsStateBlocked(state))
    {
       Print("⛔⛔⛔ BLOQUEIO CONFIRMADO - Estado ", state, " bloqueado pelo sistema corrigido - trade CANCELADO");
@@ -4175,11 +4244,45 @@ void ExecuteAction(int action, int state)
    int sameDirCount = CountSameDirectionPositions(isBuy);
    double desiredLot = LotSize;
    
-   // ✅ CORREÇÃO: Calcular Smart Lot SEMPRE (não só para primeira entrada)
-   double smartLotMultiplier = 1.0;  // Multiplicador padrão
+   // ──────────────────────────────────────────────────────────────
+   // 💰 CÁLCULO DE LOTE - NOVO SISTEMA INTEGRADO
+   // ──────────────────────────────────────────────────────────────
+   // 1. Calcular lote base usando % de risco (se habilitado)
+   // 2. Aplicar overlay de qualidade de estado (se habilitado)
+   // 3. Aplicar multiplicador SmartLot (mantém compatibilidade)
+   // ──────────────────────────────────────────────────────────────
+   
+   double baseLot = LotSize;  // Lote base inicial
    double quality = 0.0;
    string lotDecision = "📊 NORMAL";
    
+   // PASSO 1: Calcular lote base usando % de risco
+   if(UseAccountRiskPercent)
+   {
+      double slPoints = UseFixedSL ? FixedSL_Points : 35000;
+      baseLot = CalculateBaseLotFromRisk(AccountRiskPerTradePercent, slPoints);
+      Print("💰 LOTE BASE (% RISCO): ", DoubleToString(baseLot, 2), 
+            " (", DoubleToString(AccountRiskPerTradePercent, 2), "% de risco)");
+   }
+   else
+   {
+      baseLot = LotSize;
+      Print("💰 LOTE BASE (FIXO): ", DoubleToString(baseLot, 2));
+   }
+   
+   // PASSO 2: Aplicar overlay de qualidade do estado
+   double lotAfterQualityOverlay = baseLot;
+   if(EnableStateQualityRiskOverlay)
+   {
+      lotAfterQualityOverlay = ApplyStateQualityRiskOverlay(state, baseLot);
+   }
+   else
+   {
+      lotAfterQualityOverlay = baseLot;
+   }
+   
+   // PASSO 3: Aplicar SmartLot tradicional (para compatibilidade)
+   double smartLotMultiplier = 1.0;
    if(EnableSmartLot)
    {
       quality = GetStateQuality(state);
@@ -4203,77 +4306,100 @@ void ExecuteAction(int action, int state)
             " | HighTH=", DoubleToString(HighQualityThreshold, 2),
             " | UltraTH=", DoubleToString(UltraQualityThreshold, 2));
       
-      // Determinar multiplicador baseado na qualidade
-      if(quality >= UltraQualityThreshold)
+      // Determinar multiplicador baseado na qualidade (apenas se quality overlay NÃO estiver ativo)
+      if(!EnableStateQualityRiskOverlay)
       {
-         smartLotMultiplier = UltraLotMultiplier;
-         lotDecision = "💎 ULTRA";
-         Print("💎💎💎 SETUP ULTRA DETECTADO! Multiplicador: ", smartLotMultiplier, "x");
-         g_statusMessage = "💎 ULTRA SETUP - Aposta Máxima!";
-      }
-      else if(quality >= HighQualityThreshold)
-      {
-         smartLotMultiplier = SmartLotMultiplier;
-         lotDecision = "🚀 FORCE";
-         Print("🚀🚀 SETUP FORTE DETECTADO! Multiplicador: ", smartLotMultiplier, "x");
-         g_statusMessage = "🚀 SETUP FORTE - Aposta Elevada!";
-      }
-      else if(quality > 0.1)
-      {
-         lotDecision = "📈 POSITIVE";
-         Print("📊 SETUP NORMAL POSITIVO");
-         g_statusMessage = "📊 Setup Normal - Qualidade Positiva";
-      }
-      else if(quality < -0.3)
-      {
-         lotDecision = "⚠️ NEGATIVE";
-         Print("⚠️⚠️ SETUP NEGATIVO DETECTADO - Considerando cancelar trade");
-         if(quality < -0.5)
+         if(quality >= UltraQualityThreshold)
          {
-            Print("⛔ TRADE CANCELADO - Qualidade muito baixa: ", quality);
-            g_statusMessage = "⛔ Setup Negativo - Trade Cancelado";
-            UpdateQ_NOP(state);
-            return;
+            smartLotMultiplier = UltraLotMultiplier;
+            lotDecision = "💎 ULTRA";
+            Print("💎💎💎 SETUP ULTRA DETECTADO! Multiplicador: ", smartLotMultiplier, "x");
+            g_statusMessage = "💎 ULTRA SETUP - Aposta Máxima!";
          }
-      }
-      else
-      {
-         Print("📈 SETUP NEUTRO");
+         else if(quality >= HighQualityThreshold)
+         {
+            smartLotMultiplier = SmartLotMultiplier;
+            lotDecision = "🚀 FORCE";
+            Print("🚀🚀 SETUP FORTE DETECTADO! Multiplicador: ", smartLotMultiplier, "x");
+            g_statusMessage = "🚀 SETUP FORTE - Aposta Elevada!";
+         }
+         else if(quality > 0.1)
+         {
+            lotDecision = "📈 POSITIVE";
+            Print("📊 SETUP NORMAL POSITIVO");
+            g_statusMessage = "📊 Setup Normal - Qualidade Positiva";
+         }
+         else if(quality < -0.3)
+         {
+            lotDecision = "⚠️ NEGATIVE";
+            Print("⚠️⚠️ SETUP NEGATIVO DETECTADO - Considerando cancelar trade");
+            if(quality < -0.5)
+            {
+               Print("⛔ TRADE CANCELADO - Qualidade muito baixa: ", quality);
+               g_statusMessage = "⛔ Setup Negativo - Trade Cancelado";
+               UpdateQ_NOP(state);
+               return;
+            }
+         }
+         else
+         {
+            Print("📈 SETUP NEUTRO");
+         }
       }
    }
    
-   // ✅ CORREÇÃO: Aplicar Smart Lot tanto para primeira entrada quanto para piramidação
+   // PASSO 4: Calcular lote final considerando piramidação
    if(sameDirCount == 0)
    {
-      // Primeira entrada: usar lote base × Smart Lot
-      desiredLot = LotSize * smartLotMultiplier;
-      Print("💰 PRIMEIRA ENTRADA: LotSize=", DoubleToString(LotSize, 2), 
-            " × SmartMult=", DoubleToString(smartLotMultiplier, 2),
-            " = ", DoubleToString(desiredLot, 2));
+      // Primeira entrada
+      if(EnableStateQualityRiskOverlay)
+      {
+         // Usar lote já ajustado pelo quality overlay
+         desiredLot = lotAfterQualityOverlay;
+         Print("💰 PRIMEIRA ENTRADA (QUALITY OVERLAY): Lote=", DoubleToString(desiredLot, 2));
+      }
+      else
+      {
+         // Usar sistema SmartLot tradicional
+         desiredLot = baseLot * smartLotMultiplier;
+         Print("💰 PRIMEIRA ENTRADA (SMART LOT): BaseLot=", DoubleToString(baseLot, 2), 
+               " × SmartMult=", DoubleToString(smartLotMultiplier, 2),
+               " = ", DoubleToString(desiredLot, 2));
+      }
    }
    else
    {
-      // ✅ PIRAMIDAÇÃO: Calcular lote base de piramidação E aplicar Smart Lot
+      // Piramidação
       double pyramidBaseLot = CalculatePyramidLot(isBuy);
-      desiredLot = pyramidBaseLot * smartLotMultiplier;
       
-      Print("🏗️ PIRAMIDAÇÃO #", sameDirCount + 1, 
-            ": PyramidBase=", DoubleToString(pyramidBaseLot, 2),
-            " × SmartMult=", DoubleToString(smartLotMultiplier, 2),
-            " = ", DoubleToString(desiredLot, 2));
+      if(EnableStateQualityRiskOverlay)
+      {
+         // Aplicar quality overlay no lote de piramidação
+         desiredLot = ApplyStateQualityRiskOverlay(state, pyramidBaseLot);
+         Print("🏗️ PIRAMIDAÇÃO #", sameDirCount + 1, " (QUALITY OVERLAY)",
+               ": PyramidBase=", DoubleToString(pyramidBaseLot, 2),
+               " → ", DoubleToString(desiredLot, 2));
+      }
+      else
+      {
+         // Sistema SmartLot tradicional
+         desiredLot = pyramidBaseLot * smartLotMultiplier;
+         Print("🏗️ PIRAMIDAÇÃO #", sameDirCount + 1, " (SMART LOT)",
+               ": PyramidBase=", DoubleToString(pyramidBaseLot, 2),
+               " × SmartMult=", DoubleToString(smartLotMultiplier, 2),
+               " = ", DoubleToString(desiredLot, 2));
+      }
    }
    
    // 📊 LOT DECISION SUMMARY: Mostra a decisão final de lote
    Print("📊 LOT DECISION SUMMARY: ",
          lotDecision, " → ",
-         "BaseLot=", DoubleToString(LotSize, 2),
-         " × ", DoubleToString(smartLotMultiplier, 2),
-         " = FinalLot=", DoubleToString(desiredLot, 2),
+         "BaseLot=", DoubleToString(baseLot, 2),
+         " | AfterOverlay=", DoubleToString(lotAfterQualityOverlay, 2),
+         " | SmartMult=", DoubleToString(smartLotMultiplier, 2),
+         " | FinalLot=", DoubleToString(desiredLot, 2),
          " | Quality=", DoubleToString(quality, 3),
-         " | HighTH=", DoubleToString(HighQualityThreshold, 2),
-         " | UltraTH=", DoubleToString(UltraQualityThreshold, 2),
-         " | PyramidLevel=", sameDirCount,
-         " | MULTIPLIER APPLIED: ", (smartLotMultiplier > 1.0 ? "YES ✅" : "NO ❌"));
+         " | PyramidLevel=", sameDirCount);
    
    if(desiredLot > MaxAllowedLot) 
    {
@@ -4530,6 +4656,134 @@ double GetStateQuality(int state)
    if(quality < -2.0) quality = -2.0;
    
    return quality;
+}
+
+// ======================================================================
+// 💰 FUNÇÃO CalculateBaseLotFromRisk - CALCULA LOTE BASEADO EM % DE RISCO
+// ======================================================================
+double CalculateBaseLotFromRisk(double riskPercent, double slPoints)
+{
+   if(!UseAccountRiskPercent) 
+   {
+      return LotSize;  // Retorna lote fixo se não estiver usando % de risco
+   }
+   
+   if(slPoints <= 0 || riskPercent <= 0)
+   {
+      Print("⚠️ CalculateBaseLotFromRisk: SL ou risco inválido, usando lote padrão");
+      return LotSize;
+   }
+   
+   // Obter informações do símbolo
+   double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double accountEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double useBalance = MathMin(accountBalance, accountEquity);  // Usar o menor para segurança
+   
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double volumeMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double volumeMax = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double volumeStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   if(tickValue == 0 || tickSize == 0 || point == 0)
+   {
+      Print("⚠️ CalculateBaseLotFromRisk: Dados de símbolo inválidos");
+      return volumeMin;
+   }
+   
+   // Calcular valor em risco ($)
+   double riskAmount = useBalance * (riskPercent / 100.0);
+   
+   // Converter SL de pontos para preço
+   double slInPrice = slPoints * point;
+   
+   // Calcular lote baseado no risco
+   // riskAmount = lot * slInPrice * (tickValue / tickSize)
+   double calculatedLot = riskAmount / (slInPrice * (tickValue / tickSize));
+   
+   // Normalizar o lote para o step do símbolo
+   calculatedLot = MathFloor(calculatedLot / volumeStep) * volumeStep;
+   
+   // Garantir limites do símbolo
+   if(calculatedLot < volumeMin) 
+   {
+      calculatedLot = volumeMin;
+      Print("ℹ️ Lote calculado abaixo do mínimo. Usando mínimo: ", DoubleToString(volumeMin, 2));
+      Print("   💡 Para conta pequena ($", DoubleToString(useBalance, 2), "), considere reduzir SL ou aumentar % de risco");
+   }
+   
+   if(calculatedLot > volumeMax)
+   {
+      calculatedLot = volumeMax;
+      Print("⚠️ Lote calculado acima do máximo. Usando máximo: ", DoubleToString(volumeMax, 2));
+   }
+   
+   Print("💰 CÁLCULO DE RISCO: Saldo=$", DoubleToString(useBalance, 2),
+         " | Risco=", DoubleToString(riskPercent, 2), "%",
+         " | RiscoValor=$", DoubleToString(riskAmount, 2),
+         " | SL=", DoubleToString(slPoints, 0), " pts",
+         " | LoteCalculado=", DoubleToString(calculatedLot, 2));
+   
+   return calculatedLot;
+}
+
+// ======================================================================
+// 🎯 FUNÇÃO ApplyStateQualityRiskOverlay - AJUSTA LOTE POR QUALIDADE DO ESTADO
+// ======================================================================
+double ApplyStateQualityRiskOverlay(int state, double baseLot)
+{
+   if(!EnableStateQualityRiskOverlay)
+   {
+      return baseLot;  // Retorna sem alteração se overlay desabilitado
+   }
+   
+   double quality = GetStateQuality(state);
+   double multiplier = 1.0;
+   string qualityCategory = "NEUTRAL";
+   
+   // Mapear qualidade para categoria e multiplicador
+   if(quality >= 0.8)
+   {
+      multiplier = QualityMultiplier_Elite;
+      qualityCategory = "💎 ELITE";
+   }
+   else if(quality >= 0.3)
+   {
+      multiplier = QualityMultiplier_Good;
+      qualityCategory = "🚀 GOOD";
+   }
+   else if(quality >= 0.0)
+   {
+      multiplier = QualityMultiplier_Neutral;
+      qualityCategory = "📊 NEUTRAL";
+   }
+   else  // quality < 0.0
+   {
+      multiplier = QualityMultiplier_Bad;
+      qualityCategory = "⚠️ BAD";
+   }
+   
+   double adjustedLot = baseLot * multiplier;
+   
+   // Normalizar e validar
+   double volumeMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double volumeMax = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double volumeStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   adjustedLot = MathFloor(adjustedLot / volumeStep) * volumeStep;
+   
+   if(adjustedLot < volumeMin) adjustedLot = volumeMin;
+   if(adjustedLot > volumeMax) adjustedLot = volumeMax;
+   
+   Print("🎯 RISK OVERLAY: Estado=", state,
+         " | Qualidade=", DoubleToString(quality, 3),
+         " | Categoria=", qualityCategory,
+         " | Multiplicador=", DoubleToString(multiplier, 2), "x",
+         " | LoteBase=", DoubleToString(baseLot, 2),
+         " → LoteAjustado=", DoubleToString(adjustedLot, 2));
+   
+   return adjustedLot;
 }
 
 // ======================================================================
@@ -5357,6 +5611,153 @@ bool CheckVolatility()
    return true;
 }
 
+// ======================================================================
+// 🚨 FUNÇÕES DE CIRCUIT BREAKER - PROTEÇÃO DIÁRIA E SEMANAL
+// ======================================================================
+
+// Função auxiliar para resetar tracking diário
+void ResetDailyTracking()
+{
+   MqlDateTime currentTime;
+   TimeToStruct(TimeCurrent(), currentTime);
+   
+   // Verifica se mudou o dia
+   MqlDateTime lastTime;
+   TimeToStruct(g_dailyStartDate, lastTime);
+   
+   if(currentTime.day != lastTime.day || currentTime.mon != lastTime.mon || currentTime.year != lastTime.year)
+   {
+      // Novo dia - resetar
+      g_dailyPnL = 0.0;
+      g_dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      g_dailyStartDate = TimeCurrent();
+      g_dailyCircuitBreakerActive = false;
+      g_tradesToday = 0;
+      
+      Print("📅 NOVO DIA DETECTADO - Resetando tracking diário");
+      Print("   💰 Saldo inicial do dia: $", DoubleToString(g_dailyStartBalance, 2));
+   }
+}
+
+// Função auxiliar para resetar tracking semanal
+void ResetWeeklyTracking()
+{
+   MqlDateTime currentTime;
+   TimeToStruct(TimeCurrent(), currentTime);
+   
+   // Verifica se mudou a semana (usando segunda-feira como início)
+   MqlDateTime lastTime;
+   TimeToStruct(g_weeklyStartDate, lastTime);
+   
+   // Se passou para uma nova semana (comparar número da semana do ano)
+   int currentWeek = currentTime.day_of_year / 7;
+   int lastWeek = lastTime.day_of_year / 7;
+   
+   if(currentWeek != lastWeek || currentTime.year != lastTime.year)
+   {
+      // Nova semana - resetar
+      g_weeklyPnL = 0.0;
+      g_weeklyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      g_weeklyStartDate = TimeCurrent();
+      g_weeklyCircuitBreakerActive = false;
+      
+      Print("📅 NOVA SEMANA DETECTADA - Resetando tracking semanal");
+      Print("   💰 Saldo inicial da semana: $", DoubleToString(g_weeklyStartBalance, 2));
+   }
+}
+
+// Função principal para verificar circuit breakers
+bool CheckCircuitBreakers()
+{
+   // Resetar tracking se necessário
+   ResetDailyTracking();
+   ResetWeeklyTracking();
+   
+   bool canTrade = true;
+   
+   // ──────────────────────────────────────────────────────────────
+   // 🚨 CIRCUIT BREAKER DIÁRIO
+   // ──────────────────────────────────────────────────────────────
+   if(EnableDailyCircuitBreaker)
+   {
+      double dailyLossPercent = 0.0;
+      
+      if(g_dailyStartBalance > 0)
+      {
+         dailyLossPercent = (g_dailyPnL / g_dailyStartBalance) * 100.0;
+      }
+      
+      // Verificar se excedeu limite percentual
+      if(dailyLossPercent < 0 && MathAbs(dailyLossPercent) >= DailyMaxLossPercent)
+      {
+         if(!g_dailyCircuitBreakerActive)
+         {
+            Print("🚨🚨🚨 CIRCUIT BREAKER DIÁRIO ATIVADO 🚨🚨🚨");
+            Print("   📉 Perda diária: ", DoubleToString(dailyLossPercent, 2), "% (limite: ", DoubleToString(DailyMaxLossPercent, 2), "%)");
+            Print("   💰 P&L do dia: $", DoubleToString(g_dailyPnL, 2));
+            Print("   ⛔ NOVAS ENTRADAS BLOQUEADAS ATÉ AMANHÃ");
+            g_dailyCircuitBreakerActive = true;
+         }
+         canTrade = false;
+      }
+      
+      // Verificar se excedeu limite em moeda
+      if(g_dailyPnL < 0 && MathAbs(g_dailyPnL) >= DailyMaxLossCurrency)
+      {
+         if(!g_dailyCircuitBreakerActive)
+         {
+            Print("🚨🚨🚨 CIRCUIT BREAKER DIÁRIO ATIVADO (VALOR) 🚨🚨🚨");
+            Print("   💰 Perda diária: $", DoubleToString(g_dailyPnL, 2), " (limite: $", DoubleToString(DailyMaxLossCurrency, 2), ")");
+            Print("   ⛔ NOVAS ENTRADAS BLOQUEADAS ATÉ AMANHÃ");
+            g_dailyCircuitBreakerActive = true;
+         }
+         canTrade = false;
+      }
+   }
+   
+   // ──────────────────────────────────────────────────────────────
+   // 🚨 CIRCUIT BREAKER SEMANAL
+   // ──────────────────────────────────────────────────────────────
+   if(EnableWeeklyCircuitBreaker)
+   {
+      double weeklyLossPercent = 0.0;
+      
+      if(g_weeklyStartBalance > 0)
+      {
+         weeklyLossPercent = (g_weeklyPnL / g_weeklyStartBalance) * 100.0;
+      }
+      
+      // Verificar se excedeu limite percentual
+      if(weeklyLossPercent < 0 && MathAbs(weeklyLossPercent) >= WeeklyMaxLossPercent)
+      {
+         if(!g_weeklyCircuitBreakerActive)
+         {
+            Print("🚨🚨🚨 CIRCUIT BREAKER SEMANAL ATIVADO 🚨🚨🚨");
+            Print("   📉 Perda semanal: ", DoubleToString(weeklyLossPercent, 2), "% (limite: ", DoubleToString(WeeklyMaxLossPercent, 2), "%)");
+            Print("   💰 P&L da semana: $", DoubleToString(g_weeklyPnL, 2));
+            Print("   ⛔ NOVAS ENTRADAS BLOQUEADAS ATÉ PRÓXIMA SEMANA");
+            g_weeklyCircuitBreakerActive = true;
+         }
+         canTrade = false;
+      }
+      
+      // Verificar se excedeu limite em moeda
+      if(g_weeklyPnL < 0 && MathAbs(g_weeklyPnL) >= WeeklyMaxLossCurrency)
+      {
+         if(!g_weeklyCircuitBreakerActive)
+         {
+            Print("🚨🚨🚨 CIRCUIT BREAKER SEMANAL ATIVADO (VALOR) 🚨🚨🚨");
+            Print("   💰 Perda semanal: $", DoubleToString(g_weeklyPnL, 2), " (limite: $", DoubleToString(WeeklyMaxLossCurrency, 2), ")");
+            Print("   ⛔ NOVAS ENTRADAS BLOQUEADAS ATÉ PRÓXIMA SEMANA");
+            g_weeklyCircuitBreakerActive = true;
+         }
+         canTrade = false;
+      }
+   }
+   
+   return canTrade;
+}
+
 bool ValidateAllIndicators(bool isBuy)
 {
    Print("=== VALIDAÇÃO DE INDICADORES PARA ", isBuy ? "BUY" : "SELL", " ===");
@@ -5681,6 +6082,17 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    
    g_totalTrades++;
    g_sumProfit += net_profit;
+   
+   // ──────────────────────────────────────────────────────────────
+   // 🚨 ATUALIZAR CIRCUIT BREAKER TRACKING
+   // ──────────────────────────────────────────────────────────────
+   g_dailyPnL += net_profit;
+   g_weeklyPnL += net_profit;
+   
+   Print("💰 CIRCUIT BREAKER UPDATE:");
+   Print("   📊 P&L deste trade: $", DoubleToString(net_profit, 2));
+   Print("   📅 P&L diário acumulado: $", DoubleToString(g_dailyPnL, 2));
+   Print("   📆 P&L semanal acumulado: $", DoubleToString(g_weeklyPnL, 2));
    
    // ✅ NOVO: Atualizar estatísticas mensais
    UpdateMonthlyStats(net_profit);
@@ -6866,6 +7278,24 @@ int OnInit()
    g_volumeAverage = 0;
    g_volumeMultiplier = 1.0;
    g_volumeStrength = 0.0;
+   
+   // ──────────────────────────────────────────────────────────────
+   // 🚨 INICIALIZAR CIRCUIT BREAKER TRACKING
+   // ──────────────────────────────────────────────────────────────
+   g_dailyPnL = 0.0;
+   g_dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_dailyStartDate = TimeCurrent();
+   g_dailyCircuitBreakerActive = false;
+   
+   g_weeklyPnL = 0.0;
+   g_weeklyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_weeklyStartDate = TimeCurrent();
+   g_weeklyCircuitBreakerActive = false;
+   
+   Print("🚨 Circuit Breakers inicializados:");
+   Print("   💰 Saldo inicial: $", DoubleToString(g_dailyStartBalance, 2));
+   Print("   📅 Limite diário: ", DoubleToString(DailyMaxLossPercent, 2), "% ou $", DoubleToString(DailyMaxLossCurrency, 2));
+   Print("   📆 Limite semanal: ", DoubleToString(WeeklyMaxLossPercent, 2), "% ou $", DoubleToString(WeeklyMaxLossCurrency, 2));
    
    UpdateLearningStats();
    
