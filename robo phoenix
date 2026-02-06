@@ -4781,7 +4781,9 @@ void ExecuteAction(int action, int state)
       else commentType = "NEUTRO";
    }
    
-   string comment = StringFormat("PHX307F_QL_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f", 
+   // ✅ FIX #41: Incluir estado no comment para rastreamento de lucro
+   string comment = StringFormat("State_%d_PHX_QL_%s_%s_P%d_SL%d_TP%d_VOL%.1fx_Q%.2f", 
+                   state,  // ✅ CRÍTICO: Estado no início para GetStateFromTicket()
                    isBuy ? "BUY" : "SELL",
                    commentType,
                    pyramidLevel,
@@ -6003,6 +6005,44 @@ bool CanPyramid(bool isBuy)
       Print("❌ PIRAMIDAÇÃO: Limite de ", MaxPyramidPositions, " posições por direção atingido");
       return false;
    }
+
+// ======================================================================
+// ✅ FIX #41: FUNÇÃO PARA EXTRAIR ESTADO DO TICKET
+// ======================================================================
+int GetStateFromTicket(ulong ticket)
+{
+   // Selecionar deal do histórico
+   if(!HistoryDealSelect(ticket))
+   {
+      return -1;
+   }
+   
+   // Obter comment do deal
+   string comment = HistoryDealGetString(ticket, DEAL_COMMENT);
+   
+   // Comment no formato: "State_42_PHX_QL_..." ou "State_123_..."
+   if(StringFind(comment, "State_") == 0)
+   {
+      // Encontrar próximo "_" após "State_"
+      int firstUnderscore = StringFind(comment, "_", 6);  // Buscar após "State_"
+      
+      if(firstUnderscore > 6)
+      {
+         // Extrair número entre "State_" e próximo "_"
+         string stateStr = StringSubstr(comment, 6, firstUnderscore - 6);
+         int state = (int)StringToInteger(stateStr);
+         
+         if(state >= 0 && state < NUM_STATES)
+         {
+            return state;
+         }
+      }
+   }
+   
+   return -1;  // Estado não identificado
+}
+
+// ======================================================================
    
    if(sameDirCount > 0)
    {
@@ -6313,6 +6353,36 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    
    // ✅ FIX #29: Incrementar contador de limpeza A CADA TRADE
    g_memoryCleanCounter++;
+   
+   // ✅ FIX #41: Rastrear lucro/wins/losses POR ESTADO
+   int closedState = GetStateFromTicket(deal_ticket);
+   
+   if(closedState >= 0 && closedState < NUM_STATES)
+   {
+      // Atualizar lucro do estado
+      g_stateProfitSum[closedState] += net_profit;
+      
+      // Atualizar wins ou losses do estado
+      if(net_profit > 0)
+      {
+         g_stateWins[closedState]++;
+      }
+      else if(net_profit < 0)
+      {
+         g_stateLosses[closedState]++;
+      }
+      
+      // Log detalhado do rastreamento
+      Print("📊 FIX #41: Estado ", closedState,
+            " | Profit: ", DoubleToString(net_profit, 2),
+            " | Total Estado: ", DoubleToString(g_stateProfitSum[closedState], 2),
+            " | Wins: ", g_stateWins[closedState],
+            " | Losses: ", g_stateLosses[closedState]);
+   }
+   else
+   {
+      Print("⚠️ Estado não identificado do ticket ", deal_ticket, " - usando g_lastTradeState: ", g_lastTradeState);
+   }
    
    // ✅ FIX #34: Atualizar ranking a cada 10 trades
    if(g_totalTrades % 10 == 0)
