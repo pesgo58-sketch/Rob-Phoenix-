@@ -6007,7 +6007,7 @@ void CreateDailySummaryReport()
    FileWrite(file_handle, "Contagem Corrigida: " + IntegerToString(g_totalTrades) + " trades REAIS");
    FileWrite(file_handle, "");
    FileWrite(file_handle, "🛡️ CORREÇÕES IMPLEMENTADAS:");
-   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (576 estados)");
+   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (288 estados com MACD)");
    FileWrite(file_handle, "2. ✅ Reset automático funcionando");
    FileWrite(file_handle, "3. ✅ Estados não travam mais em 10 visitas");
    FileWrite(file_handle, "4. ✅ Regras de bloqueio mais agressivas");
@@ -6332,7 +6332,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    FileWrite(file_handle, "🛡️ SISTEMA SUPER CORRIGIDO - MELHORIAS IMPLEMENTADAS");
    FileWrite(file_handle, "----------------------------------------");
    FileWrite(file_handle, "✅ CORREÇÕES CRÍTICAS IMPLEMENTADAS:");
-   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (576 estados)");
+   FileWrite(file_handle, "1. ✅ Cálculo de estados corrigido (288 estados com MACD)");
    FileWrite(file_handle, "2. ✅ Reset automático funcionando");
    FileWrite(file_handle, "3. ✅ Estados não travam mais em 10 visitas");
    FileWrite(file_handle, "4. ✅ Regras de bloqueio mais agressivas");
@@ -6340,7 +6340,7 @@ bool ExportMemoryToTextFileFunc(bool forceExport = false)
    FileWrite(file_handle, "6. ✅ Reset de emergência disponível");
    FileWrite(file_handle, "");
    
-   string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×2×3×2×2×2 = 576)";
+   string systemInfo = "Estados totais possíveis: " + IntegerToString(NUM_STATES) + " (3×4×3×2×2×2 = 288)";
    FileWrite(file_handle, systemInfo);
    
    string activeInfo = "Estados ativos na memória: " + IntegerToString(g_activeStatesCount);
@@ -6757,12 +6757,11 @@ int OnInit()
    Print("🔥🔥🔥 Bins por indicador:");
    Print("🔥🔥🔥 MA Distance: ", BINS_MA_DIST);
    Print("🔥🔥🔥 RSI: ", BINS_RSI);
-   Print("🔥🔥🔥 ADX: ", BINS_ADX);
-   Print("🔥🔥🔥 BB Position: ", BINS_BBPOS);
+   Print("🔥🔥🔥 MACD: ", BINS_MACD);
    Print("🔥🔥🔥 Volatilidade: ", BINS_VOLATILITY);
    Print("🔥🔥🔥 Volume: ", BINS_VOLUME);
    Print("🔥🔥🔥 Tempo: ", BINS_TIME);
-   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×2×3×2×2×2 = 576)");
+   Print("🔥🔥🔥 TOTAL DE ESTADOS: ", NUM_STATES, " (3×4×3×2×2×2 = 288)");
    Print("🔥🔥🔥 MEMÓRIA MÁXIMA: ", MaxMemoryStates, " estados ativos");
    Print("🔥🔥🔥 SISTEMA SUPER CORRIGIDO: ATIVADO");
    
