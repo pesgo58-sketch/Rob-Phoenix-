@@ -3100,7 +3100,7 @@ void CreateHUDObjects()
       ObjectSetString(0, "HUD_Divider", OBJPROP_FONT, "Arial");
       ObjectSetInteger(0, "HUD_Divider", OBJPROP_BACK, false);
       ObjectSetInteger(0, "HUD_Divider", OBJPROP_SELECTABLE, false);
-      ObjectSetString(0, "HUD_Divider", OBJPROP_TEXT, "══════════════════════════════════════════");
+      ObjectSetString(0, "HUD_Divider", OBJPROP_TEXT, "==========================================");
       hudObjects[hudObjectCount++] = "HUD_Divider";
       currentY += lineHeight;
    }
@@ -3130,7 +3130,7 @@ void CreateHUDObjects()
       ObjectSetString(0, "HUD_Progress", OBJPROP_FONT, "Arial");
       ObjectSetInteger(0, "HUD_Progress", OBJPROP_BACK, false);
       ObjectSetInteger(0, "HUD_Progress", OBJPROP_SELECTABLE, false);
-      ObjectSetString(0, "HUD_Progress", OBJPROP_TEXT, "   [░░░░░░░░░░░░░░░░░░░░] (0.0%)");
+      ObjectSetString(0, "HUD_Progress", OBJPROP_TEXT, "   [--------------------] (0.0%)");
       hudObjects[hudObjectCount++] = "HUD_Progress";
       currentY += lineHeight;
    }
@@ -3175,7 +3175,7 @@ void CreateHUDObjects()
       ObjectSetString(0, "HUD_Direction", OBJPROP_FONT, "Arial");
       ObjectSetInteger(0, "HUD_Direction", OBJPROP_BACK, false);
       ObjectSetInteger(0, "HUD_Direction", OBJPROP_SELECTABLE, false);
-      ObjectSetString(0, "HUD_Direction", OBJPROP_TEXT, "Direção: ● NEUTRO");
+      ObjectSetString(0, "HUD_Direction", OBJPROP_TEXT, "Direção: O NEUTRO");
       hudObjects[hudObjectCount++] = "HUD_Direction";
       currentY += lineHeight;
    }
@@ -3321,27 +3321,27 @@ void CreateHUDObjects()
 string CreateProgressBarFast(int current, int total)
 {
    static string bars[21] = {
-      "░░░░░░░░░░░░░░░░░░░░",
-      "▓░░░░░░░░░░░░░░░░░░░",
-      "▓▓░░░░░░░░░░░░░░░░░░",
-      "▓▓▓░░░░░░░░░░░░░░░░░",
-      "▓▓▓▓░░░░░░░░░░░░░░░░",
-      "▓▓▓▓▓░░░░░░░░░░░░░░░",
-      "▓▓▓▓▓▓░░░░░░░░░░░░░░",
-      "▓▓▓▓▓▓▓░░░░░░░░░░░░░",
-      "▓▓▓▓▓▓▓▓░░░░░░░░░░░░",
-      "▓▓▓▓▓▓▓▓▓░░░░░░░░░░░",
-      "▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░",
-      "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓"
+      "--------------------",
+      "#-------------------",
+      "##------------------",
+      "###-----------------",
+      "####----------------",
+      "#####---------------",
+      "######--------------",
+      "#######-------------",
+      "########------------",
+      "#########-----------",
+      "##########----------",
+      "###########---------",
+      "############--------",
+      "#############-------",
+      "##############------",
+      "###############-----",
+      "################----",
+      "#################---",
+      "##################--",
+      "###################-",
+      "####################"
    };
    
    if(total <= 0) total = 1;
@@ -3354,9 +3354,9 @@ string CreateProgressBarFast(int current, int total)
 
 string GetDirectionIconFast(int direction)
 {
-   if(direction == 1) return "▲";
-   if(direction == 2) return "▼";
-   return "●";
+   if(direction == 1) return "^";
+   if(direction == 2) return "v";
+   return "O";
 }
 
 color GetDirectionColorFast(int direction)
@@ -3417,7 +3417,7 @@ void UpdateHUDLight()
       cachedDirection = currentDir;
    }
    
-   string newTitle = "🛡️ PHOENIX TRADER v307F SUPER CORRIGIDO";
+   string newTitle = "PHOENIX TRADER v307F SUPER CORRIGIDO";
    ObjectSetString(0, "HUD_Title", OBJPROP_TEXT, newTitle);
    
    string newStates = StringFormat("Estados: %d/%d", visitedStates, NUM_STATES);
