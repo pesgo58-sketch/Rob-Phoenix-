@@ -74,14 +74,23 @@ const int MIN_VISITS_FOR_BLOCK = 30;
 // ──────────────────────────────────────────────────────────────────────
 // 🛡️ 1. CONTROLE DE RISCO E LIMITES
 // ──────────────────────────────────────────────────────────────────────
-input group "──── 🛡️ LIMITES DIÁRIOS ────";
+input group "──── 🛡️ LIMITES DIÁRIOS E SEMANAIS ────";
 input int    MaxTradesPerDay          = 30;           // Máximo de trades por dia
 input int    ConsecutiveLossLimit     = 15;           // Limite de perdas consecutivas
+input bool   EnableDailyCircuitBreaker = true;        // Circuit breaker diário
+input double MaxDailyLossPercent      = 5.0;          // Perda máxima diária (%)
+input double MaxDailyLossDollars      = 5.0;          // Perda máxima diária ($)
+input bool   EnableWeeklyCircuitBreaker = true;       // Circuit breaker semanal
+input double MaxWeeklyLossPercent     = 15.0;         // Perda máxima semanal (%)
+input double MaxWeeklyLossDollars     = 15.0;         // Perda máxima semanal ($)
 
 input group "──── 💰 NEGOCIAÇÃO BÁSICA ────";
 input double LotSize                  = 0.01;         // Tamanho do lote padrão
 input int    MagicNumber              = 27101;        // Número mágico das ordens
 input int    MinMinutesBetweenTrades  = 3;            // Tempo mínimo entre trades
+input double MinAccountBalance        = 100.0;        // Saldo mínimo recomendado ($)
+input bool   UsePercentageBasedLot    = false;        // Calcular lote por % da conta
+input double RiskPercentPerTrade      = 1.5;          // Risco por trade (% da conta)
 
 // ──────────────────────────────────────────────────────────────────────
 // 📈 2. INDICADORES TÉCNICOS
@@ -138,6 +147,13 @@ input double UltraQualityThreshold    = 0.8;          // Threshold ultra qualida
 input double SmartLotMultiplier       = 1.8;          // Multiplicador lote normal
 input double UltraLotMultiplier       = 3.0;          // Multiplicador lote ultra
 input double MaxAllowedLot            = 1.0;          // Lote máximo permitido
+
+input group "──── 🛡️ RISK OVERLAY POR QUALIDADE ────";
+input bool   UseRiskOverlay           = true;         // Usar overlay de risco
+input double MinStateQualityForTrade  = -0.5;         // Qualidade mínima para operar
+input bool   ReduceLotOnLowQuality    = true;         // Reduzir lote em baixa qualidade
+input double LowQualityThreshold      = 0.0;          // Threshold de baixa qualidade
+input double LowQualityLotMultiplier  = 0.5;          // Multiplicador para baixa qualidade
 
 input group "──── 📊 PIRAMIDAÇÃO ────";
 input bool   EnablePyramiding         = true;         // Habilitar piramidação
@@ -362,6 +378,16 @@ int g_lastBarProcessed = 0;
 int g_tradesToday = 0;
 datetime g_lastTradeDate = 0;
 datetime g_lastResetDate = 0;
+
+// ✅ CIRCUIT BREAKER - Controle diário e semanal
+double g_dailyProfit = 0.0;           // Lucro/prejuízo acumulado do dia
+double g_weeklyProfit = 0.0;          // Lucro/prejuízo acumulado da semana
+datetime g_lastDayReset = 0;          // Última vez que resetou o dia
+datetime g_lastWeekReset = 0;         // Última vez que resetou a semana
+bool g_dailyCircuitBreakerTriggered = false;    // Circuit breaker diário ativado
+bool g_weeklyCircuitBreakerTriggered = false;   // Circuit breaker semanal ativado
+double g_initialBalanceToday = 0.0;   // Saldo inicial do dia
+double g_initialBalanceWeek = 0.0;    // Saldo inicial da semana
 
 // ──────────────────────────────────────────────────────────────────────
 // 📊 5. ESTATÍSTICAS E PERFORMANCE
