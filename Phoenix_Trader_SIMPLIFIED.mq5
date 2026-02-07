@@ -14,6 +14,44 @@
 #property link      ""
 #property version   "3.08"
 
+// ══════════════════════════════════════════════════════════════════════
+// 📖 CONFIGURAÇÃO PARA CONTAS PEQUENAS (~$100)
+// ══════════════════════════════════════════════════════════════════════
+//
+// Este robô foi otimizado para operar com contas de aproximadamente $100.
+// Principais recursos de proteção para contas pequenas:
+//
+// 1. RISK OVERLAY (EnableRiskOverlay = true):
+//    - Ajusta automaticamente o tamanho do lote baseado no saldo/equity
+//    - Multiplica risco por qualidade do estado (ELITE=1.5x, BOM=1.2x, NEUTRO=1.0x, RUIM=0.5x)
+//    - Respeita limites mínimos de lote do símbolo
+//    - AccountReferenceBalance = 100.0 USD (ajuste conforme seu saldo inicial)
+//
+// 2. CIRCUIT BREAKER (proteção contra drawdown excessivo):
+//    - Diário: Interrompe trading após X% de perda no dia (MaxDailyLossPercent = 5%)
+//    - Semanal: Interrompe trading após X% de perda na semana (MaxWeeklyLossPercent = 15%)
+//    - Reseta automaticamente ao trocar de dia/semana
+//
+// 3. CONFIGURAÇÕES RECOMENDADAS PARA $100:
+//    - LotSize = 0.01 (mínimo permitido na maioria dos brokers)
+//    - MaxRiskPerTradePercent = 1.0% (risco de $1 por trade em estado neutro)
+//    - MaxDailyLossPercent = 5% (perda máxima de $5 por dia)
+//    - MaxWeeklyLossPercent = 15% (perda máxima de $15 por semana)
+//    - UseEquityForRisk = true (usar equity para cálculos mais precisos)
+//
+// 4. CORREÇÕES DE BLOQUEIO IMPLEMENTADAS (previne travamento do robô):
+//    - EnableMemoryDecay = false (decay desabilitado por padrão)
+//    - MinVisitsForBlockDecision = 50 (aumentado para evitar bloqueio prematuro)
+//    - BlockLossRateThreshold = 0.85 (85% - critério mais rigoroso para bloquear)
+//    - UnblockWinRateThreshold = 0.40 (40% - mais fácil desbloquear estados)
+//
+// Para ajustar para saldo diferente:
+// - Modifique AccountReferenceBalance (ex: 200 para conta de $200)
+// - Ajuste MaxDailyLossPercent e MaxWeeklyLossPercent proporcionalmente
+// - Considere ajustar LotSize se seu broker permitir lotes menores
+//
+// ══════════════════════════════════════════════════════════════════════
+
 // ====
 // Includes essenciais
 // ====
@@ -234,6 +272,7 @@ input double StateBlockThreshold      = 0.15;         // ✅ REDUZIDO - Win rate
 input double BlockLossRateThreshold   = 0.85;         // ✅ AUMENTADO - Taxa perda para bloquear (85% ao invés de 80%)
 input double UnblockWinRateThreshold  = 0.40;         // ✅ REDUZIDO - Taxa vitória para desbloquear (40% ao invés de 55%)
 input int    MinVisitsForBlockDecision    = 50;       // ✅ AUMENTADO - Visitas mín. decisão bloqueio (50 ao invés de 30)
+input bool   EnableBlockingDebugLog   = false;        // ✅ NOVO - Log detalhado de bloqueio/desbloqueio (apenas para diagnóstico)
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
@@ -1173,20 +1212,31 @@ bool ShouldBlockState(int state)
         }
     }
     
-    // 🔍 DEBUG: Log detalhado apenas quando bloqueio vai acontecer
+    // 🔍 DEBUG: Log detalhado apenas quando bloqueio vai acontecer OU se debug habilitado
     bool shouldBlock = (highLossRate || lowSharpe);
-    if(shouldBlock)
+    if(shouldBlock || EnableBlockingDebugLog)
     {
-        Print("🚫 BLOQUEANDO Estado ", state, 
-              " | Visits=", visits,
-              " | Wins=", wins,
-              " | Losses=", losses,
-              " | WinRate=", DoubleToString(winRate*100, 1), "%",
-              " | LossRate=", DoubleToString(lossRate*100, 1), "%",
-              " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
-              " | Sharpe=", DoubleToString(sharpe, 2),
-              " | HighLoss?=", highLossRate,
-              " | LowSharpe?=", lowSharpe);
+        if(shouldBlock)
+        {
+            Print("🚫 BLOQUEANDO Estado ", state, 
+                  " | Visits=", visits,
+                  " | Wins=", wins,
+                  " | Losses=", losses,
+                  " | WinRate=", DoubleToString(winRate*100, 1), "%",
+                  " | LossRate=", DoubleToString(lossRate*100, 1), "%",
+                  " | LossRateTH=", DoubleToString(BlockLossRateThreshold*100, 1), "%",
+                  " | Sharpe=", DoubleToString(sharpe, 2),
+                  " | HighLoss?=", highLossRate,
+                  " | LowSharpe?=", lowSharpe);
+        }
+        else if(EnableBlockingDebugLog)
+        {
+            Print("🔍 BLOCK CHECK Estado ", state, 
+                  " | Visits=", visits,
+                  " | WinRate=", DoubleToString(winRate*100, 1), "%",
+                  " | LossRate=", DoubleToString(lossRate*100, 1), "%",
+                  " | → NÃO BLOQUEIA");
+        }
     }
     
     // Bloquear se OU taxa de perda alta OU Sharpe muito baixo
@@ -1234,20 +1284,23 @@ bool ShouldUnblockState(int state)
         }
     }
     
-    // 🔍 DEBUG: Log detalhado de avaliação de desbloqueio
+    // 🔍 DEBUG: Log detalhado de avaliação de desbloqueio (apenas se debug habilitado ou vai desbloquear)
     bool shouldUnblock = (goodWinRate && goodSharpe);
-    Print("🔓 UNBLOCK DEBUG: State=", state, 
-          " | Visits=", visits,
-          " | Wins=", wins,
-          " | Losses=", losses,
-          " | WinRate=", DoubleToString(winRate*100, 1), "%",
-          " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
-          " | Sharpe=", DoubleToString(sharpe, 2),
-          " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
-          " | EnableSharpe=", EnableSharpeFilter,
-          " | GoodWR?=", goodWinRate,
-          " | GoodSharpe?=", goodSharpe,
-          " → SHOULD UNBLOCK=", shouldUnblock);
+    if(shouldUnblock || EnableBlockingDebugLog)
+    {
+        Print("🔓 UNBLOCK ", (shouldUnblock ? "✅ DESBLOQUEANDO" : "CHECK"), " Estado ", state, 
+              " | Visits=", visits,
+              " | Wins=", wins,
+              " | Losses=", losses,
+              " | WinRate=", DoubleToString(winRate*100, 1), "%",
+              " | WinRateTH=", DoubleToString(UnblockWinRateThreshold*100, 1), "%",
+              " | Sharpe=", DoubleToString(sharpe, 2),
+              " | SharpeTH=", DoubleToString(MinSharpeToUnblock, 2),
+              " | EnableSharpe=", EnableSharpeFilter,
+              " | GoodWR?=", goodWinRate,
+              " | GoodSharpe?=", goodSharpe,
+              " → SHOULD UNBLOCK=", shouldUnblock);
+    }
     
     // Desbloquear apenas se AMBOS win rate E Sharpe forem bons
     return shouldUnblock;
@@ -3665,7 +3718,7 @@ void UpdateHUDLight()
       cachedDirection = currentDir;
    }
    
-   string newTitle = "🛡️ PHOENIX TRADER v307F SUPER CORRIGIDO";
+   string newTitle = "🛡️ PHOENIX TRADER v3.08 + RISK OVERLAY";
    ObjectSetString(0, "HUD_Title", OBJPROP_TEXT, newTitle);
    
    string newStates = StringFormat("Estados: %d/%d", visitedStates, NUM_STATES);
