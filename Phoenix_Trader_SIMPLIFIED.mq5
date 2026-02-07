@@ -1,16 +1,18 @@
 //+------------------------------------------------------------------+
-//|                         Phoenix_Trader_v307_FIXED_CORRIGIDO.mq5  |
-//|          CONTAGEM CORRIGIDA + DECAY FUNCIONAL + EXPLORAÇÃO LIMITADA |
+//|                         Phoenix_Trader_SIMPLIFIED.mq5            |
+//|          ✅ CORREÇÃO BLOQUEIO DE ESTADOS + RISK OVERLAY         |
+//|          🛡️ RISK OVERLAY POR QUALIDADE + CIRCUIT BREAKER       |
+//|          💰 OTIMIZADO PARA CONTAS PEQUENAS (~$100)             |
 //|                  COM SISTEMA DE MEMÓRIA OTIMIZADA COMPLETA       |
-//|                      SISTEMA DE BLOQUEIO UNIFICADO              |
-//|                             ESTADOS VARIADOS v307F_ESTADOS       |
+//|                      SISTEMA DE BLOQUEIO UNIFICADO CORRIGIDO     |
+//|                             ESTADOS VARIADOS v307F               |
 //|                + SISTEMA DE DECAY E RESET INTELIGENTE           |
 //|                  + CORREÇÕES CRÍTICAS IMPLEMENTADAS             |
 //|               + CORREÇÕES EXTREMAS PARA ESTADOS TRAVADOS        |
 //+------------------------------------------------------------------+
 #property copyright "Phoenix Trader"
 #property link      ""
-#property version   "3.07"
+#property version   "3.08"
 
 // ====
 // Includes essenciais
@@ -83,6 +85,20 @@ const double BB_NEUTRAL_POSITION = 0.5;
 input group "──── 🛡️ LIMITES DIÁRIOS ────";
 input int    MaxTradesPerDay          = 30;           // Máximo de trades por dia
 input int    ConsecutiveLossLimit     = 15;           // Limite de perdas consecutivas
+
+input group "──── 🛡️ RISCO GLOBAL E CIRCUIT BREAKER ────";
+input bool   EnableRiskOverlay             = true;         // ✅ Habilitar risk overlay por qualidade de estado
+input double AccountReferenceBalance       = 100.0;        // 💰 Referência de banca (ex: 100 USD para contas pequenas)
+input double MaxDailyLossPercent           = 5.0;          // ⛔ % de perda máxima diária antes do circuit breaker
+input double MaxWeeklyLossPercent          = 15.0;         // ⛔ % de perda máxima semanal antes do circuit breaker
+input double MaxRiskPerTradePercent        = 1.0;          // 💎 % da banca por trade em estado NEUTRO
+input double EliteRiskMultiplier           = 1.5;          // 🌟 Multiplicador de risco para estados ELITE (1.5x)
+input double GoodRiskMultiplier            = 1.2;          // ✅ Multiplicador de risco para estados BONS (1.2x)
+input double BadRiskMultiplier             = 0.5;          // ⚠️ Reduzir risco em estados RUINS (0.5x)
+input double BlockedRiskMultiplier         = 0.0;          // 🚫 Não operar estados BLOQUEADOS (0.0x)
+input bool   UseEquityForRisk              = true;         // 📊 Usar equity ao invés de saldo para cálculo de risco
+input bool   EnableDailyCircuitBreaker     = true;         // ⛔ Ativar circuit breaker diário
+input bool   EnableWeeklyCircuitBreaker    = true;         // ⛔ Ativar circuit breaker semanal
 
 input group "──── 💰 NEGOCIAÇÃO BÁSICA ────";
 input double LotSize                  = 0.01;         // Tamanho do lote padrão
@@ -203,21 +219,21 @@ input int    CleanMemoryAfterTrades   = 100;          // Limpar após N trades
 input bool   UseIncrementalSave       = true;         // Salvamento incremental
 
 input group "──── 🔄 DECAY E RESET ────";
-input bool   EnableMemoryDecay        = true;         // Habilitar decay de memória
-input double DecayFactor              = 0.05;         // Fator de decay (5%)
+input bool   EnableMemoryDecay        = false;        // ✅ DESABILITADO - Decay causa travamento (era true)
+input double DecayFactor              = 0.02;         // ✅ REDUZIDO - Fator de decay (2% ao invés de 5%)
 input bool   EnableIntelligentReset   = true;         // Reset inteligente
-input double BadStateLossThreshold    = 0.60;         // Threshold perda para reset (60%)
+input double BadStateLossThreshold    = 0.70;         // ✅ AUMENTADO - Threshold perda para reset (70% ao invés de 60%)
 input int    BadStateMinVisits        = 20;           // Visitas mínimas para reset
 input int    MinStatesBeforeReset     = 150;          // Mínimo de estados aprendidos antes de permitir resets
-input int    DecayCheckIntervalHours  = 1;            // Intervalo verificação decay (horas)
+input int    DecayCheckIntervalHours  = 24;           // ✅ AUMENTADO - Intervalo verificação decay (24h ao invés de 1h)
 input bool   ExcludeNOPFromVisits     = true;         // NOP não conta visita
 
 input group "──── 🚫 BLOQUEIO DE ESTADOS ────";
 input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
-input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
-input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
-input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
-input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+input double StateBlockThreshold      = 0.15;         // ✅ REDUZIDO - Win rate mínimo para NÃO bloquear (15% ao invés de 20%)
+input double BlockLossRateThreshold   = 0.85;         // ✅ AUMENTADO - Taxa perda para bloquear (85% ao invés de 80%)
+input double UnblockWinRateThreshold  = 0.40;         // ✅ REDUZIDO - Taxa vitória para desbloquear (40% ao invés de 55%)
+input int    MinVisitsForBlockDecision    = 50;       // ✅ AUMENTADO - Visitas mín. decisão bloqueio (50 ao invés de 30)
 
 input group "──── 📊 SHARPE RATIO AVANÇADO ────";
 input bool   EnableSharpeFilter       = false;        // Habilitar filtro Sharpe Ratio
@@ -373,6 +389,20 @@ int g_lastBarProcessed = 0;
 int g_tradesToday = 0;
 datetime g_lastTradeDate = 0;
 datetime g_lastResetDate = 0;
+
+// ──────────────────────────────────────────────────────────────────────
+// 🛡️ CIRCUIT BREAKER E RISK OVERLAY
+// ──────────────────────────────────────────────────────────────────────
+// Circuit Breaker Diário/Semanal
+bool g_dailyCircuitBroken = false;       // ⛔ Flag de circuit breaker diário ativado
+bool g_weeklyCircuitBroken = false;      // ⛔ Flag de circuit breaker semanal ativado
+double g_dailyPnL = 0.0;                 // 📊 PnL acumulado do dia
+double g_weeklyPnL = 0.0;                // 📊 PnL acumulado da semana
+datetime g_dailyResetTime = 0;           // ⏰ Timestamp do último reset diário
+datetime g_weeklyResetTime = 0;          // ⏰ Timestamp do último reset semanal
+int g_currentDayOfYear = 0;              // 📅 Dia do ano atual (para detectar mudança de dia)
+int g_currentWeekOfYear = 0;             // 📅 Semana do ano atual (para detectar mudança de semana)
+double g_lastTradeRiskPercent = 0.0;     // 💰 Risco percentual do último trade executado
 
 // ──────────────────────────────────────────────────────────────────────
 // 📊 5. ESTATÍSTICAS E PERFORMANCE
@@ -565,6 +595,224 @@ void DebugStuckStatesEnhanced()
    
    Print("=== FIM DEBUG ===");
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// 🛡️ CIRCUIT BREAKER E RISK OVERLAY - SISTEMA PARA CONTAS PEQUENAS ($100)
+// ══════════════════════════════════════════════════════════════════════
+
+// ──────────────────────────────────────────────────────────────────────
+// ✅ FUNÇÃO: Resetar PnL diário e semanal quando muda o dia/semana
+// ──────────────────────────────────────────────────────────────────────
+void UpdateCircuitBreakerTimers()
+{
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   
+   int currentDay = dt.day_of_year;
+   int currentWeek = (dt.day_of_year / 7) + 1;
+   
+   // Reset diário
+   if(g_currentDayOfYear != currentDay)
+   {
+      if(g_currentDayOfYear > 0)  // Não é a primeira execução
+      {
+         Print("📅 NOVO DIA DETECTADO - Resetando circuit breaker diário");
+         Print("   PnL do dia anterior: ", DoubleToString(g_dailyPnL, 2));
+      }
+      
+      g_dailyPnL = 0.0;
+      g_dailyCircuitBroken = false;
+      g_currentDayOfYear = currentDay;
+      g_dailyResetTime = TimeCurrent();
+   }
+   
+   // Reset semanal
+   if(g_currentWeekOfYear != currentWeek)
+   {
+      if(g_currentWeekOfYear > 0)  // Não é a primeira execução
+      {
+         Print("📅 NOVA SEMANA DETECTADA - Resetando circuit breaker semanal");
+         Print("   PnL da semana anterior: ", DoubleToString(g_weeklyPnL, 2));
+      }
+      
+      g_weeklyPnL = 0.0;
+      g_weeklyCircuitBroken = false;
+      g_currentWeekOfYear = currentWeek;
+      g_weeklyResetTime = TimeCurrent();
+   }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// ✅ FUNÇÃO: Atualizar PnL diário/semanal após cada trade
+// ──────────────────────────────────────────────────────────────────────
+void UpdateDailyWeeklyPnL(double tradeProfit)
+{
+   g_dailyPnL += tradeProfit;
+   g_weeklyPnL += tradeProfit;
+   
+   // Verificar se atingiu limite diário
+   if(EnableDailyCircuitBreaker && !g_dailyCircuitBroken)
+   {
+      double referenceBalance = UseEquityForRisk ? AccountInfoDouble(ACCOUNT_EQUITY) : AccountInfoDouble(ACCOUNT_BALANCE);
+      if(referenceBalance < AccountReferenceBalance)
+         referenceBalance = AccountReferenceBalance;
+      
+      double maxDailyLoss = -(referenceBalance * MaxDailyLossPercent / 100.0);
+      
+      if(g_dailyPnL <= maxDailyLoss)
+      {
+         g_dailyCircuitBroken = true;
+         Print("⛔⛔⛔ CIRCUIT BREAKER DIÁRIO ATIVADO! ⛔⛔⛔");
+         Print("   PnL diário: ", DoubleToString(g_dailyPnL, 2));
+         Print("   Limite: ", DoubleToString(maxDailyLoss, 2));
+         Print("   Percentual de perda: ", DoubleToString((g_dailyPnL / referenceBalance) * 100, 2), "%");
+         Print("   ⚠️ TRADING PAUSADO ATÉ AMANHÃ!");
+      }
+   }
+   
+   // Verificar se atingiu limite semanal
+   if(EnableWeeklyCircuitBreaker && !g_weeklyCircuitBroken)
+   {
+      double referenceBalance = UseEquityForRisk ? AccountInfoDouble(ACCOUNT_EQUITY) : AccountInfoDouble(ACCOUNT_BALANCE);
+      if(referenceBalance < AccountReferenceBalance)
+         referenceBalance = AccountReferenceBalance;
+      
+      double maxWeeklyLoss = -(referenceBalance * MaxWeeklyLossPercent / 100.0);
+      
+      if(g_weeklyPnL <= maxWeeklyLoss)
+      {
+         g_weeklyCircuitBroken = true;
+         Print("⛔⛔⛔ CIRCUIT BREAKER SEMANAL ATIVADO! ⛔⛔⛔");
+         Print("   PnL semanal: ", DoubleToString(g_weeklyPnL, 2));
+         Print("   Limite: ", DoubleToString(maxWeeklyLoss, 2));
+         Print("   Percentual de perda: ", DoubleToString((g_weeklyPnL / referenceBalance) * 100, 2), "%");
+         Print("   ⚠️ TRADING PAUSADO ATÉ PRÓXIMA SEMANA!");
+      }
+   }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// ✅ FUNÇÃO: Verificar se circuit breaker está ativo
+// ──────────────────────────────────────────────────────────────────────
+bool IsCircuitBreakerActive()
+{
+   if(g_dailyCircuitBroken && EnableDailyCircuitBreaker)
+   {
+      Print("⛔ Circuit breaker diário ativo - não operar");
+      return true;
+   }
+   
+   if(g_weeklyCircuitBroken && EnableWeeklyCircuitBreaker)
+   {
+      Print("⛔ Circuit breaker semanal ativo - não operar");
+      return true;
+   }
+   
+   return false;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// ✅ FUNÇÃO: Calcular lote ajustado com risk overlay
+// Combina: tamanho da conta + qualidade do estado + circuit breaker
+// Otimizado para contas pequenas (~$100)
+// ──────────────────────────────────────────────────────────────────────
+double CalculateRiskAdjustedLot(int state, double baseLot)
+{
+   if(!EnableRiskOverlay)
+      return baseLot;
+   
+   // 1. Obter balance/equity para cálculo de risco
+   double accountSize = UseEquityForRisk ? AccountInfoDouble(ACCOUNT_EQUITY) : AccountInfoDouble(ACCOUNT_BALANCE);
+   
+   // 2. Se conta é menor que referência, usar referência como base (proteção para contas muito pequenas)
+   if(accountSize < AccountReferenceBalance)
+      accountSize = AccountReferenceBalance;
+   
+   // 3. Calcular risco base em % da conta
+   double baseRiskPercent = MaxRiskPerTradePercent;
+   
+   // 4. Ajustar risco baseado na qualidade do estado
+   double riskMultiplier = 1.0;  // NEUTRO por padrão
+   
+   if(state >= 0 && state < NUM_STATES)
+   {
+      // Verificar se está bloqueado
+      if(g_stateBlocked[state])
+      {
+         riskMultiplier = BlockedRiskMultiplier;  // 0.0 - não opera
+      }
+      else if(g_stateVisits[state] >= MinVisitsForBlockDecision)
+      {
+         double winRate = CalculateWinRate(state);
+         double quality = GetStateQuality(state);
+         
+         // Classificar estado por qualidade
+         if(winRate >= 0.65 && quality >= UltraQualityThreshold)
+         {
+            riskMultiplier = EliteRiskMultiplier;  // ELITE: 1.5x
+         }
+         else if(winRate >= 0.55 && quality >= HighQualityThreshold)
+         {
+            riskMultiplier = GoodRiskMultiplier;   // BOM: 1.2x
+         }
+         else if(winRate < 0.35)
+         {
+            riskMultiplier = BadRiskMultiplier;    // RUIM: 0.5x
+         }
+         // else: NEUTRO (1.0x)
+      }
+   }
+   
+   // 5. Calcular risco ajustado
+   double adjustedRiskPercent = baseRiskPercent * riskMultiplier;
+   g_lastTradeRiskPercent = adjustedRiskPercent;  // Salvar para exibir no HUD
+   
+   // 6. Calcular lote baseado no risco percentual
+   // Para contas de $100 com 1% de risco = $1 de risco por trade
+   double riskAmount = accountSize * (adjustedRiskPercent / 100.0);
+   
+   // 7. Converter risco em lote (simplificado - pode ser refinado com SL em pips)
+   // Assumindo risco de ~$10 por 0.01 lote (aproximação)
+   double lotPerDollarRisk = 0.01 / 10.0;  // 0.01 lote para cada $10 de risco
+   double calculatedLot = riskAmount * lotPerDollarRisk;
+   
+   // 8. Ajustar com base no lote base fornecido (não substituir completamente, combinar)
+   double finalLot = baseLot * riskMultiplier;
+   
+   // 9. Respeitar limites de lote do símbolo
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   if(finalLot < minLot)
+   {
+      Print("⚠️ Lote calculado (", DoubleToString(finalLot, 3), 
+            ") abaixo do mínimo (", DoubleToString(minLot, 3), ") - usando lote mínimo");
+      finalLot = minLot;
+   }
+   
+   if(finalLot > MaxAllowedLot)
+      finalLot = MaxAllowedLot;
+   
+   if(finalLot > maxLot)
+      finalLot = maxLot;
+   
+   // Arredondar para step do lote
+   finalLot = MathFloor(finalLot / lotStep) * lotStep;
+   
+   // 10. Log detalhado
+   Print("💰 RISK OVERLAY APLICADO:");
+   Print("   Conta: $", DoubleToString(accountSize, 2));
+   Print("   Risco base: ", DoubleToString(baseRiskPercent, 2), "%");
+   Print("   Multiplicador de qualidade: ", DoubleToString(riskMultiplier, 2), "x");
+   Print("   Risco ajustado: ", DoubleToString(adjustedRiskPercent, 2), "%");
+   Print("   Lote base: ", DoubleToString(baseLot, 3));
+   Print("   Lote final: ", DoubleToString(finalLot, 3));
+   
+   return finalLot;
+}
+
+// ══════════════════════════════════════════════════════════════════════
 
 // ======================================================================
 // ✅✅✅ 5. FUNÇÃO: DESBLOQUEAR ESTADOS BONS (REMOVIDO RESET DE ESTADOS)
@@ -3451,16 +3699,34 @@ void UpdateHUDLight()
    string positionsText = StringFormat("   Posições ativas: %d", totalPositions);
    ObjectSetString(0, "HUD_Positions", OBJPROP_TEXT, positionsText);
    
+   // ✅ CIRCUIT BREAKER: Priorizar exibição se estiver ativo
+   string displayStatus = g_statusMessage;
    color statusColor = HUD_TextColor;
-   if(StringFind(g_statusMessage, "⛔") >= 0) statusColor = HUD_ErrorColor;
-   else if(StringFind(g_statusMessage, "✅") >= 0) statusColor = HUD_SuccessColor;
-   else if(StringFind(g_statusMessage, "⚠️") >= 0) statusColor = HUD_WarningColor;
    
-   if(cachedStatus != g_statusMessage)
+   if(g_dailyCircuitBroken || g_weeklyCircuitBroken)
+   {
+      if(g_dailyCircuitBroken)
+         displayStatus = StringFormat("⛔ CIRCUIT BREAKER DIÁRIO: %.2f (%.1f%%)", 
+                                     g_dailyPnL, 
+                                     (g_dailyPnL / MathMax(AccountInfoDouble(ACCOUNT_EQUITY), AccountReferenceBalance)) * 100);
+      else
+         displayStatus = StringFormat("⛔ CIRCUIT BREAKER SEMANAL: %.2f (%.1f%%)", 
+                                     g_weeklyPnL,
+                                     (g_weeklyPnL / MathMax(AccountInfoDouble(ACCOUNT_EQUITY), AccountReferenceBalance)) * 100);
+      statusColor = HUD_ErrorColor;
+   }
+   else
+   {
+      if(StringFind(g_statusMessage, "⛔") >= 0) statusColor = HUD_ErrorColor;
+      else if(StringFind(g_statusMessage, "✅") >= 0) statusColor = HUD_SuccessColor;
+      else if(StringFind(g_statusMessage, "⚠️") >= 0) statusColor = HUD_WarningColor;
+   }
+   
+   if(cachedStatus != displayStatus)
    {
       ObjectSetInteger(0, "HUD_Status", OBJPROP_COLOR, statusColor);
-      ObjectSetString(0, "HUD_Status", OBJPROP_TEXT, "STATUS: " + g_statusMessage);
-      cachedStatus = g_statusMessage;
+      ObjectSetString(0, "HUD_Status", OBJPROP_TEXT, "STATUS: " + displayStatus);
+      cachedStatus = displayStatus;
    }
    
    if(cachedVolume != g_volumeMultiplier)
@@ -3546,8 +3812,13 @@ void UpdateHUDLight()
    ObjectSetInteger(0, "HUD_WinRate", OBJPROP_COLOR, winRateColor);
    ObjectSetString(0, "HUD_WinRate", OBJPROP_TEXT, winRateText);
    
-   // Atualizar precisão (vitórias vs derrotas)
-   string accuracyText = StringFormat("   Vitórias: %d | Derrotas: %d", g_totalWins, g_totalLosses);
+   // Atualizar precisão (vitórias vs derrotas) + PnL diário/semanal
+   double accountSize = MathMax(AccountInfoDouble(ACCOUNT_EQUITY), AccountReferenceBalance);
+   double dailyPct = (g_dailyPnL / accountSize) * 100;
+   double weeklyPct = (g_weeklyPnL / accountSize) * 100;
+   
+   string accuracyText = StringFormat("   V:%d|D:%d | Dia:%.1f%% Sem:%.1f%%", 
+                                       g_totalWins, g_totalLosses, dailyPct, weeklyPct);
    ObjectSetString(0, "HUD_Accuracy", OBJPROP_TEXT, accuracyText);
    
    ChartRedraw(0);
@@ -4288,6 +4559,9 @@ void ExecuteAction(int action, int state)
       Print("⚠️ Lote ajustado ao mínimo permitido: ", minLot);
    }
    
+   // ✅ RISK OVERLAY: Aplicar ajuste de risco baseado em qualidade do estado e tamanho da conta
+   desiredLot = CalculateRiskAdjustedLot(state, desiredLot);
+   
    Print("💰 LOTE FINAL DEFINIDO: ", desiredLot);
    
    double price = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
@@ -4799,6 +5073,13 @@ int GetTotalPositions()
 
 bool CanOpenNewPosition(bool isBuy)
 {
+   // ✅ CIRCUIT BREAKER: Verificar se está ativo
+   if(IsCircuitBreakerActive())
+   {
+      g_statusMessage = "⛔ Circuit breaker ativo";
+      return false;
+   }
+   
    if(AllowOnlyOneDirection)
    {
       int currentDir = GetCurrentPositionsDirection();
@@ -5746,6 +6027,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    g_lastTradeProfit = net_profit;
    g_lastTradeDate   = TimeCurrent();
    
+   // ✅ CIRCUIT BREAKER: Atualizar PnL diário/semanal e verificar limites
+   UpdateDailyWeeklyPnL(net_profit);
+   
    if(g_firstTradeDate == 0) g_firstTradeDate = TimeCurrent();
    
    UpdateProfitHistory(net_profit);
@@ -6201,6 +6485,9 @@ void OnTick()
 {
    static datetime last_bar_time = 0;
    datetime current_bar_time = iTime(_Symbol,_Period,0);
+
+   // ✅ CIRCUIT BREAKER: Atualizar timers e resetar PnL diário/semanal quando muda o dia/semana
+   UpdateCircuitBreakerTimers();
 
    // ✅ ATUALIZAÇÃO MAE/MFE: Rastrear eficiência dos trades em tempo real
    UpdatePositionMetrics();
@@ -6885,6 +7172,15 @@ int OnInit()
    g_currentDirection = GetCurrentPositionsDirection();
    g_positionsCount = GetTotalPositions();
    
+   // ✅ CIRCUIT BREAKER: Inicializar timers e variáveis
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   g_currentDayOfYear = dt.day_of_year;
+   g_currentWeekOfYear = (dt.day_of_year / 7) + 1;
+   g_dailyResetTime = TimeCurrent();
+   g_weeklyResetTime = TimeCurrent();
+   Print("🛡️ Circuit breaker inicializado - Dia: ", g_currentDayOfYear, " Semana: ", g_currentWeekOfYear);
+   
    if(g_currentDirection == 3)
    {
       Print("⚠️ ATENÇÃO: Encontradas posições em ambas as direções!");
@@ -6922,20 +7218,34 @@ int OnInit()
    if(EnableMemoryExport) ExportAllMemoryFiles();
 
    Print("===============================================================");
-   Print("✅ PHOENIX TRADER V307F - SISTEMA SUPER CORRIGIDO V2");
+   Print("✅ PHOENIX TRADER V3.08 - RISK OVERLAY + CIRCUIT BREAKER");
    Print("===============================================================");
-   Print("🔴 CORREÇÕES EXTREMAS IMPLEMENTADAS:");
-   Print("   1. ✅ REMOÇÃO COMPLETA do limite de 10 visitas");
-   Print("   2. ✅ Auto-desbloqueio de estados com win rate > 35%");
-   Print("   3. ✅ Reset parcial em vez de completo");
-   Print("   4. ✅ Correção automática de estados travados");
-   Print("   5. ✅ Sistema anti-bloqueio-erroneo ativado");
+   Print("🔴 CORREÇÕES DE BLOQUEIO IMPLEMENTADAS:");
+   Print("   1. ✅ Decay DESABILITADO por padrão (evita travamento)");
+   Print("   2. ✅ MinVisitsForBlockDecision aumentado para 50");
+   Print("   3. ✅ BlockLossRateThreshold aumentado para 85%");
+   Print("   4. ✅ UnblockWinRateThreshold reduzido para 40%");
+   Print("   5. ✅ NOP threshold reduzido (menos NOP forçado)");
    Print("   6. ✅ Teste periódico de estados bloqueados (a cada 30 dias)");
-   Print("🔥 NOVAS FUNÇÕES ADICIONADAS:");
-   Print("   • EmergencyCounterFix() - Correção emergencial de contadores");
-   Print("   • OverhaulBlockingSystem() - Revisão completa do bloqueio");
-   Print("   • IntelligentPartialReset() - Reset parcial inteligente");
-   Print("   • OptimizeParametersDynamically() - Otimização dinâmica");
+   Print("🛡️ RISK OVERLAY E CIRCUIT BREAKER:");
+   Print("   • Risk Overlay: ", (EnableRiskOverlay ? "ATIVO ✅" : "DESATIVADO ❌"));
+   if(EnableRiskOverlay)
+   {
+      Print("   • Conta de referência: $", DoubleToString(AccountReferenceBalance, 2));
+      Print("   • Risco base por trade: ", DoubleToString(MaxRiskPerTradePercent, 2), "%");
+      Print("   • Multiplicadores de risco:");
+      Print("     - ELITE: ", DoubleToString(EliteRiskMultiplier, 2), "x");
+      Print("     - BOM: ", DoubleToString(GoodRiskMultiplier, 2), "x");
+      Print("     - NEUTRO: 1.0x");
+      Print("     - RUIM: ", DoubleToString(BadRiskMultiplier, 2), "x");
+      Print("     - BLOQUEADO: ", DoubleToString(BlockedRiskMultiplier, 2), "x (não opera)");
+   }
+   Print("   • Circuit Breaker Diário: ", (EnableDailyCircuitBreaker ? "ATIVO ✅" : "DESATIVADO ❌"));
+   if(EnableDailyCircuitBreaker)
+      Print("     - Perda máxima diária: ", DoubleToString(MaxDailyLossPercent, 2), "%");
+   Print("   • Circuit Breaker Semanal: ", (EnableWeeklyCircuitBreaker ? "ATIVO ✅" : "DESATIVADO ❌"));
+   if(EnableWeeklyCircuitBreaker)
+      Print("     - Perda máxima semanal: ", DoubleToString(MaxWeeklyLossPercent, 2), "%");
    Print("===============================================================");
    Print("💾 CONFIGURAÇÃO DE BACKUP (ANTI-PERDA DE DADOS):");
    Print("   • Salvamento após cada trade: ", (SaveAfterEachTrade ? "ATIVO ✅" : "DESATIVADO ❌"));
