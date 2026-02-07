@@ -104,12 +104,12 @@ CHistoryOrderInfo historyOrderInfo;
 // ✅✅✅ ATUALIZAÇÃO CRÍTICA: DISCRETIZAÇÃO DE ESTADO OTIMIZADA
 // ============================================================
 // Reduzindo para um número gerenciável de estados
-#define BINS_MA_DIST   3      // Reduzido de 6 para 3
+#define BINS_MA_DIST   6      // Reduzido de 6 para 3
 #define BINS_RSI       4      // Reduzido de 6 para 4  
 // ✅ REMOVIDO: BINS_ADX (indicador ADX removido)
 // ✅ REMOVIDO: BINS_BBPOS (indicador BB removido)
 #define BINS_VOLATILITY 2     // Mantido 2
-#define BINS_VOLUME    2      // Reduzido de 3 para 2
+#define BINS_VOLUME    3     // Reduzido de 3 para 2
 #define BINS_TIME      2      // Reduzido de 4 para 2
 
 // Cálculo do número total de estados - SIMPLIFICADO (sem ADX e BB)
