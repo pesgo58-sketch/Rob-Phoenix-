@@ -1,0 +1,182 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║           CORREÇÃO DO CÁLCULO - 288 ESTADOS VERIFICADOS                   ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+📋 PROBLEMA IDENTIFICADO:
+   Após mudança de ADX/BB para MACD, algumas referências no código ainda
+   mostravam a fórmula antiga (576 estados).
+
+✅ SOLUÇÃO IMPLEMENTADA:
+   Todas as referências foram atualizadas para mostrar corretamente 288 estados.
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ CÁLCULO CORRETO - 288 ESTADOS                                              │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│   NUM_STATES = BINS_MA_DIST × BINS_RSI × BINS_MACD ×                      │
+│                BINS_VOLATILITY × BINS_VOLUME × BINS_TIME                   │
+│                                                                            │
+│   NUM_STATES = 3 × 4 × 3 × 2 × 2 × 2                                      │
+│                                                                            │
+│   Cálculo passo a passo:                                                   │
+│   3 × 4 = 12                                                               │
+│   12 × 3 = 36                                                              │
+│   36 × 2 = 72                                                              │
+│   72 × 2 = 144                                                             │
+│   144 × 2 = 288 ✅                                                         │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ BINS ATUALIZADOS                                                           │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│   BINS_MA_DIST = 3      (Distância da MA)                                 │
+│   BINS_RSI = 4          (RSI - sobrecompra/sobrevenda)                    │
+│   BINS_MACD = 3         (MACD histograma) ✅ NOVO                         │
+│   BINS_VOLATILITY = 2   (ATR - volatilidade)                              │
+│   BINS_VOLUME = 2       (Volume relativo)                                 │
+│   BINS_TIME = 2         (Período do dia)                                  │
+│                                                                            │
+│   REMOVIDOS:                                                               │
+│   BINS_ADX              ❌ (substituído por MACD)                          │
+│   BINS_BBPOS            ❌ (substituído por MACD)                          │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    CORREÇÕES REALIZADAS NO CÓDIGO                          ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║ Localização         │ ANTES            │ DEPOIS                           ║
+╟─────────────────────┼──────────────────┼──────────────────────────────────╢
+║ Linha 6010          │ 576 estados      │ 288 estados com MACD             ║
+║ (Log arquivo)       │                  │                                  ║
+╟─────────────────────┼──────────────────┼──────────────────────────────────╢
+║ Linha 6335          │ 576 estados      │ 288 estados com MACD             ║
+║ (Log crítico)       │                  │                                  ║
+╟─────────────────────┼──────────────────┼──────────────────────────────────╢
+║ Linha 6343          │ (3×4×2×3×2×2×2   │ (3×4×3×2×2×2 = 288)             ║
+║ (System info)       │  = 576)          │                                  ║
+╟─────────────────────┼──────────────────┼──────────────────────────────────╢
+║ Linha 6765          │ (3×4×2×3×2×2×2   │ (3×4×3×2×2×2 = 288)             ║
+║ (Print init)        │  = 576)          │                                  ║
+╟─────────────────────┼──────────────────┼──────────────────────────────────╢
+║ Linhas 6760-6761    │ Print BINS_ADX   │ Print BINS_MACD                  ║
+║ (Print bins)        │ Print BINS_BBPOS │ (removidas linhas antigas)       ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ COMPARAÇÃO: ANTES vs DEPOIS                                                │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│ ANTES (com ADX e Bollinger Bands):                                         │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                │
+│   3 × 4 × 2 × 3 × 2 × 2 × 2 = 576 estados                                 │
+│   ↓   ↓   ↓   ↓   ↓   ↓   ↓                                               │
+│  MA  RSI ADX  BB Vol Vlu Time                                              │
+│                                                                            │
+│ DEPOIS (com MACD):                                                         │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                │
+│   3 × 4 × 3 × 2 × 2 × 2 = 288 estados                                     │
+│   ↓   ↓   ↓   ↓   ↓   ↓                                                   │
+│  MA  RSI MACD Vol Vlu Time                                                 │
+│                                                                            │
+│ REDUÇÃO: 288 / 576 = 50% MENOS ESTADOS ✅                                 │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ IMPACTO NA MEMÓRIA                                                         │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│ Q-TABLE (valores de ação):                                                 │
+│   ANTES: 576 estados × 3 ações = 1.728 valores                            │
+│   DEPOIS: 288 estados × 3 ações = 864 valores                             │
+│   ECONOMIA: 864 valores (50% menos memória)                                │
+│                                                                            │
+│ ARRAYS DE ESTADO:                                                          │
+│   g_stateVisits[576]    → g_stateVisits[288]    (-288 elementos)          │
+│   g_stateWins[576]      → g_stateWins[288]      (-288 elementos)          │
+│   g_stateLosses[576]    → g_stateLosses[288]    (-288 elementos)          │
+│   g_stateBlocked[576]   → g_stateBlocked[288]   (-288 elementos)          │
+│   ... e outros arrays ...                                                  │
+│                                                                            │
+│ TOTAL ECONOMIZADO: ~50% em todas as estruturas de dados                   │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ARQUIVO DE MEMÓRIA (BRAIN)                                                │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│ FORMATO ANTIGO (576 estados):                                              │
+│   Cerebro_B3x4x2x3x2x2x2_A3.bin                                           │
+│   └─ Incompatível com nova estrutura ❌                                   │
+│                                                                            │
+│ FORMATO NOVO (288 estados):                                                │
+│   Cerebro_B3x4x3x2x2x2_A3.bin                                             │
+│   └─ Criado automaticamente na primeira execução ✅                       │
+│                                                                            │
+│ ⚠️  NOTA: O aprendizado recomeçará do zero (esperado)                     │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                             VANTAGENS                                      ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  1. APRENDIZADO MAIS RÁPIDO                                                ║
+║     • Cada estado visitado com maior frequência                            ║
+║     • Menos estados = convergência mais rápida da Q-table                  ║
+║                                                                            ║
+║  2. MENOS MEMÓRIA                                                          ║
+║     • 50% de redução em todos os arrays                                    ║
+║     • Arquivos de brain menores                                            ║
+║     • Menos uso de RAM                                                     ║
+║                                                                            ║
+║  3. PROCESSAMENTO MAIS EFICIENTE                                           ║
+║     • Menos iterações em loops de estados                                  ║
+║     • Salvamento/carregamento mais rápido                                  ║
+║                                                                            ║
+║  4. SISTEMA MAIS SIMPLES                                                   ║
+║     • Menos indicadores para validar (ADX e BB removidos)                  ║
+║     • MACD combina tendência + momentum em um indicador                    ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ VERIFICAÇÃO FINAL                                                          │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  ✅ Fórmula de cálculo: 3×4×3×2×2×2 = 288                                 │
+│  ✅ Todas as referências atualizadas no código                             │
+│  ✅ Prints de inicialização corrigidos                                     │
+│  ✅ Logs de arquivo atualizados                                            │
+│  ✅ Bins corretos mostrados (MACD, não ADX/BB)                             │
+│  ✅ Sem referências a constantes removidas                                 │
+│  ✅ Documentação criada (VERIFICACAO_288_ESTADOS.md)                       │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║ EXEMPLO DE LOG ESPERADO                                                   ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║ 🔥🔥🔥 INICIALIZANDO SISTEMA SUPER CORRIGIDO...                           ║
+║ 🔥🔥🔥 CONFIGURAÇÃO DE ESTADOS:                                           ║
+║ 🔥🔥🔥 Bins por indicador:                                                ║
+║ 🔥🔥🔥 MA Distance: 3                                                     ║
+║ 🔥🔥🔥 RSI: 4                                                             ║
+║ 🔥🔥🔥 MACD: 3                                                            ║
+║ 🔥🔥🔥 Volatilidade: 2                                                    ║
+║ 🔥🔥🔥 Volume: 2                                                          ║
+║ 🔥🔥🔥 Tempo: 2                                                           ║
+║ 🔥🔥🔥 TOTAL DE ESTADOS: 288 (3×4×3×2×2×2 = 288)                         ║
+║ 🔥🔥🔥 MEMÓRIA MÁXIMA: 1000 estados ativos                                ║
+║ 🔥🔥🔥 SISTEMA SUPER CORRIGIDO: ATIVADO                                   ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+Data: 2026-02-07
+Versão: v307 FIXED com MACD
+Status: ✅ VERIFICADO E CORRIGIDO
