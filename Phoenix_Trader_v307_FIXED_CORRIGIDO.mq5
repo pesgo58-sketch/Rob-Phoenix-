@@ -2863,6 +2863,144 @@ void EmergencyCounterFix()
 }
 
 // ======================================================================
+// ✅ CIRCUIT BREAKER - Proteção de Risco Diária e Semanal
+// ======================================================================
+
+// Resetar contadores diários
+void ResetDailyCounters()
+{
+   MqlDateTime timeStruct;
+   TimeCurrent(timeStruct);
+   
+   if(g_lastDayReset != 0)
+   {
+      MqlDateTime lastResetStruct;
+      TimeToStruct(g_lastDayReset, lastResetStruct);
+      
+      if(timeStruct.day == lastResetStruct.day && 
+         timeStruct.mon == lastResetStruct.mon &&
+         timeStruct.year == lastResetStruct.year)
+      {
+         return;
+      }
+   }
+   
+   Print("🔄 RESET DIÁRIO - Novo dia de trading");
+   g_tradesToday = 0;
+   g_dailyProfit = 0.0;
+   g_initialBalanceToday = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_dailyCircuitBreakerTriggered = false;
+   g_lastDayReset = TimeCurrent();
+}
+
+// Resetar contadores semanais
+void ResetWeeklyCounters()
+{
+   MqlDateTime timeStruct;
+   TimeCurrent(timeStruct);
+   
+   if(g_lastWeekReset != 0)
+   {
+      MqlDateTime lastResetStruct;
+      TimeToStruct(g_lastWeekReset, lastResetStruct);
+      
+      if(timeStruct.day_of_week != 1)
+      {
+         return;
+      }
+      
+      if(timeStruct.day == lastResetStruct.day && 
+         timeStruct.mon == lastResetStruct.mon)
+      {
+         return;
+      }
+   }
+   
+   Print("🔄 RESET SEMANAL - Nova semana de trading");
+   g_weeklyProfit = 0.0;
+   g_initialBalanceWeek = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_weeklyCircuitBreakerTriggered = false;
+   g_lastWeekReset = TimeCurrent();
+}
+
+// Verificar circuit breaker
+bool CheckCircuitBreaker()
+{
+   ResetDailyCounters();
+   ResetWeeklyCounters();
+   
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   
+   if(EnableDailyCircuitBreaker && !g_dailyCircuitBreakerTriggered)
+   {
+      double dailyLoss = g_initialBalanceToday - currentBalance;
+      double dailyLossPercent = SafeDivide(dailyLoss, g_initialBalanceToday, 0.0) * 100.0;
+      
+      if(dailyLossPercent >= MaxDailyLossPercent)
+      {
+         g_dailyCircuitBreakerTriggered = true;
+         Print("🚨🚨🚨 CIRCUIT BREAKER DIÁRIO ATIVADO!");
+         Print("💥 Perda diária: $", DoubleToString(dailyLoss, 2), " (", DoubleToString(dailyLossPercent, 2), "%)");
+         g_statusMessage = "🚨 Circuit Breaker Diário Ativado!";
+         return false;
+      }
+      
+      if(dailyLoss >= MaxDailyLossDollars)
+      {
+         g_dailyCircuitBreakerTriggered = true;
+         Print("🚨🚨🚨 CIRCUIT BREAKER DIÁRIO ATIVADO!");
+         Print("💥 Perda diária: $", DoubleToString(dailyLoss, 2));
+         g_statusMessage = "🚨 Circuit Breaker Diário Ativado!";
+         return false;
+      }
+   }
+   else if(g_dailyCircuitBreakerTriggered)
+   {
+      g_statusMessage = "⛔ Circuit Breaker Diário Ativo";
+      return false;
+   }
+   
+   if(EnableWeeklyCircuitBreaker && !g_weeklyCircuitBreakerTriggered)
+   {
+      double weeklyLoss = g_initialBalanceWeek - currentBalance;
+      double weeklyLossPercent = SafeDivide(weeklyLoss, g_initialBalanceWeek, 0.0) * 100.0;
+      
+      if(weeklyLossPercent >= MaxWeeklyLossPercent)
+      {
+         g_weeklyCircuitBreakerTriggered = true;
+         Print("🚨🚨🚨 CIRCUIT BREAKER SEMANAL ATIVADO!");
+         Print("💥 Perda semanal: $", DoubleToString(weeklyLoss, 2), " (", DoubleToString(weeklyLossPercent, 2), "%)");
+         g_statusMessage = "🚨 Circuit Breaker Semanal Ativado!";
+         return false;
+      }
+      
+      if(weeklyLoss >= MaxWeeklyLossDollars)
+      {
+         g_weeklyCircuitBreakerTriggered = true;
+         Print("🚨🚨🚨 CIRCUIT BREAKER SEMANAL ATIVADO!");
+         Print("💥 Perda semanal: $", DoubleToString(weeklyLoss, 2));
+         g_statusMessage = "🚨 Circuit Breaker Semanal Ativado!";
+         return false;
+      }
+   }
+   else if(g_weeklyCircuitBreakerTriggered)
+   {
+      g_statusMessage = "⛔ Circuit Breaker Semanal Ativo";
+      return false;
+   }
+   
+   if(currentBalance < MinAccountBalance * 0.5)
+   {
+      Print("⚠️ AVISO: Saldo muito baixo ($", DoubleToString(currentBalance, 2), ")");
+      g_statusMessage = "⚠️ Saldo Abaixo do Recomendado";
+   }
+   
+   return true;
+}
+
+
+
+// ======================================================================
 // ✅✅✅ FUNÇÃO: REVISÃO COMPLETA DO SISTEMA DE BLOQUEIO
 // ======================================================================
 void OverhaulBlockingSystem()
@@ -4197,11 +4335,77 @@ void ExecuteAction(int action, int state)
    int sameDirCount = CountSameDirectionPositions(isBuy);
    double desiredLot = LotSize;
    
+   // ✅ CÁLCULO DE LOTE POR PORCENTAGEM DA CONTA (para contas pequenas)
+   if(UsePercentageBasedLot)
+   {
+      double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      double riskAmount = accountBalance * (RiskPercentPerTrade / 100.0);
+      
+      // Calcular lote baseado no SL em pontos
+      double slPoints = FixedSL_Points;
+      double pointValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      
+      if(pointValue > 0 && slPoints > 0)
+      {
+         // Lote = RiskAmount / (SL_Points * PointValue)
+         desiredLot = riskAmount / (slPoints * pointValue / contractSize);
+         
+         // Normalizar lote
+         double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+         double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+         double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+         
+         if(lotStep > 0)
+         {
+            desiredLot = MathFloor(desiredLot / lotStep) * lotStep;
+         }
+         
+         if(desiredLot < minLot) desiredLot = minLot;
+         if(desiredLot > maxLot) desiredLot = maxLot;
+         
+         Print("💰 LOTE POR %: Conta=$", DoubleToString(accountBalance, 2),
+               " | Risco=", DoubleToString(RiskPercentPerTrade, 1), "%",
+               " | RiskAmount=$", DoubleToString(riskAmount, 2),
+               " | Lote=", DoubleToString(desiredLot, 3));
+      }
+   }
+   
    // ✅ CORREÇÃO: Calcular Smart Lot SEMPRE (não só para primeira entrada)
    double smartLotMultiplier = 1.0;  // Multiplicador padrão
    double quality = 0.0;
    string lotDecision = "📊 NORMAL";
    
+   // ✅ RISK OVERLAY - Verificar qualidade do estado ANTES de operar
+   if(UseRiskOverlay)
+   {
+      quality = GetStateQuality(state);
+      
+      // Bloquear trade se qualidade muito baixa
+      if(quality < MinStateQualityForTrade)
+      {
+         Print("🛡️ RISK OVERLAY: Estado bloqueado por qualidade muito baixa");
+         Print("   Quality=", DoubleToString(quality, 3), 
+               " | Mínimo=", DoubleToString(MinStateQualityForTrade, 3));
+         g_statusMessage = "🛡️ Bloqueado - Qualidade Muito Baixa";
+         UpdateQ_NOP(state);
+         return;
+      }
+      
+      // Reduzir lote em estados de baixa qualidade
+      if(ReduceLotOnLowQuality && quality < LowQualityThreshold)
+      {
+         double qualityMultiplier = LowQualityLotMultiplier;
+         desiredLot *= qualityMultiplier;
+         Print("🛡️ RISK OVERLAY: Lote reduzido por baixa qualidade");
+         Print("   Quality=", DoubleToString(quality, 3),
+               " | Multiplicador=", DoubleToString(qualityMultiplier, 2),
+               " | Novo lote=", DoubleToString(desiredLot, 3));
+         lotDecision = "⚠️ REDUZIDO";
+      }
+   }
+   
+   // ✅ CORREÇÃO: Calcular Smart Lot
    if(EnableSmartLot)
    {
       quality = GetStateQuality(state);
@@ -5571,6 +5775,13 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    g_totalTrades++;
    g_sumProfit += net_profit;
    
+   // ✅ CIRCUIT BREAKER - Atualizar lucro diário e semanal
+   g_dailyProfit += net_profit;
+   g_weeklyProfit += net_profit;
+   
+   Print("💰 Lucros - Diário: $", DoubleToString(g_dailyProfit, 2),
+         " | Semanal: $", DoubleToString(g_weeklyProfit, 2));
+   
    // ✅ NOVO: Atualizar estatísticas mensais
    UpdateMonthlyStats(net_profit);
    
@@ -6747,6 +6958,25 @@ int OnInit()
    
    ArrayResize(g_recentProfits, 100);
    ArrayInitialize(g_recentProfits, 0.0);
+   
+   // ✅ CIRCUIT BREAKER - Inicializar variáveis de controle
+   g_initialBalanceToday = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_initialBalanceWeek = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_dailyProfit = 0.0;
+   g_weeklyProfit = 0.0;
+   g_dailyCircuitBreakerTriggered = false;
+   g_weeklyCircuitBreakerTriggered = false;
+   g_lastDayReset = TimeCurrent();
+   g_lastWeekReset = TimeCurrent();
+   
+   Print("🛡️ Circuit Breaker inicializado:");
+   Print("   Saldo inicial: $", DoubleToString(g_initialBalanceToday, 2));
+   if(UsePercentageBasedLot)
+   {
+      Print("   Modo: Lote por % da conta (", DoubleToString(RiskPercentPerTrade, 1), "% por trade)");
+   }
+   Print("   Perda máxima diária: ", DoubleToString(MaxDailyLossPercent, 1), "% ou $", DoubleToString(MaxDailyLossDollars, 2));
+   Print("   Perda máxima semanal: ", DoubleToString(MaxWeeklyLossPercent, 1), "% ou $", DoubleToString(MaxWeeklyLossDollars, 2));
    g_recentProfitsIndex = 0;
    
    g_currentVolume = 0;
