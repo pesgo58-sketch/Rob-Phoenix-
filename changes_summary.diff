@@ -1,0 +1,65 @@
+--- "robo phoenix"	2026-02-06 23:36:29.004539303 +0000
++++ Phoenix_Trader_v307_FIXED_CORRIGIDO.mq5	2026-02-06 23:40:26.522804834 +0000
+@@ -216,7 +216,7 @@
+ input bool   EnableUnifiedBlockingSystem = true;      // Sistema unificado bloqueio
+ input double StateBlockThreshold      = 0.20;         // Win rate mínimo para NÃO bloquear (20%)
+ input double BlockLossRateThreshold   = 0.80;         // Taxa perda para bloquear
+-input double UnblockWinRateThreshold  = 0.55;         // Taxa vitória para desbloquear
++input double UnblockWinRateThreshold  = 0.40;         // Taxa vitória para desbloquear (40% - mais permissivo)
+ input int    MinVisitsForBlockDecision    = 30;       // Visitas mín. decisão bloqueio
+ 
+ input group "──── 📊 SHARPE RATIO AVANÇADO ────";
+@@ -646,8 +646,8 @@
+          totalMemoryBefore += g_stateVisits[s];
+          
+          // Aplicar decay somente em estados com histórico muito significativo
+-         // ✅ CORREÇÃO: Aumentado de >10 para >50 para evitar cap artificial em 10 visitas
+-         if(g_stateVisits[s] > 50)
++         // ✅ CORREÇÃO: Aumentado de >10 para >100 para permitir amadurecimento adequado antes do decay
++         if(g_stateVisits[s] > 100)
+          {
+             // ✅ CORREÇÃO: Decay deve REMOVER X%, não MANTER X%
+             // Se DecayFactor = 0.05 (5%), deve manter 95% (1.0 - 0.05)
+@@ -3978,7 +3978,7 @@
+    {
+       int idx = state * NUM_ACTIONS;
+       double oldQ = g_Q[idx];
+-      double newQ = oldQ - 0.02;  // ✅ PENALIDADE MODERADA: -0.02 (BTC M5 precisa de NOP mais tolerante)
++      double newQ = oldQ - 0.5;  // ✅ PENALIDADE AUMENTADA: -0.5 (tornar NOP menos atrativo que trades)
+       g_Q[idx] = CompressQValue(newQ);
+       
+       g_memoryDirty = true;
+@@ -3998,8 +3998,15 @@
+    
+    if(IsStateBlocked(state))
+    {
+-      Print("⛔ Estado ", state, " bloqueado pelo sistema corrigido");
+-      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (sistema corrigido)", state);
++      // ✅ DIAGNÓSTICO APRIMORADO: Mostra por que o estado está bloqueado e estatísticas
++      double winRate = CalculateWinRate(state);
++      int blockedCount = CountBlockedStates();
++      Print("⛔ Estado ", state, " bloqueado pelo sistema corrigido",
++            " | Win Rate: ", DoubleToString(winRate*100,1), "%",
++            " | Visitas: ", g_stateVisits[state],
++            " | Total bloqueados: ", blockedCount, "/", g_activeStatesCount);
++      g_statusMessage = StringFormat("⛔ Estado %d bloqueado (WR: %.1f%%, %d/%d bloqueados)", 
++                                     state, winRate*100, blockedCount, g_activeStatesCount);
+       return 0;
+    }
+    
+@@ -4075,13 +4082,13 @@
+    
+    // ⚠️ CORREÇÃO: Tornar NOP MENOS atrativo - exigir estados MUITO ruins
+    double winRate = CalculateWinRate(state);
+-   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.15)  // ✅ REDUZIDO: 15% ao invés de 30%
++   if(g_stateVisits[state] >= MinVisitsForBlockDecision && winRate < 0.10)  // ✅ REDUZIDO: 10% ao invés de 15% - apenas estados EXTREMAMENTE ruins
+    {
+       bestA = 0;
+       Print("🤔 NOP escolhido (estado muito ruim, win rate: ", DoubleToString(winRate*100,1), "%)");
+       g_statusMessage = "NOP (estado muito ruim)";
+    }
+-   else if(nopQ > best * 5.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 5x melhor ao invés de 1.5x
++   else if(nopQ > best * 15.0 && bestA > 0)  // ✅ AUMENTADO: NOP precisa ser 15x melhor (anteriormente 5x)
+    {
+       bestA = 0;
+       Print("🤔 NOP escolhido (superioridade: ", nopQ, " vs ", best, ")");
